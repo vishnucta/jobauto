@@ -8,8 +8,7 @@ import { handOffFoundPosting, handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { fullText } from "@/lib/job-search/find";
 import { foundPostingSchema, JOB_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
-import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
-import { scoreJobKey, scorePostingJob } from "@/lib/jobs/score-posting";
+import { startScoring } from "@/lib/jobs/score-posting";
 import { removeSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { dismissPosting, savePosting, storePosting, unmarkPosting } from "@/lib/postings";
 import { saveSettings } from "@/lib/settings-data";
@@ -84,7 +83,5 @@ export const restorePosting = action(postingRef.extend({ saved: z.boolean() }), 
 export const startScoringPosting = action(z.object({ posting: foundPostingSchema }), async ({ posting }): Promise<{ jobId: string } | { handoff: string }> => {
   if (await handsOffToClaude(await isAiUsable())) return { handoff: await handOffFoundPosting(posting, "score") };
   if (!(await isAiConfigured())) throw new ActionError("Choose an AI provider in Settings → AI provider first.");
-  const key = scoreJobKey(posting);
-  const [unfinished] = await findUnfinishedJobs(key);
-  return { jobId: unfinished?.id ?? (await startJob(scorePostingJob, { posting }, { key })) };
+  return { jobId: await startScoring(posting) };
 });

@@ -3,16 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { AgentCandidateStatus } from "@/generated/prisma/enums";
-import { agentDraftJob, approveCandidate, dismissCandidate, draftJobKey, restoreCandidate } from "@/lib/agent/draft";
-import { AGENT_JOB_KEY, agentScanJob } from "@/lib/agent/jobs";
-import { agentQueryReady, agentSetupProblem } from "@/lib/agent/run";
-import { runLimitProblem } from "@/lib/agent/runs";
-import { action, ActionError } from "@/lib/action";
-import { safeLink, searchQuerySchema } from "@/lib/job-search/search";
-import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
-import { prisma } from "@/lib/prisma";
-import { loadSettings, saveSettings } from "@/lib/settings-data";
+import { approveCandidate, dismissCandidate, restoreCandidate, startCandidateDraft } from "@/lib/agent/draft";
+import { startAgentRun } from "@/lib/agent/jobs";
+import { agentSettingsChangeSchema, updateAgentSettings } from "@/lib/agent/settings";
+import { action } from "@/lib/action";
+import { safeLink } from "@/lib/job-search/search";
 
 // The Agent screen's actions (E16). Nothing here ever sends anything:
 // approving only makes a draft a normal Draft application.
@@ -21,35 +16,11 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
  * Settings → Job agent (E16-7): each change saves at once. Turning the agent
  * on needs a search with keywords and a country.
  */
-export const saveAgentSettings = action(
-  z.object({
-    enabled: z.boolean().optional(),
-    query: searchQuerySchema.optional(),
-    hour: z.number().int().min(0).max(23).optional(),
-    minScore: z.number().int().min(0).max(100).optional(),
-    maxScores: z.number().int().min(1).max(30).optional(),
-    maxDrafts: z.number().int().min(0).max(10).optional(),
-    autoDraft: z.boolean().optional(),
-  }),
-  async (changes) => {
-    const settings = await loadSettings();
-    const query = changes.query ?? settings.agentQuery;
-    if (changes.enabled && !agentQueryReady(query)) {
-      throw new ActionError(query.keywords.trim() ? "Choose a country for the search before turning the agent on." : "Type what the agent should look for before turning it on.");
-    }
-    await saveSettings({
-      agentEnabled: changes.enabled,
-      agentQuery: changes.query,
-      agentHour: changes.hour,
-      agentMinScore: changes.minScore,
-      agentMaxScores: changes.maxScores,
-      agentMaxDrafts: changes.maxDrafts,
-      agentAutoDraft: changes.autoDraft,
-    });
-    revalidatePath("/agent");
-    return null;
-  },
-);
+export const saveAgentSettings = action(agentSettingsChangeSchema, async (changes) => {
+  await updateAgentSettings(changes);
+  revalidatePath("/agent");
+  return null;
+});
 
 /**
  * Run now (E16-4): one more run, at most once an hour after the previous
@@ -57,17 +28,9 @@ export const saveAgentSettings = action(
  * reused rather than started again.
  */
 export const runAgentNow = action(z.object({}), async () => {
-  const settings = await loadSettings();
-  if (!settings.agentEnabled) throw new ActionError("Turn the job agent on in Settings → Job agent first.");
-  const setup = await agentSetupProblem(settings.agentQuery);
-  if (setup) throw new ActionError(setup);
-  const [unfinished] = await findUnfinishedJobs(AGENT_JOB_KEY);
-  if (unfinished) return { jobId: unfinished.id, reused: true };
-  const limit = runLimitProblem(settings.agentRuns, new Date(), { manual: true });
-  if (limit) throw new ActionError(limit);
-  const jobId = await startJob(agentScanJob, { manual: true }, { key: AGENT_JOB_KEY });
-  revalidatePath("/agent");
-  return { jobId, reused: false };
+  const run = await startAgentRun();
+  if (!run.reused) revalidatePath("/agent");
+  return run;
 });
 
 const candidateId = z.string().min(1).max(100);
@@ -85,15 +48,9 @@ function revalidateAgent() {
  * draft under way is reused, and one already made is answered with.
  */
 export const prepareAgentDraft = action(z.object({ candidateId }), async ({ candidateId }) => {
-  const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, applicationId: true } });
-  if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
-  if (candidate.status === AgentCandidateStatus.DRAFTED && candidate.applicationId) return { jobId: null, applicationId: candidate.applicationId };
-  const [unfinished] = await findUnfinishedJobs(draftJobKey(candidateId));
-  if (unfinished) return { jobId: unfinished.id, applicationId: null };
-  if (candidate.status !== AgentCandidateStatus.SCORED) throw new ActionError("That posting is no longer waiting for a draft.");
-  const jobId = await startJob(agentDraftJob, { candidateId }, { key: draftJobKey(candidateId) });
-  revalidatePath("/agent");
-  return { jobId, applicationId: null };
+  const { jobId, applicationId, started } = await startCandidateDraft(candidateId);
+  if (started) revalidatePath("/agent");
+  return { jobId, applicationId };
 });
 
 /** Approve (E16-5): the draft joins Applications as a Draft. Nothing is sent. */

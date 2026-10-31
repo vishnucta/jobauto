@@ -8,7 +8,7 @@
   Your job search, on your own server: one profile, a tailored resume and cover letter for every job, and every application tracked from draft to offer.
 </p>
 
-> **About this fork (jobauto).** A personal fork of [Dossier](https://github.com/AienTech/dossier) for job hunting in Germany. Added so far: Groq as an AI provider, an **Apply** tab that opens the employer's own application form in a real browser window, fills it from the profile and a set of saved standard answers, attaches the resume and cover letter as PDFs and then hands over for the final Send, plus Chrome/Edge fallbacks so PDF export works on Windows without a separate Chromium download. The apply assistant needs a screen: run the app on the computer you apply from. To set it up on a Windows laptop, follow [Install it on Windows from GitHub](#install-it-on-windows-from-github). It only works on the page you opened for that application, visibly, and you press Send yourself; some job boards' terms forbid automated tools, so apply by hand there. Everything else, including the links and badges below, is upstream Dossier's. Modified from Dossier 1.9.2 since 29 October 2026 (see the git log). Same AGPL-3.0 license.
+> **About this fork (jobauto).** A personal fork of [Dossier](https://github.com/AienTech/dossier) for job hunting in Germany. Added so far: Groq as an AI provider, an **Apply** tab that opens the employer's own application form in a real browser window, fills it from the profile and a set of saved standard answers, attaches the resume and cover letter as PDFs and then hands over for the final Send, plus Chrome/Edge fallbacks so PDF export works on Windows without a separate Chromium download. The apply assistant needs a screen: run the app on the computer you apply from. To set it up on a Windows laptop, follow [Install it on Windows from GitHub](#install-it-on-windows-from-github). Its Claude connector is an MCP server whose tools cover what the screens do, so Claude Code, Claude Desktop or claude.ai can run the job search too: see [Use it from Claude](#7-use-it-from-claude-optional). It only works on the page you opened for that application, visibly, and you press Send yourself; some job boards' terms forbid automated tools, so apply by hand there. Everything else, including the links and badges below, is upstream Dossier's. Modified from Dossier 1.9.2 since 29 October 2026 (see the git log). Same AGPL-3.0 license.
 
 <p align="center">
   <a href="https://github.com/AienTech/dossier/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/AienTech/dossier?label=release"></a>
@@ -42,7 +42,7 @@ It's for one person on a small server: one password, your data in your own Postg
 - **Never invents experience:** drafts only use facts from your profile. What the posting asks for and your profile doesn't have is shown as a gap, not made up.
 - **Refine:** ask for changes in a chat, edit or regenerate any part (every part of the cover letter too: sender, date, recipient, greeting and sign-off, written in the letter's language), undo AI changes or go back to any earlier version, keep private notes.
 - **Send:** an email to go with each application, to whoever the posting says to send it to, ready to copy or open in your mail app, with the resume and cover letter PDFs to attach. Edit, rewrite or refine it like the documents.
-- **Claude connector (optional):** use Dossier from Claude, on claude.ai, in the Desktop and mobile apps or in Claude's command-line app, on your own Claude plan. Claude can search for jobs, score them against your profile, read your profile and applications, and save the resume and cover letter it writes as a Draft, checked like Dossier's own. It never sends or deletes anything. Without an AI model of Dossier's own, **Write it with Claude** hands a posting to a new Claude chat. Turn it on in Settings → Claude connector (see [Connecting Claude](https://github.com/AienTech/dossier/wiki/Connecting-Claude)).
+- **Claude connector (optional):** use Dossier from Claude, on claude.ai, in the Desktop and mobile apps or in Claude's command-line app, on your own Claude plan. In this fork Claude can do what the screens do: search and score jobs, edit your profile, write, refine and export applications, start the Apply tab's form filling, read and answer your mail, and run the job agent and Startups. It sends email and deletes only when you ask, never sees API keys, and can't delete everything. Without an AI model of Dossier's own, **Write it with Claude** hands a posting to a new Claude chat. Turn it on in Settings → Claude connector (see [Connecting Claude](https://github.com/AienTech/dossier/wiki/Connecting-Claude)).
 - **Gmail and Calendar (optional):** connect your Google account to send an application from your own address with its PDFs attached, see employers' replies next to each application, have the AI read what they ask and draft your answer from your profile, offer interview times you're free, and see your month and the week ahead on the dashboard, with interviews kept in step with Google Calendar both ways. Nothing is sent without your confirmation. Set it up by entering your Google OAuth client in Settings → Google, or with `DOSSIER_GOOGLE_CLIENT_ID` and `DOSSIER_GOOGLE_CLIENT_SECRET` (see [Connecting Gmail and Calendar](https://github.com/AienTech/dossier/wiki/Connecting-Gmail-and-Calendar)).
 - **Track:** a board and a table of every application, and a dashboard with your funnel (last 30 days, 90 days or all time), a week-by-week chart, what's worth a look next, upcoming interviews included, and a calendar.
 - **Your data:** export and import everything as one file, nightly backups, and Delete everything.
@@ -175,6 +175,21 @@ The browser opens before the app is ready: if it can't connect, wait a few secon
 2. **Settings → Job search**: choose **Bundesagentur für Arbeit**, which is free and needs no key, and tick **I understand, and choose this source myself**.
 3. **Profile → Import from a resume**: upload your CV and check what it read. Moving over from another computer instead? There, use **Settings → Your data → Export everything** with **Include my API keys** ticked. Here, use **Import** in **Settings → Your data** and choose that file. Delete the file afterwards: it holds your profile and your keys in plain text.
 4. **Find jobs**, open a posting and create an application. On its **Apply** tab, **Open and fill it in** opens the employer's form in a browser window and fills it in. Check everything in that window, and press Send yourself.
+
+### 7. Use it from Claude (optional)
+
+The app is also an MCP server, so Claude can work in it for you: search jobs, change your profile, write and send applications, fill in forms on the Apply tab, and more.
+
+1. In the app, open **Settings → Claude connector** and turn it on.
+2. In Claude Code on this laptop, run this once, then type `/mcp` in Claude Code and sign in when the browser opens:
+
+```powershell
+claude mcp add --transport http dossier http://localhost:3000/api/mcp
+```
+
+Claude Desktop and claude.ai reach the app from Anthropic's servers, so they need an internet address with HTTPS, for example through Tailscale Funnel. On a Team or Enterprise plan, only an Owner can add the connector there.
+
+Claude Code asks you before it uses a tool, unless you've allowed that tool for good, so keep sending and deleting tools on ask. Claude never sees your API keys or your password through the connector.
 
 ### Updating to a new version
 

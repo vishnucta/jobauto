@@ -10,7 +10,7 @@ import { foundPostingSchema, postingKey, postingText, type FoundPosting } from "
 import { saveScore } from "@/lib/posting-scores";
 import { loadProfile } from "@/lib/profile-data";
 
-import { defineJob } from "./runner";
+import { defineJob, findUnfinishedJobs, startJob } from "./runner";
 
 /** The key of a posting's scoring job, so a second click follows the one under way. */
 export const scoreJobKey = (posting: Pick<FoundPosting, "source" | "externalId">) => `posting-score:${postingKey(posting)}`;
@@ -41,3 +41,10 @@ export const scorePostingJob = defineJob({
     return data;
   },
 });
+
+/** Starts scoring a posting in the background, unless a scoring of it is under way; returns its job. */
+export async function startScoring(posting: FoundPosting): Promise<string> {
+  const key = scoreJobKey(posting);
+  const [unfinished] = await findUnfinishedJobs(key);
+  return unfinished?.id ?? (await startJob(scorePostingJob, { posting }, { key }));
+}

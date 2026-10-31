@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { JobStatus } from "@/generated/prisma/enums";
 import { writeBackup } from "@/lib/backups";
+import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
 import { currentSummary, importExport, parseExport, summarizeExport } from "@/lib/data-import";
 import { IMPORT_MAX_BYTES, IMPORT_TOO_BIG } from "@/lib/import-limits";
 import { cancelJob } from "@/lib/jobs/runner";
@@ -35,6 +36,8 @@ export const POST = route(async (request) => {
 
   const backup = await writeBackup("before-import");
   await importExport(prisma, parsed.data);
+  // Profile entries Claude removed belonged to the profile the import replaced.
+  forgetRemovedProfileEntries();
   revalidatePath("/", "layout");
   return NextResponse.json({ incoming, backup });
 });

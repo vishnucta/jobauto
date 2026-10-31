@@ -73,7 +73,8 @@ async function main() {
 
   let controls = await scanControls(page);
   for (let attempt = 0; attempt < 2 && !hasForm(controls); attempt++) {
-    const next = await clickApplyEntry(page);
+    // As a real run does: past the posting's own page, only the stricter entry buttons count.
+    const next = await clickApplyEntry(page, { pastPosting: attempt > 0 });
     if (!next) break;
     console.log(`Clicked the apply button${next === page ? "" : " (opened a new tab)"}.`);
     page = next;

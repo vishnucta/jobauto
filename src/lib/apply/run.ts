@@ -5,7 +5,8 @@ import path from "node:path";
 
 import type { Page } from "playwright-core";
 import type { Prisma } from "@/generated/prisma/client";
-import { ApplicationStatus, ApplyAttemptStatus, DocumentKind } from "@/generated/prisma/enums";
+import { AgentCandidateStatus, ApplicationStatus, ApplyAttemptStatus, DocumentKind } from "@/generated/prisma/enums";
+import { approveCandidate } from "@/lib/agent/draft";
 import { getAiProvider } from "@/lib/ai";
 import { isAiConfigured } from "@/lib/ai/config";
 import { AiError } from "@/lib/ai/errors";
@@ -33,6 +34,7 @@ import { clickApplyEntry, clickSubmit, dismissCookieBanner, executeFill, formSti
 import { planFor } from "./plan";
 import type { Filled, UnfilledList } from "./run-types";
 import { APPLY_STEPS } from "./steps";
+import { OPEN_ATTEMPT_STATUSES } from "./view";
 import { addWatch, stopWatching } from "./watches";
 
 // One run of the apply assistant (Phase A): the application's PDFs are
@@ -94,7 +96,14 @@ async function screenshot(page: Page, attemptId: string, name: string): Promise<
 /** Marks the application sent, once: a draft moves to Sent, anything further along stays. */
 async function markSent(applicationId: string): Promise<void> {
   const application = await prisma.application.findUnique({ where: { id: applicationId }, select: { status: true } });
-  if (application?.status === ApplicationStatus.DRAFT) await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT);
+  if (application?.status !== ApplicationStatus.DRAFT) return;
+  // A job agent draft still waiting for review is approved by moving it on, as everywhere else (#195).
+  const pending = await prisma.agentCandidate.findFirst({
+    where: { applicationId, status: AgentCandidateStatus.DRAFTED, application: { awaitingReview: true } },
+    select: { id: true },
+  });
+  if (pending) await approveCandidate(pending.id);
+  await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT);
 }
 
 async function finishSubmitted(attemptId: string, applicationId: string, page: Page | null): Promise<ApplyOutcome> {
@@ -129,16 +138,21 @@ function startWatching(attemptId: string, applicationId: string, page: Page): vo
   addWatch(attemptId, { page, timer });
 }
 
-/** "I sent it" / "I didn't send it" on the Apply tab: ends an attempt by the user's word. */
-export async function resolveAttempt(attemptId: string, sent: boolean): Promise<void> {
+/**
+ * "I sent it" / "I didn't send it" on the Apply tab: ends an attempt that's
+ * still open by the user's word. False when it's gone or had already ended:
+ * a run that ended keeps how it ended.
+ */
+export async function resolveAttempt(attemptId: string, sent: boolean): Promise<boolean> {
   const attempt = await prisma.applyAttempt.findUnique({ where: { id: attemptId }, select: { applicationId: true, status: true } });
-  if (!attempt) return;
+  if (!attempt || !OPEN_ATTEMPT_STATUSES.includes(attempt.status)) return false;
   if (sent) {
     await markSent(attempt.applicationId);
     await end(attemptId, ApplyAttemptStatus.SUBMITTED, "Sent, as you said.");
   } else {
     await end(attemptId, ApplyAttemptStatus.ABANDONED, "Not sent, as you said.");
   }
+  return true;
 }
 
 const describeAction = (action: FillAction, byAi: Set<string>, files: Record<FileKind, string | null>): Filled[number] => {
@@ -217,7 +231,8 @@ export async function runApplyAttempt(attemptId: string, { step, signal }: JobCo
     await step(APPLY_STEPS[2]);
     let controls = await scanControls(page);
     for (let tries = 0; tries < 2 && !hasForm(controls); tries++) {
-      const next = await clickApplyEntry(page);
+      // Only the posting's own page gets a button named like Send clicked: past it, that may be Send itself.
+      const next = await clickApplyEntry(page, { pastPosting: tries > 0 });
       if (!next) break;
       page = next;
       await dismissCookieBanner(page);

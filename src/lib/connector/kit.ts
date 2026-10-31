@@ -96,12 +96,14 @@ export async function resolvePosting(source: PostingSource): Promise<ResolvedPos
     const kept = foundPostingSchema.array().catch([]).parse(search?.postings ?? []);
     const found = source.number ? kept[source.number - 1] : undefined;
     if (!found) return { error: "There's no such posting in that search. Use a number from search_jobs." };
-    const description = (await fullText(found)) ?? found.description;
+    const whole = await fullText(found);
+    const description = whole ?? found.description;
     if (!description.trim()) return { error: "That posting has no text to write from. Give its link as posting_url instead." };
     return {
       text: postingText({ ...found, description }),
       url: found.url,
-      postingId: (await storePosting(found)).id,
+      // Kept with its whole text when the source gave it, as Find jobs keeps a posting it applies from.
+      postingId: (await storePosting(whole ? { ...found, description: whole, complete: true } : found)).id,
       title: found.title,
       company: found.company,
       place: found.place,

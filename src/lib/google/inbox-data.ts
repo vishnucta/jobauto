@@ -75,6 +75,12 @@ export async function loadConversation(applicationId: string): Promise<EmailView
   return rows.map(view);
 }
 
+/** One mail, for Claude (#221); null once it's gone or dismissed. */
+export async function loadEmail(id: string): Promise<EmailView | null> {
+  const row = await prisma.emailMessage.findFirst({ where: { id, dismissedAt: null }, select: SELECT });
+  return row ? view(row) : null;
+}
+
 export type Inbox = {
   /** Linked replies still waiting for an answer, newest first. */
   waiting: EmailView[];

@@ -3,15 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { action, ActionError } from "@/lib/action";
-import { deleteApplyRuns } from "@/lib/apply/files";
-import { cancelApplicationJobs } from "@/lib/jobs/runner";
-import { prisma } from "@/lib/prisma";
+import { action } from "@/lib/action";
+import { eraseApplication, setApplicationArchived } from "@/lib/application-lifecycle";
 
 // Archiving and deleting an application (E9-5, LST-8), from its page, a
-// card or a table row.
-
-const GONE = "That application no longer exists.";
+// card or a table row. The work is in src/lib/application-lifecycle.ts,
+// which the Claude connector shares.
 
 // The list, the dashboard and the application all show it.
 const refreshEverything = () => revalidatePath("/", "layout");
@@ -22,28 +19,14 @@ const refreshEverything = () => revalidatePath("/", "layout");
  * stays as it was.
  */
 export const setArchived = action(z.object({ id: z.string().min(1), archived: z.boolean() }), async ({ id, archived }) => {
-  const current = await prisma.application.findUnique({ where: { id }, select: { updatedAt: true } });
-  if (!current) throw new ActionError(GONE);
-  await prisma.application.update({
-    where: { id },
-    data: { archivedAt: archived ? new Date() : null, updatedAt: current.updatedAt },
-  });
+  await setApplicationArchived(id, archived);
   refreshEverything();
   return null;
 });
 
-/**
- * Deletes an application with its documents and their versions, chat,
- * notes, status history and background jobs, whose inputs and results hold
- * the posting and the documents too (the database cascades), and its apply
- * runs with the PDFs and screenshots they kept.
- */
+/** Deletes an application with its documents, chat, notes, history, jobs and apply runs. */
 export const deleteApplication = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
-  await cancelApplicationJobs(id);
-  const runs = await prisma.applyAttempt.findMany({ where: { applicationId: id }, select: { id: true } });
-  const { count } = await prisma.application.deleteMany({ where: { id } });
-  if (count === 0) throw new ActionError(GONE);
-  await deleteApplyRuns(runs.map((run) => run.id));
+  await eraseApplication(id);
   refreshEverything();
   return null;
 });

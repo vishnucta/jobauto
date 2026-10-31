@@ -27,7 +27,7 @@ describe("parseEnv", () => {
   it("accepts the required variables and fills in defaults", () => {
     expect(parseEnv(valid)).toEqual({
       ...valid,
-      DOSSIER_DATA_DIR: "/data",
+      DOSSIER_DATA_DIR: path.resolve("/data"),
       DOSSIER_BACKUP_RETENTION_DAYS: 14,
       DOSSIER_TELEMETRY: undefined,
     });
@@ -53,7 +53,7 @@ describe("parseEnv", () => {
       DOSSIER_AI_KEY: "sk-test",
     });
     expect(env).toMatchObject({
-      DOSSIER_DATA_DIR: "/srv/dossier",
+      DOSSIER_DATA_DIR: path.resolve("/srv/dossier"),
       DOSSIER_BACKUP_RETENTION_DAYS: 30,
       DOSSIER_AI_PROVIDER: "local",
       DOSSIER_AI_URL: "http://ollama:11434",
@@ -76,7 +76,7 @@ describe("parseEnv", () => {
   it("treats empty values as unset", () => {
     const env = parseEnv({ ...valid, DOSSIER_AI_KEY: "", DOSSIER_DATA_DIR: " " });
     expect(env.DOSSIER_AI_KEY).toBeUndefined();
-    expect(env.DOSSIER_DATA_DIR).toBe("/data");
+    expect(env.DOSSIER_DATA_DIR).toBe(path.resolve("/data"));
     expect(problems({ ...valid, DOSSIER_PASSWORD: "" })).toEqual([
       expect.stringMatching(/^DOSSIER_PASSWORD is not set\./),
     ]);

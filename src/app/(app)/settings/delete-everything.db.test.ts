@@ -35,6 +35,8 @@ vi.mock("next/navigation", () => ({
 }));
 const dataDir = vi.hoisted(() => ({ path: "" }));
 vi.mock("@/lib/env", () => ({ env: { get DOSSIER_DATA_DIR() { return dataDir.path; }, DOSSIER_SECRET: "s".repeat(32) } }));
+const forgotten = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/lib/connector/removed-entries", () => ({ forgetRemovedProfileEntries: () => void (forgotten.count += 1) }));
 
 const prisma = () => db.client!;
 const now = new Date(2026, 8, 28, 12);
@@ -78,6 +80,8 @@ describe("deleteEverything (E10-8)", () => {
     await prisma().setting.create({ data: { key: "connectorEnabledAt", value: "2026-10-23T09:00:00.000Z" } });
     await expect(deleteEverything({ confirm: "DELETE" })).rejects.toThrow("NEXT_REDIRECT");
     expect(redirected.to).toBe("/");
+    // Profile entries Claude removed can't come back into the empty profile.
+    expect(forgotten.count).toBe(1);
     const counts = await Promise.all([
       prisma().posting.count(),
       prisma().postingSearch.count(),

@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 
-import { action, ActionError } from "@/lib/action";
+import { action } from "@/lib/action";
+import { addFact, checkFactRoom } from "@/lib/facts";
 import { prisma } from "@/lib/prisma";
 import { nextSort } from "@/lib/profile-entries";
 
@@ -14,22 +15,8 @@ const id = z.string().min(1);
 const applicationId = id.nullable();
 /** About a short paragraph: a fact, not a document. */
 const text = z.string().max(1000);
-/** Plenty for one person or one application, and still a prompt a local model can take. */
-const MAX_FACTS = 50;
 
-async function checkRoom(applicationId: string | null) {
-  if (applicationId && !(await prisma.application.findUnique({ where: { id: applicationId }, select: { id: true } }))) {
-    throw new ActionError("This application doesn't exist any more.");
-  }
-  if ((await prisma.fact.count({ where: { applicationId } })) >= MAX_FACTS) {
-    throw new ActionError(`That's ${MAX_FACTS} facts already. Remove one you no longer need first.`);
-  }
-}
-
-export const createFact = action(z.object({ applicationId }), async ({ applicationId }) => {
-  await checkRoom(applicationId);
-  return prisma.fact.create({ data: { applicationId, sort: await nextSort(prisma.fact) }, select: { id: true, text: true } });
-});
+export const createFact = action(z.object({ applicationId }), ({ applicationId }) => addFact(applicationId));
 
 export const saveFact = action(z.object({ id, text }), async ({ id, text }) => {
   await prisma.fact.updateMany({ where: { id }, data: { text } });
@@ -47,7 +34,7 @@ export const removeFact = action(z.object({ id }), async ({ id }) => {
 export const restoreFact = action(
   z.object({ id, applicationId, text, sort: z.number().int().nullable() }),
   async ({ id, applicationId, text, sort }) => {
-    await checkRoom(applicationId);
+    await checkFactRoom(applicationId);
     return prisma.fact.upsert({
       where: { id },
       create: { id, applicationId, text, sort: sort ?? (await nextSort(prisma.fact)) },

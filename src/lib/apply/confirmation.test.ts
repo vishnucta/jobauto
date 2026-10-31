@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { APPLY_ENTRY_TEXTS, looksLikeCaptcha, looksSubmitted, SUBMIT_TEXTS } from "./confirmation";
+import { APPLY_ENTRY_TEXTS, entryButtons, looksLikeCaptcha, looksSubmitted, SUBMIT_TEXTS } from "./confirmation";
 
 describe("reading the employer's page", () => {
   it.each([
@@ -40,5 +40,29 @@ describe("reading the employer's page", () => {
     expect(matches(SUBMIT_TEXTS, "Submit application")).toBe(true);
     expect(matches(SUBMIT_TEXTS, "Weiter")).toBe(false);
     expect(matches(SUBMIT_TEXTS, "Next")).toBe(false);
+  });
+
+  it("clicks nothing on the way to the form that might send something", () => {
+    const clicks = (name: string, where: { board: boolean; pastPosting: boolean }) => {
+      const { texts, except } = entryButtons(where);
+      return texts.some((pattern) => pattern.test(name)) && !except.some((pattern) => pattern.test(name));
+    };
+    const posting = { board: false, pastPosting: false };
+    const board = { board: true, pastPosting: false };
+    const later = { board: false, pastPosting: true };
+    // The posting's own way in, and SmartRecruiters' "I'm interested", which opens its form.
+    expect(clicks("Jetzt bewerben", posting)).toBe(true);
+    expect(clicks("I'm interested", posting)).toBe(true);
+    // On a job board, "I'm interested" shares the profile with the recruiter.
+    expect(clicks("Jetzt bewerben", board)).toBe(true);
+    expect(clicks("Ich bin interessiert", board)).toBe(false);
+    expect(clicks("I'm interested", { board: true, pastPosting: true })).toBe(false);
+    // Past the posting's own page, a button named like Send may be Send.
+    expect(clicks("Jetzt bewerben", later)).toBe(false);
+    expect(clicks("Bewerben", later)).toBe(false);
+    expect(clicks("Apply", later)).toBe(false);
+    expect(clicks("Jetzt online bewerben", later)).toBe(true);
+    expect(clicks("Zur Bewerbung", later)).toBe(true);
+    expect(clicks("Apply for this job", later)).toBe(true);
   });
 });

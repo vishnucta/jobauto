@@ -3,21 +3,37 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import type { Prisma } from "@/generated/prisma/client";
-import { JobStatus, LanguageLevel } from "@/generated/prisma/enums";
-import { action, ActionError } from "@/lib/action";
+import { LanguageLevel } from "@/generated/prisma/enums";
+import { action } from "@/lib/action";
 import { prisma } from "@/lib/prisma";
-import { fieldsFromBasics, inEntryOrder } from "@/lib/profile";
-import { findOrCreateSkill, firstSort, nextSort } from "@/lib/profile-entries";
-import { discardProfileImports, importProfileJob } from "@/lib/jobs/import-profile";
-import { isPhotoDataUrl, PHOTO_KEY, PHOTO_MAX_LENGTH, PHOTO_ON_RESUMES_KEY } from "@/lib/photo";
-import { loadProfileName } from "@/lib/profile-data";
+import { findOrCreateSkill } from "@/lib/profile-entries";
+import { applyProfileImportJob, discardProfileImports } from "@/lib/jobs/import-profile";
+import { isPhotoDataUrl, PHOTO_MAX_LENGTH } from "@/lib/photo";
+import {
+  addOrUpdateLanguage,
+  deletePhoto,
+  newEducation,
+  newExperience,
+  newProject,
+  newPublication,
+  newReference,
+  photoOnResumesRow,
+  reorderPublicationList,
+  reorderSection,
+  restoreEducationEntry,
+  restoreExperienceEntry,
+  restoreProjectEntry,
+  restorePublicationEntry,
+  restoreReferenceEntry,
+  saveBasicsFields,
+  sortSectionByDate,
+  storePhoto,
+} from "@/lib/profile-edits";
 import { importCounts } from "@/lib/profile-import";
-import { applyImportedProfile } from "@/lib/profile-import-apply";
-import { loadSettings, saveSettings } from "@/lib/settings-data";
 
 // Every profile change saves through these actions; they all check the
-// session (action()) and validate their input.
+// session (action()) and validate their input. What a change does is in
+// src/lib/profile-edits.ts, which the Claude connector uses too.
 
 const text = (max: number) => z.string().max(max);
 
@@ -38,40 +54,20 @@ export const saveBasics = action(
     showAge: z.boolean(),
   }),
   async (basics) => {
-    const before = await loadProfileName();
-    await prisma.$transaction(
-      Object.entries(fieldsFromBasics(basics)).map(([key, value]) =>
-        value === null
-          ? prisma.profileField.deleteMany({ where: { key } })
-          : prisma.profileField.upsert({ where: { key }, create: { key, value }, update: { value } }),
-      ),
-    );
+    const { nameChanged } = await saveBasicsFields(basics);
     // The sidebar shows the name.
-    if (before !== basics.name) revalidatePath("/", "layout");
+    if (nameChanged) revalidatePath("/", "layout");
     return null;
   },
 );
 
 // ─── Photo (#224) ────────────────────────────────────────────────────────────
 
-/** "Show on resumes" is on unless its row says "false". */
-const photoOnResumesRow = (onResumes: boolean) =>
-  onResumes
-    ? prisma.profileField.deleteMany({ where: { key: PHOTO_ON_RESUMES_KEY } })
-    : prisma.profileField.upsert({
-        where: { key: PHOTO_ON_RESUMES_KEY },
-        create: { key: PHOTO_ON_RESUMES_KEY, value: "false" },
-        update: { value: "false" },
-      });
-
 /** Saves the cropped photo, or puts a removed one back as it was (Undo). */
 export const savePhoto = action(
   z.object({ src: z.string().max(PHOTO_MAX_LENGTH).refine(isPhotoDataUrl), onResumes: z.boolean() }),
   async ({ src, onResumes }) => {
-    await prisma.$transaction([
-      prisma.profileField.upsert({ where: { key: PHOTO_KEY }, create: { key: PHOTO_KEY, value: src }, update: { value: src } }),
-      photoOnResumesRow(onResumes),
-    ]);
+    await storePhoto(src, onResumes);
     return null;
   },
 );
@@ -83,7 +79,7 @@ export const setPhotoOnResumes = action(z.object({ onResumes: z.boolean() }), as
 });
 
 export const removePhoto = action(z.object({}), async () => {
-  await prisma.profileField.deleteMany({ where: { key: { in: [PHOTO_KEY, PHOTO_ON_RESUMES_KEY] } } });
+  await deletePhoto();
   return null;
 });
 
@@ -107,13 +103,7 @@ const level = z.enum(LanguageLevel);
  */
 export const addLanguage = action(
   z.object({ name: z.string().trim().min(1, "Type a language first.").max(100), level }),
-  async ({ name, level }) => {
-    const existing = await prisma.language.findUnique({ where: { name } });
-    const language = existing
-      ? await prisma.language.update({ where: { id: existing.id }, data: { level } })
-      : await prisma.language.create({ data: { name, level, sort: await nextSort(prisma.language) } });
-    return { language: { id: language.id, name: language.name, level: language.level }, added: !existing };
-  },
+  ({ name, level }) => addOrUpdateLanguage(name, level),
 );
 
 export const setLanguageLevel = action(z.object({ id, level }), async ({ id, level }) => {
@@ -167,11 +157,7 @@ const experienceItem = (entry: {
 });
 
 /** "+ Add a role": a blank entry, last in date order (it has no dates yet), first in an order set by hand. */
-export const createExperience = action(z.object({}), async () => {
-  const manual = (await loadSettings()).experienceOrder === "manual";
-  const sort = manual ? await firstSort(prisma.experience) : await nextSort(prisma.experience);
-  return experienceItem(await prisma.experience.create({ data: { sort } }));
-});
+export const createExperience = action(z.object({}), async () => experienceItem(await newExperience()));
 
 /** Autosaves a role. Saving one that was just removed does nothing. */
 export const saveExperience = action(experienceFields, async ({ id, ...data }) => {
@@ -186,22 +172,10 @@ export const removeExperience = action(z.object({ id }), async ({ id }) => {
 });
 
 /** Puts a removed role back, with the links to skills that still exist. */
-export const restoreExperience = action(
-  experienceFields.extend({ skillIds: z.array(id) }),
-  async ({ skillIds, ...entry }) => {
-    const skills = await prisma.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true } });
-    const restored = await prisma.experience.upsert({
-      where: { id: entry.id },
-      create: {
-        ...entry,
-        sort: await nextSort(prisma.experience),
-        skills: { create: skills.map((skill) => ({ skillId: skill.id })) },
-      },
-      update: {},
-    });
-    return experienceItem(restored, skills.map((skill) => skill.id));
-  },
-);
+export const restoreExperience = action(experienceFields.extend({ skillIds: z.array(id) }), async (entry) => {
+  const { restored, skillIds } = await restoreExperienceEntry(entry);
+  return experienceItem(restored, skillIds);
+});
 
 /** Attaches a skill to a role, or detaches it (PRO-6). */
 export const setExperienceSkill = action(
@@ -253,11 +227,7 @@ const projectItem = (entry: z.infer<typeof projectFields>, skillIds: string[] = 
 });
 
 /** "+ Add a project": a blank entry, placed like a new role. */
-export const createProject = action(z.object({}), async () => {
-  const manual = (await loadSettings()).projectOrder === "manual";
-  const sort = manual ? await firstSort(prisma.project) : await nextSort(prisma.project);
-  return projectItem(await prisma.project.create({ data: { sort } }));
-});
+export const createProject = action(z.object({}), async () => projectItem(await newProject()));
 
 /** Autosaves a project. Saving one that was just removed does nothing. */
 export const saveProject = action(projectFields, async ({ id, ...data }) => {
@@ -272,18 +242,9 @@ export const removeProject = action(z.object({ id }), async ({ id }) => {
 });
 
 /** Puts a removed project back, with the links to skills that still exist. */
-export const restoreProject = action(projectFields.extend({ skillIds: z.array(id) }), async ({ skillIds, ...entry }) => {
-  const skills = await prisma.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true } });
-  const restored = await prisma.project.upsert({
-    where: { id: entry.id },
-    create: {
-      ...entry,
-      sort: await nextSort(prisma.project),
-      skills: { create: skills.map((skill) => ({ skillId: skill.id })) },
-    },
-    update: {},
-  });
-  return projectItem(restored, skills.map((skill) => skill.id));
+export const restoreProject = action(projectFields.extend({ skillIds: z.array(id) }), async (entry) => {
+  const { restored, skillIds } = await restoreProjectEntry(entry);
+  return projectItem(restored, skillIds);
 });
 
 /** Attaches a skill to a project, or detaches it. */
@@ -328,11 +289,7 @@ const educationItem = (entry: z.infer<typeof educationFields>) => ({
   current: entry.current,
 });
 
-export const createEducation = action(z.object({}), async () => {
-  const manual = (await loadSettings()).educationOrder === "manual";
-  const sort = manual ? await firstSort(prisma.education) : await nextSort(prisma.education);
-  return educationItem(await prisma.education.create({ data: { sort } }));
-});
+export const createEducation = action(z.object({}), async () => educationItem(await newEducation()));
 
 export const saveEducation = action(educationFields, async ({ id, ...data }) => {
   await prisma.education.updateMany({ where: { id }, data });
@@ -344,15 +301,7 @@ export const removeEducation = action(z.object({ id }), async ({ id }) => {
   return null;
 });
 
-export const restoreEducation = action(educationFields, async (entry) =>
-  educationItem(
-    await prisma.education.upsert({
-      where: { id: entry.id },
-      create: { ...entry, sort: await nextSort(prisma.education) },
-      update: {},
-    }),
-  ),
-);
+export const restoreEducation = action(educationFields, async (entry) => educationItem(await restoreEducationEntry(entry)));
 
 // ─── Publications (#218) ─────────────────────────────────────────────────────
 
@@ -371,9 +320,7 @@ const publicationItem = (entry: z.infer<typeof publicationFields>) => ({
 });
 
 /** "+ Add a publication": a blank entry at the top, where the newest usually goes. */
-export const createPublication = action(z.object({}), async () =>
-  publicationItem(await prisma.publication.create({ data: { sort: await firstSort(prisma.publication) } })),
-);
+export const createPublication = action(z.object({}), async () => publicationItem(await newPublication()));
 
 /** Autosaves a publication. Saving one that was just removed does nothing. */
 export const savePublication = action(publicationFields, async ({ id, ...data }) => {
@@ -387,90 +334,41 @@ export const removePublication = action(z.object({ id }), async ({ id }) => {
 });
 
 /** Puts a removed publication back; the list then saves its place in the order. */
-export const restorePublication = action(publicationFields, async (entry) =>
-  publicationItem(
-    await prisma.publication.upsert({
-      where: { id: entry.id },
-      create: { ...entry, sort: await nextSort(prisma.publication) },
-      update: {},
-    }),
-  ),
-);
+export const restorePublication = action(publicationFields, async (entry) => publicationItem(await restorePublicationEntry(entry)));
 
 /** Saves the publications' order: `ids` is every publication, in the new order. */
 export const reorderPublications = action(z.object({ ids: z.array(id) }), async ({ ids }) => {
-  await prisma.$transaction(async (tx) => {
-    const known = new Set((await tx.publication.findMany({ select: { id: true } })).map((entry) => entry.id));
-    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((entryId) => known.has(entryId))) {
-      throw new ActionError("The list changed in the meantime. Reload the page and try again.");
-    }
-    for (const [sort, entryId] of ids.entries()) await tx.publication.update({ where: { id: entryId }, data: { sort } });
-  });
+  await reorderPublicationList(ids);
   return null;
 });
 
 // ─── Order (E4-9) ────────────────────────────────────────────────────────────
 
 const section = z.enum(["experience", "project", "education"]);
-type Section = z.infer<typeof section>;
-
-/** Each ordered section's setting. */
-const ORDER_SETTING = { experience: "experienceOrder", project: "projectOrder", education: "educationOrder" } as const;
-
-/** The section's table, as far as ordering needs it. */
-function entries(db: Prisma.TransactionClient, section: Section) {
-  const select = { id: true, sort: true, startYear: true, startMonth: true, endYear: true, endMonth: true, current: true } as const;
-  const setSort = (entryId: string, sort: number) => ({ where: { id: entryId }, data: { sort } });
-  if (section === "experience") {
-    return { list: () => db.experience.findMany({ select }), setSort: (entryId: string, sort: number) => db.experience.update(setSort(entryId, sort)) };
-  }
-  if (section === "project") {
-    return { list: () => db.project.findMany({ select }), setSort: (entryId: string, sort: number) => db.project.update(setSort(entryId, sort)) };
-  }
-  return { list: () => db.education.findMany({ select }), setSort: (entryId: string, sort: number) => db.education.update(setSort(entryId, sort)) };
-}
 
 /**
  * Saves an order set by hand: `ids` is every entry of the section, in the new
  * order. From then on the section keeps that order instead of dates.
  */
 export const reorderEntries = action(z.object({ section, ids: z.array(id) }), async ({ section, ids }) => {
-  await prisma.$transaction(async (tx) => {
-    const table = entries(tx, section);
-    const known = new Set((await table.list()).map((entry) => entry.id));
-    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((entryId) => known.has(entryId))) {
-      throw new ActionError("The list changed in the meantime. Reload the page and try again.");
-    }
-    for (const [sort, entryId] of ids.entries()) await table.setSort(entryId, sort);
-    await saveSettings({ [ORDER_SETTING[section]]: "manual" }, tx);
-  });
+  await reorderSection(section, ids);
   return null;
 });
 
 /** Goes back to date order; returns the section's ids in that order for the list. */
-export const sortEntriesByDate = action(z.object({ section }), async ({ section }) => {
-  await saveSettings({ [ORDER_SETTING[section]]: "date" });
-  return inEntryOrder(await entries(prisma, section).list(), "date").map((entry) => entry.id);
-});
+export const sortEntriesByDate = action(z.object({ section }), ({ section }) => sortSectionByDate(section));
 
 // ─── Import from a resume (E4-10) ───────────────────────────────────────────
 
 /**
- * Merges the profile read from a resume into the profile, or replaces it.
- * Nothing goes into the profile before this: the read profile waits in its
- * job, and is taken from there rather than from the browser. Then the job is
- * deleted, with the resume's text.
+ * Merges the profile read from a resume into the profile, or replaces it,
+ * from the reading its job keeps (applyProfileImportJob); the job goes then,
+ * with the resume's text.
  */
 export const applyProfileImport = action(
   z.object({ jobId: id, mode: z.enum(["merge", "replace"]) }),
   async ({ jobId, mode }, { toast }) => {
-    const job = await prisma.job.findUnique({ where: { id: jobId }, select: { type: true, status: true, result: true } });
-    if (job?.type !== importProfileJob.type || job.status !== JobStatus.DONE) {
-      throw new ActionError("That resume isn't read yet, or it's no longer there. Choose the file again.");
-    }
-    const { profile } = importProfileJob.result.parse(job.result);
-    await applyImportedProfile(prisma, profile, mode);
-    await prisma.job.deleteMany({ where: { id: jobId } });
+    const profile = await applyProfileImportJob(jobId, mode);
     revalidatePath("/", "layout");
     toast(`${mode === "replace" ? "Your profile now holds" : "Added to your profile"}: ${importCounts(profile)}.`);
     return null;
@@ -503,9 +401,7 @@ const referenceItem = (entry: z.infer<typeof referenceFields>) => ({
   phone: entry.phone,
 });
 
-export const createReference = action(z.object({}), async () =>
-  referenceItem(await prisma.reference.create({ data: { sort: await nextSort(prisma.reference) } })),
-);
+export const createReference = action(z.object({}), async () => referenceItem(await newReference()));
 
 export const saveReference = action(referenceFields, async ({ id, ...data }) => {
   await prisma.reference.updateMany({ where: { id }, data });
@@ -517,12 +413,4 @@ export const removeReference = action(z.object({ id }), async ({ id }) => {
   return null;
 });
 
-export const restoreReference = action(referenceFields, async (entry) =>
-  referenceItem(
-    await prisma.reference.upsert({
-      where: { id: entry.id },
-      create: { ...entry, sort: await nextSort(prisma.reference) },
-      update: {},
-    }),
-  ),
-);
+export const restoreReference = action(referenceFields, async (entry) => referenceItem(await restoreReferenceEntry(entry)));

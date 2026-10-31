@@ -770,7 +770,7 @@ describe("notes and activity (E8-9)", () => {
   it("has a Notes tab with the number of notes", () => {
     open();
     expect(screen.getByRole("tab", { name: "Notes · 2" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Private and never sent to the AI")).toBeInTheDocument();
+    expect(screen.getByText("Private. Dossier's AI never reads them; Claude only when you ask.")).toBeInTheDocument();
   });
 
   it("shows notes and status changes in one timeline, newest first", () => {

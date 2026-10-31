@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { ApplicationStatus, DocumentKind, EmailDirection } from "@/generated/prisma/enums";
 import { unitsSchema } from "@/lib/application-data";
 import { emailAddresses, emailParts } from "@/lib/application-email";
@@ -32,14 +34,19 @@ async function sender(address: string): Promise<string> {
 
 export type SentApplication = { threadId: string; eventId: string | null; attachments: string[] };
 
+/** For Claude (#221): the email it showed the user isn't the one that would go out now. */
+export const EMAIL_CHANGED = "The email changed or already went out. Show the user the preview again.";
+
+// The applications whose email is going out right now. On globalThis, so
+// the dev server's hot reloads keep them.
+const globalForSend = globalThis as unknown as { sendingApplications?: Set<string> };
+const sending: Set<string> = (globalForSend.sendingApplications ??= new Set());
+
 /**
- * Sends the application's email from the connected account, with the
- * tailored resume and cover letter attached, keeps the thread to watch for
- * replies, and moves a draft to Sent.
+ * The application's email, checked, with the PDFs that go with it: their
+ * file names and the pages they're printed from.
  */
-export async function sendApplicationEmail(applicationId: string): Promise<SentApplication> {
-  const account = await loadGoogleAccount();
-  if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
+async function applicationEmail(applicationId: string) {
   const application = await prisma.application.findUnique({ where: { id: applicationId }, include: { documents: { select: { kind: true, units: true } } } });
   if (!application) throw new GoogleError("unavailable", "That application no longer exists.");
 
@@ -50,45 +57,104 @@ export async function sendApplicationEmail(applicationId: string): Promise<SentA
   if (!subject.trim() || !body.trim()) throw new GoogleError("unavailable", "The email needs a subject and a message.");
 
   const [name, settings] = await Promise.all([loadProfileName(), loadSettings()]);
-  const attachments: Attachment[] = [];
-  for (const { kind, path } of PRINTED) {
-    if (!application.documents.some((document) => document.kind === kind)) continue;
-    attachments.push({
-      fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date() }),
-      contentType: "application/pdf",
-      data: await renderPdf(`/print/${path}/${applicationId}`),
-    });
-  }
+  const printed = PRINTED.filter(({ kind }) => application.documents.some((document) => document.kind === kind)).map(({ kind, path }) => ({
+    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date() }),
+    page: `/print/${path}/${applicationId}`,
+  }));
+  return { application, name, to, subject, body, printed };
+}
 
-  const from = await sender(account.email);
-  const sent = await sendMail({ from, to, subject, body, attachments });
-  await prisma.$transaction([
-    prisma.application.update({ where: { id: applicationId }, data: { emailThreadId: sent.threadId } }),
-    prisma.emailMessage.upsert({
-      where: { gmailId: sent.id },
-      create: {
-        gmailId: sent.id,
-        threadId: sent.threadId,
-        applicationId,
-        direction: EmailDirection.OUTGOING,
-        fromName: name.trim(),
-        fromAddress: account.email.toLowerCase(),
-        toAddress: to,
-        subject,
-        body,
-        sentAt: new Date(),
-        handledAt: new Date(),
-      },
-      update: {},
-    }),
-  ]);
+type ApplicationEmail = Awaited<ReturnType<typeof applicationEmail>>;
 
-  let eventId: string | null = null;
-  if (application.status === ApplicationStatus.DRAFT) {
-    const change = await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT);
-    if (change.outcome === "changed") eventId = change.event.id;
+/**
+ * A fingerprint of the email as it would go out, and of the sends before
+ * it, for Claude to send only what it showed (#221): it stops matching once
+ * the email changes or goes out.
+ */
+async function fingerprint({ application, to, subject, body, printed }: ApplicationEmail): Promise<string> {
+  const sends = await prisma.emailMessage.count({ where: { applicationId: application.id, direction: EmailDirection.OUTGOING } });
+  const parts = [to, subject, body, printed.map((file) => file.fileName), application.emailThreadId, sends];
+  return createHash("sha256").update(JSON.stringify(parts)).digest("base64url").slice(0, 16);
+}
+
+export type ApplicationEmailPreview = {
+  to: string;
+  subject: string;
+  body: string;
+  attachments: string[];
+  status: ApplicationStatus;
+  sentBefore: boolean;
+  /** For sendApplicationEmail's `expected`: sends exactly this email, once. */
+  token: string;
+};
+
+/** What sendApplicationEmail would send, for Claude to show before it goes (#221). */
+export async function previewApplicationEmail(applicationId: string): Promise<ApplicationEmailPreview> {
+  const email = await applicationEmail(applicationId);
+  const { application, to, subject, body, printed } = email;
+  return {
+    to,
+    subject,
+    body,
+    attachments: printed.map((file) => file.fileName),
+    status: application.status,
+    sentBefore: application.emailThreadId !== null,
+    token: await fingerprint(email),
+  };
+}
+
+/**
+ * Sends the application's email from the connected account, with the
+ * tailored resume and cover letter attached, keeps the thread to watch for
+ * replies, and moves a draft to Sent. With `expected`, a preview's token,
+ * it sends only the email that preview showed, and only once. One send per
+ * application at a time, so a retry while the first is still going out
+ * doesn't send it twice.
+ */
+export async function sendApplicationEmail(applicationId: string, { expected }: { expected?: string } = {}): Promise<SentApplication> {
+  const account = await loadGoogleAccount();
+  if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
+  if (sending.has(applicationId)) throw new GoogleError("unavailable", "It's being sent right now.");
+  sending.add(applicationId);
+  try {
+    const email = await applicationEmail(applicationId);
+    if (expected !== undefined && (await fingerprint(email)) !== expected) throw new GoogleError("unavailable", EMAIL_CHANGED);
+    const { application, name, to, subject, body, printed } = email;
+    const attachments: Attachment[] = [];
+    for (const { fileName, page } of printed) attachments.push({ fileName, contentType: "application/pdf", data: await renderPdf(page) });
+
+    const from = await sender(account.email);
+    const sent = await sendMail({ from, to, subject, body, attachments });
+    await prisma.$transaction([
+      prisma.application.update({ where: { id: applicationId }, data: { emailThreadId: sent.threadId } }),
+      prisma.emailMessage.upsert({
+        where: { gmailId: sent.id },
+        create: {
+          gmailId: sent.id,
+          threadId: sent.threadId,
+          applicationId,
+          direction: EmailDirection.OUTGOING,
+          fromName: name.trim(),
+          fromAddress: account.email.toLowerCase(),
+          toAddress: to,
+          subject,
+          body,
+          sentAt: new Date(),
+          handledAt: new Date(),
+        },
+        update: {},
+      }),
+    ]);
+
+    let eventId: string | null = null;
+    if (application.status === ApplicationStatus.DRAFT) {
+      const change = await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT);
+      if (change.outcome === "changed") eventId = change.event.id;
+    }
+    return { threadId: sent.threadId, eventId, attachments: attachments.map((file) => file.fileName) };
+  } finally {
+    sending.delete(applicationId);
   }
-  return { threadId: sent.threadId, eventId, attachments: attachments.map((file) => file.fileName) };
 }
 
 /** "Re: …", unless it already is. */

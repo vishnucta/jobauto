@@ -9,16 +9,16 @@ import { AiError } from "@/lib/ai/errors";
 import { createApplicationFromDocuments, type ApplicationDetails } from "@/lib/application-create";
 import type { Extracted } from "@/lib/application-data";
 import { fullText } from "@/lib/job-search/find";
-import { postingText, type FoundPosting } from "@/lib/job-search/search";
+import { postingText, safeLink, type FoundPosting } from "@/lib/job-search/search";
 import { readPostingJob } from "@/lib/jobs/read-posting";
-import { cancelJob, defineJob, findUnfinishedJobs, type JobContext } from "@/lib/jobs/runner";
+import { cancelJob, defineJob, findUnfinishedJobs, startJob, type JobContext } from "@/lib/jobs/runner";
 import { writeDocumentsJob } from "@/lib/jobs/write-documents";
 import { logServerError } from "@/lib/log";
 import { dismissPosting, storePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
 
-import { DISMISSED_TRIM } from "./candidates";
+import { DISMISSED_TRIM, stringsOf } from "./candidates";
 
 // A candidate's draft (E16-5): written the way New application writes one,
 // kept off Applications until it's approved (#195), and never sent.
@@ -125,6 +125,22 @@ export const agentDraftJob = defineJob({
 });
 
 /**
+ * Prepare draft (E16-5), from the Agent screen or from Claude: starts a
+ * candidate's draft in the background. A draft under way is reused, and one
+ * already made is answered with; `started` says whether a job began.
+ */
+export async function startCandidateDraft(candidateId: string): Promise<{ jobId: string | null; applicationId: string | null; started: boolean }> {
+  const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, applicationId: true } });
+  if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
+  if (candidate.status === AgentCandidateStatus.DRAFTED && candidate.applicationId) return { jobId: null, applicationId: candidate.applicationId, started: false };
+  const [unfinished] = await findUnfinishedJobs(draftJobKey(candidateId));
+  if (unfinished) return { jobId: unfinished.id, applicationId: null, started: false };
+  if (candidate.status !== AgentCandidateStatus.SCORED) throw new ActionError("That posting is no longer waiting for a draft.");
+  const jobId = await startJob(agentDraftJob, { candidateId }, { key: draftJobKey(candidateId) });
+  return { jobId, applicationId: null, started: true };
+}
+
+/**
  * Approve: the draft becomes a normal Draft application, shown everywhere,
  * and its posting shows as applied for in Find jobs. Nothing is sent.
  */
@@ -192,4 +208,32 @@ export async function restoreCandidate(saved: DismissedCandidate): Promise<void>
     },
   });
   await unmarkPosting(candidate, "dismissed");
+}
+
+/**
+ * Restore from Claude (#221), which has no toast to undo from: a dismissed
+ * candidate back in the queue, from what Find jobs keeps of its posting and
+ * its score. A draft it had stays deleted.
+ */
+export async function restoreDismissedCandidate(candidateId: string): Promise<void> {
+  const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, source: true, externalId: true } });
+  if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
+  if (candidate.status !== AgentCandidateStatus.DISMISSED) throw new ActionError("That posting isn't dismissed.");
+  const where = { source_externalId: { source: candidate.source, externalId: candidate.externalId } };
+  const [posting, score] = await Promise.all([prisma.posting.findUnique({ where }), prisma.postingScore.findUnique({ where })]);
+  if (!posting) throw new ActionError("Dossier no longer keeps that posting's details, so it can't come back.");
+  await restoreCandidate({
+    id: candidateId,
+    place: posting.place,
+    remote: posting.remote,
+    salary: posting.salary,
+    postedAt: posting.postedAt,
+    // Shown as a link again: only a web address.
+    url: safeLink(posting.url),
+    via: posting.via,
+    description: posting.description,
+    complete: posting.complete,
+    reasons: stringsOf(score?.reasons ?? null),
+    redFlags: stringsOf(score?.redFlags ?? null),
+  });
 }

@@ -70,7 +70,7 @@ test("connects Claude through Settings and the consent page, serves its tools, a
   const query = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: CALLBACK, code_challenge: challenge, code_challenge_method: "S256", state: "xyz", resource: address });
   await page.goto(`/oauth/authorize?${query}`);
   await expect(page.getByRole("heading", { name: "Connect Claude to Dossier" })).toBeVisible();
-  await expect(page.getByText("It can never send an application or an email, or delete anything.", { exact: false })).toBeVisible();
+  await expect(page.getByText("It never sees your API keys or your password", { exact: false })).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Allow" }).click();
   await page.waitForURL((url) => url.href.startsWith(`${CALLBACK}?`));

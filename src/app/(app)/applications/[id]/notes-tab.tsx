@@ -13,7 +13,7 @@ import { addNote, deleteNote, restoreNote, updateNote } from "./actions";
 /**
  * The Notes tab (E8-9, APP-14): private notes, each dated, with the
  * application's status changes and creation in one timeline, newest first.
- * Notes never go to the AI.
+ * Dossier's AI never reads notes; Claude only when the user asks it to (list_notes).
  */
 export function NotesTab({ applicationId, activity }: { applicationId: string; activity: ActivityEntry[] }) {
   const [draft, setDraft] = useState("");
@@ -56,7 +56,7 @@ export function NotesTab({ applicationId, activity }: { applicationId: string; a
     <div className="@container flex flex-1 flex-col items-center gap-4 overflow-auto bg-canvas px-10 pt-11 pb-16">
       <div className="flex w-full max-w-[640px] flex-wrap justify-between gap-x-3 gap-y-1 text-meta text-muted">
         <span>Notes and activity</span>
-        <span>Private and never sent to the AI</span>
+        <span>Private. Dossier&apos;s AI never reads them; Claude only when you ask.</span>
       </div>
       <div className="flex w-full max-w-[640px] flex-col gap-5 rounded-panel border border-line-card bg-card px-[30px] py-7">
         <div className="flex flex-col gap-2.5">

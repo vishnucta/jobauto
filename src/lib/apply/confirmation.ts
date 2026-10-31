@@ -31,9 +31,10 @@ export const APPLY_ENTRY_TEXTS: readonly RegExp[] = [
   /^bewerben$/i,
   /apply (now|for this (job|position|role))/i,
   /^apply$/i,
-  /i'?m interested/i,
-  /ich bin interessiert/i,
 ];
+
+/** "I'm interested": SmartRecruiters' way to its form, but on a job board such as XING it shares the profile with the recruiter. */
+const INTERESTED_TEXTS: readonly RegExp[] = [/i'?m interested/i, /ich bin interessiert/i];
 
 /** Buttons that send the form, most specific first; never "Weiter"/"Next". */
 export const SUBMIT_TEXTS: readonly RegExp[] = [
@@ -45,6 +46,18 @@ export const SUBMIT_TEXTS: readonly RegExp[] = [
   /^bewerben$/i,
   /^(submit|send|apply)$/i,
 ];
+
+/**
+ * The buttons a run may click on its way to the form, and the names it
+ * leaves alone there, since nothing it clicks on the way may send
+ * anything. A job board goes without "I'm interested". Past the posting's
+ * own page, a button named like Send is left to the user: a board's
+ * quick-apply step words its Send button the way posting pages word the
+ * way in ("Jetzt bewerben").
+ */
+export function entryButtons({ board, pastPosting }: { board: boolean; pastPosting: boolean }): { texts: readonly RegExp[]; except: readonly RegExp[] } {
+  return { texts: board ? APPLY_ENTRY_TEXTS : [...APPLY_ENTRY_TEXTS, ...INTERESTED_TEXTS], except: pastPosting ? SUBMIT_TEXTS : [] };
+}
 
 /** Cookie banners' "accept" buttons, so they don't cover the form. */
 export const COOKIE_ACCEPT_TEXTS: readonly RegExp[] = [

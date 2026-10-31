@@ -95,8 +95,9 @@ export function ConnectorSection({ initial, address }: { initial: { on: boolean 
           <Card className="flex flex-col gap-3 text-sm text-pretty">
             <p>
               What Claude reads through the connector goes to Anthropic with your Claude account, as anything in a chat does: your profile
-              without its contact details, the postings and applications it works on, and your searches. Private notes and the letter&apos;s
-              sender and signature stay out.{" "}
+              without its contact details, the postings, applications and emails it works on, and your searches. Private notes only when you
+              ask Claude to read them, and never a letter&apos;s sender and signature. Claude can change things here too, and send email or
+              delete only when you ask it to.{" "}
               <a href="https://github.com/AienTech/dossier/wiki/Connecting-Claude" target="_blank" rel="noopener noreferrer" className={LINK}>
                 Connecting Claude
               </a>{" "}

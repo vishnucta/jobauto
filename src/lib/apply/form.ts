@@ -1,6 +1,7 @@
 import type { Frame, Locator, Page } from "playwright-core";
 
-import { APPLY_ENTRY_TEXTS, COOKIE_ACCEPT_SELECTORS, COOKIE_ACCEPT_TEXTS, SUBMIT_TEXTS } from "./confirmation";
+import { detectAts } from "./ats";
+import { COOKIE_ACCEPT_SELECTORS, COOKIE_ACCEPT_TEXTS, entryButtons, SUBMIT_TEXTS } from "./confirmation";
 import type { FillAction, FileKind, FormControl } from "./fields";
 
 // Working an employer's page in the browser (Phase A): reading its form
@@ -184,8 +185,8 @@ export async function executeFill(page: Page, actions: readonly FillAction[], fi
   return report;
 }
 
-/** The first visible button or link whose name matches one of the patterns, in their order. */
-async function findButton(page: Page, patterns: readonly RegExp[]): Promise<Locator | null> {
+/** The first visible button or link whose name matches one of the patterns, in their order, and none of `except`. */
+async function findButton(page: Page, patterns: readonly RegExp[], except: readonly RegExp[] = []): Promise<Locator | null> {
   for (const pattern of patterns) {
     for (const frame of page.frames()) {
       for (const role of ["button", "link"] as const) {
@@ -193,12 +194,20 @@ async function findButton(page: Page, patterns: readonly RegExp[]): Promise<Loca
         const count = await candidates.count().catch(() => 0);
         for (let index = 0; index < Math.min(count, 5); index++) {
           const candidate = candidates.nth(index);
-          if (await candidate.isVisible().catch(() => false)) return candidate;
+          if (!(await candidate.isVisible().catch(() => false))) continue;
+          if (except.length > 0 && (await namedLike(frame, role, candidate, except))) continue;
+          return candidate;
         }
       }
     }
   }
   return null;
+}
+
+/** Whether a button's name also matches one of the patterns; one that can't be read counts as matching. */
+async function namedLike(frame: Frame, role: "button" | "link", candidate: Locator, patterns: readonly RegExp[]): Promise<boolean> {
+  const named = patterns.map((pattern) => frame.getByRole(role, { name: pattern })).reduce((either, other) => either.or(other));
+  return (await candidate.and(named).count().catch(() => 1)) > 0;
 }
 
 /** Clicks a cookie banner away, if one is up; true when something was clicked. */
@@ -224,9 +233,12 @@ export function hasForm(controls: readonly FormControl[]): boolean {
 /**
  * Clicks "Jetzt bewerben" (or the like) and returns the page the form is
  * on: the same one, or the tab it opened. Null when there's no such button.
+ * `pastPosting` says an entry button was clicked already: from there on, a
+ * button named like Send is left alone (see entryButtons).
  */
-export async function clickApplyEntry(page: Page): Promise<Page | null> {
-  const button = await findButton(page, APPLY_ENTRY_TEXTS);
+export async function clickApplyEntry(page: Page, { pastPosting = false }: { pastPosting?: boolean } = {}): Promise<Page | null> {
+  const { texts, except } = entryButtons({ board: detectAts(page.url()).board, pastPosting });
+  const button = await findButton(page, texts, except);
   if (!button) return null;
   const popup = page.context().waitForEvent("page", { timeout: 4_000 }).catch(() => null);
   await button.click({ timeout: ACTION_TIMEOUT_MS });

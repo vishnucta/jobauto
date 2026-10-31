@@ -1,4 +1,4 @@
-import { globSync, readFileSync } from "node:fs";
+import { globSync as globFiles, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +23,9 @@ const OPEN_ROUTES = new Set([
   "src/app/api/oauth/register/route.ts",
   "src/app/api/oauth/token/route.ts",
 ]);
+
+/** Files matching `pattern`, with forward slashes on every system (Windows lists them with backslashes). */
+const globSync = (pattern: string) => globFiles(pattern).map((file) => file.replaceAll("\\", "/"));
 
 const sources = globSync("src/**/*.{ts,tsx}").filter((file) => !/\.test\.tsx?$/.test(file) && !file.startsWith("src/generated/"));
 const read = (file: string) => readFileSync(file, "utf8");

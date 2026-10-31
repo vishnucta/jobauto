@@ -36,13 +36,17 @@ export default async function AuthorizePage({ searchParams }: PageProps<"/oauth/
                 <strong>{checked.clientName}</strong> wants to use your Dossier. Once you allow it, Claude can:
               </p>
               <ul className="list-disc pl-5 text-muted">
-                <li>search for jobs with your job source, and score postings against your profile</li>
-                <li>read your profile and your applications, with their resumes and cover letters, but not your contact details or notes</li>
-                <li>save applications it writes for you as drafts, and change their status</li>
+                <li>search for jobs, keep and score postings, and run the job agent and Startups</li>
+                <li>read and change your profile, without ever reading your contact details</li>
+                <li>read, write and change your applications: documents, emails, notes when you ask, status and PDFs</li>
+                <li>fill in an employer&apos;s form in a browser window on this computer, for you to check and send</li>
+                <li>read your inbox, draft answers, and send emails with Gmail when you ask it to</li>
+                <li>change themes and settings that hold no secrets, and export your data</li>
+                <li>delete applications, notes, profile entries, searches and startups when you ask it to</li>
               </ul>
               <p className="text-muted">
-                It can never send an application or an email, or delete anything. Allow it only if you&apos;ve just added Dossier as a
-                connector in Claude yourself: it sends you back to{" "}
+                It never sees your API keys or your password, and it can&apos;t delete everything or import over your data. Allow it only if
+                you&apos;ve just added Dossier as a connector in Claude yourself: it sends you back to{" "}
                 <strong className="text-ink">{new URL(checked.redirectUri).host}</strong>. Disconnect Claude in Settings → Claude connector at
                 any time.
               </p>

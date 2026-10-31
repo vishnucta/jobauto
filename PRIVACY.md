@@ -103,19 +103,34 @@ User-agent: Dossier
 Disallow: /
 ```
 
-**If you use it:** Startups is for applying for jobs. Offering your services as a freelancer by email is advertising in many countries: in Germany and the rest of the EU it needs the company's consent first, even when the company published the address, and in the US, Canada and Australia such an email needs a way to opt out. Dossier doesn't support that use. Whether the GDPR's exemption for personal activities covers your own job search hasn't been settled, so Dossier treats the addresses as personal data: it looks up people's own addresses only when you ask, drops them after 14 days unless you write to that startup, keeps every address out of what the AI receives, and **Remove for good** deletes a startup and keeps only hashes so it doesn't come back. If someone asks you to delete their address, that's the button.
+**If you use it:** Startups is for applying for jobs. Offering your services as a freelancer by email is advertising in many countries: in Germany and the rest of the EU it needs the company's consent first, even when the company published the address, and in the US, Canada and Australia such an email needs a way to opt out. Dossier doesn't support that use. Whether the GDPR's exemption for personal activities covers your own job search hasn't been settled, so Dossier treats the addresses as personal data: it looks up people's own addresses only when you ask, drops them after 14 days unless you write to that startup, keeps every address out of what the AI provider receives, gives them to Claude only while the [Claude connector](#claude-connector) is on, and **Remove for good** deletes a startup and keeps only hashes so it doesn't come back. If someone asks you to delete their address, that's the button.
 
 ### Claude connector
 
-The Claude connector lets you use Dossier from Claude: in chats on claude.ai, in the Desktop and mobile apps, and in Claude's command-line app. It's off until you turn it on in Settings → Claude connector. Then Claude can use it once you've signed in to Dossier and pressed **Allow**; while it's off, its addresses answer as if they didn't exist.
+The Claude connector lets you use Dossier from Claude: in chats on claude.ai, in the Desktop and mobile apps, and in Claude's command-line app. It's off until you turn it on in Settings → Claude connector. Then Claude can use it once you've signed in to Dossier and pressed **Allow**; while it's off, its addresses answer as if they didn't exist. In this fork its tools cover what the screens do, so Claude can read and change most of Dossier.
 
 What Claude reads through it goes to Anthropic, under your own Claude account and its terms, as anything you put in a chat does:
 
-- **Your profile,** without contact details, links or references: the same as a hosted AI provider gets for writing.
-- **Postings:** what Find jobs searches find for Claude (the searches are kept in Find jobs, like your own), the postings you hand over, and the text of a posting Claude asks for by its link, fetched from your server.
-- **Your applications:** their details and status, the posting and the match, and the resume and cover letter as text. Never your private notes, or a letter's sender and signature.
+- **Your profile,** without your contact details and links, and without your references' email and phone. Claude only learns which of your contact details are filled in.
+- **Postings:** what Find jobs searches find for Claude (the searches are kept in Find jobs, like your own), your saved and dismissed postings and past searches, the postings you hand over, and the text of a posting Claude asks for by its link, fetched from your server.
+- **Your applications:** their details and status, the posting and the match, and the resume, cover letter and email as text. Your private notes only when you ask Claude to read them. Never a letter's sender and signature.
+- **The Apply tab:** where an application's form is, what a run filled in (without your contact details) and what it left to you.
+- **Your inbox:** the employers' mail Dossier fetched from Gmail, what the AI read in it and the answers drafted, and your free times when Claude looks for interview slots.
+- **The job agent and Startups:** the agent's settings and runs, its finds with their postings, scores, reasons and red flags, and its drafts' resume and cover letter as text; the startups Startups found, with their posts, your status and notes, and the addresses they publish. People's own addresses only when Claude reads that one startup.
+- **Settings without secrets:** the AI provider, its address and model, and whether a key is saved; the job source and its details; document defaults, themes and the Google settings. Never an API key or your password.
+- **Files Claude asks for:** a resume or cover letter PDF, and, only when you ask, the export of everything, which holds your contact details but no API keys.
 
-Claude also writes through it: an application it wrote, saved as a Draft and checked like Dossier's own AI's; the fit scores it gives postings; and an application's status. No tool deletes, archives or sends anything. With **Write it with Claude** in New application, the posting you pasted is kept for Claude to read for 14 days; Score and Write it with Claude open a new chat on claude.ai with a short prompt that names the posting by its ID, and nothing else.
+Claude also changes things through it, as the screens do:
+
+- **Your profile:** its basics, your contact details as you give them, skills, languages, facts about you and its entries. Importing a resume through Claude sends its text, contact details included, to the AI provider set in Dossier, as Import does.
+- **Applications:** saving one it wrote as a Draft, checked like Dossier's own AI's; their documents, notes, the facts you gave for them, status, interview date and archiving; Dossier's AI rewriting a part, the whole document or the email.
+- **The Apply tab:** a run opens the employer's page in a browser window on the computer Dossier runs on and fills in the form there. A run Claude starts never presses Send: you check the form and send it yourself.
+- **Find jobs, the job agent and Startups:** saving, dismissing and scoring postings, the agent's settings and runs, approving or dismissing its finds, refreshing Startups and looking on a startup's own site for addresses, and a startup's status and notes.
+- **Settings without secrets and themes.** Claude can't change the AI provider's address to another server.
+
+Claude sends only when you ask, with tools marked as sending: an answer to an employer's email, and an application's email with its PDFs, both from your Gmail; and an interview it confirms goes into your Google Calendar. An application's email can only go out after Claude has fetched a preview of it to show you, and only exactly that version. Claude deletes only when you ask, with tools marked as deleting: an application with everything in it, a note, a kept search, a startup for good, a custom theme, and a profile entry, which Claude can put back within the hour. A dismissed find's draft goes too, as on the Agent screen. Claude can't delete everything, import a file over your data, read or save API keys, or turn the connector on or off.
+
+With **Write it with Claude** in New application, the posting you pasted is kept for Claude to read for 14 days; Score and Write it with Claude open a new chat on claude.ai with a short prompt that names the posting by its ID, and nothing else.
 
 Anthropic is the controller of what reaches it through your Claude account; the Dossier project receives nothing from the connector. Dossier keeps no tokens: Claude's sign-in is signed with `DOSSIER_SECRET`, and **Disconnect Claude** ends it.
 

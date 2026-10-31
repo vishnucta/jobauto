@@ -4,13 +4,18 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { ApplicationStatus, DocumentKind } from "@/generated/prisma/enums";
+import { ActionError } from "@/lib/action";
 import { approveCandidate } from "@/lib/agent/draft";
 import { isAiUsable } from "@/lib/ai/config";
+import { AiError } from "@/lib/ai/errors";
 import { scoreFrom } from "@/lib/ai/tasks/score-posting";
 import { fitBand } from "@/lib/fit";
+import { GoogleError } from "@/lib/google/errors";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
+import { JobSearchError } from "@/lib/job-search/errors";
 import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
 import { getJob, startJob } from "@/lib/jobs/runner";
+import { logServerError } from "@/lib/log";
 import { saveScore } from "@/lib/posting-scores";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { foundFromPosting } from "@/lib/postings";
@@ -36,27 +41,62 @@ import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writte
 // The Claude connector's tools (#221, src/app/api/mcp), adapted from Anirudh
 // Sharma's fork of Dossier: search for jobs, read the profile and the
 // applications, save applications and fit scores, and move applications
-// along. Like the AI features, they never send anything, and no tool
-// deletes or archives. Contact details, private notes and the letter's
-// sender and signature stay out of what Claude is given.
+// along. The jobauto fork adds a group of tools per screen (./tools/*), so
+// Claude can do what the screens do. Tools that send, delete or archive say
+// so in their description and carry destructiveHint, for the user to allow
+// one by one. No tool reads or saves a secret, deletes everything, imports
+// over the data or turns the connector off. Contact details, references'
+// email and phone, and a letter's sender and signature stay out of what
+// Claude reads; private notes only through list_notes, when the user asks.
 
 const POSTED = POSTED_WITHIN.map((option) => option.value) as [PostedWithin, ...PostedWithin[]];
+
+/** Failures whose messages are written for the user, so Claude may pass them on as they are. */
+const FOR_THE_USER = [ActionError, AiError, GoogleError, JobSearchError];
+
+/**
+ * Makes every tool registered on `server` answer an unexpected error with a
+ * plain message, logged on the server: the SDK would otherwise hand Claude
+ * the raw message, which can hold database details.
+ */
+function guardTools(server: McpServer): McpServer {
+  type Handler = (...args: unknown[]) => unknown;
+  const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: Handler) => unknown;
+  (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, handler: Handler) =>
+    register(name, config, async (...args: unknown[]) => {
+      try {
+        return await handler(...args);
+      } catch (error) {
+        if (FOR_THE_USER.some((kind) => error instanceof kind)) return failure((error as Error).message);
+        logServerError(`Claude connector: ${name}`, error);
+        return failure("Dossier couldn't do that just now. Try again in a moment, or do it in the app.");
+      }
+    });
+  return server;
+}
 
 /** Dossier as an MCP server, for one request; `origin` is the address links in answers point to. */
 export function createDossierServer(origin: string): McpServer {
   const linkTo = (path: string) => `${origin}${path}`;
-  const server = new McpServer(
-    { name: "dossier", title: "Dossier", version: appVersion },
-    {
-      instructions:
-        "Dossier is the user's own job search app: one profile, tailored resumes and cover letters, and every application tracked. " +
-        "Search jobs with search_jobs (in the profile's city and country unless the user says otherwise), " +
-        "and when the user wants to know which fit best, score them against the profile and save the scores with save_job_scores. " +
-        "To draft an application, you write it yourself: call get_profile and get_posting, write a tailored resume and cover letter " +
-        "from facts in the profile only (never invent experience, employers, numbers or degrees; say what's missing instead), " +
-        "show the user a short summary, then save it with save_application. Read or update applications with the other tools. " +
-        "Nothing is ever sent for the user: drafts wait in Dossier for them to review and download as PDFs.",
-    },
+  const server = guardTools(
+    new McpServer(
+      { name: "dossier", title: "Dossier", version: appVersion },
+      {
+        instructions:
+          "Dossier is the user's own job search app: one profile, tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
+          "Its tools do what its screens do. " +
+          "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs; score postings yourself and save the scores with save_job_scores, " +
+          "or have Dossier's AI score them with score_with_dossier; keep or drop postings with update_postings. " +
+          "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
+          "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application. " +
+          "Or let Dossier's AI draft it with draft_application. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
+          "Change the profile only with what the user told you or confirmed. " +
+          "Work that takes a while answers with a task_id: follow it with check_task. " +
+          "start_apply fills in the employer's application form in a browser window on the user's computer; the user checks it and presses Send there, then settle_apply records it. " +
+          "Tools marked destructive send email, delete or can't be undone: use them only when the user asked for exactly that, after telling them what will happen. " +
+          "Links in answers open the screen in Dossier where the user sees the result.",
+      },
+    ),
   );
 
   server.registerTool(

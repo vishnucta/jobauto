@@ -46,7 +46,7 @@ const call = (body: unknown, token?: string) =>
   );
 
 /** The answer to one JSON-RPC call, whether it came as JSON or as one server-sent event. */
-async function answer(response: Response): Promise<{ result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string }[]; serverInfo?: unknown }; error?: unknown }> {
+async function answer(response: Response): Promise<{ result?: { content?: { text: string }[]; isError?: boolean; tools?: { name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }[]; serverInfo?: unknown }; error?: unknown }> {
   const body = await response.text();
   const data = body.trimStart().startsWith("{") ? body : body.split("\n").find((line) => line.startsWith("data: "))!.slice("data: ".length);
   return JSON.parse(data);
@@ -79,7 +79,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     expect((await call({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "not-a-token")).status).toBe(401);
   });
 
-  it("answers MCP with Dossier's tools once signed in, and none that delete, archive or send", async () => {
+  it("answers MCP with Dossier's tools once signed in, and marks the ones that send or delete", async () => {
     const token = await accessToken();
     const init = await call(
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } },
@@ -89,19 +89,82 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     expect(await answer(init)).toMatchObject({ result: { serverInfo: { name: "dossier" } } });
 
     const { result } = await answer(await call({ jsonrpc: "2.0", id: 2, method: "tools/list" }, token));
-    expect(result?.tools?.map((entry) => entry.name).sort()).toEqual([
+    const tools = result?.tools ?? [];
+    // The jobauto fork's tools cover what the screens do (src/lib/connector/tools/*).
+    expect(tools.map((entry) => entry.name).sort()).toEqual([
+      "act_on_agent_find",
+      "add_match_skill",
+      "cancel_task",
       "check_draft",
+      "check_for_updates",
+      "check_inbox",
+      "check_task",
+      "confirm_interview",
+      "delete_application",
       "draft_application",
+      "draft_email_reply",
+      "edit_document",
+      "edit_profile_items",
+      "export_data",
+      "export_pdf",
+      "find_free_slots",
+      "finish_profile_import",
       "get_application",
+      "get_apply_status",
+      "get_document",
+      "get_job_agent",
       "get_posting",
       "get_profile",
+      "get_settings",
+      "import_profile_from_resume",
+      "list_ai_models",
       "list_applications",
+      "list_emails",
+      "list_notes",
+      "list_postings",
+      "list_startups",
+      "list_themes",
       "more_jobs",
+      "read_email",
+      "refresh_startups",
+      "remove_profile_entry",
+      "remove_search",
+      "remove_startup",
+      "retry_task",
+      "rewrite_document",
       "save_application",
+      "save_apply_answers",
+      "save_email_reply",
       "save_job_scores",
+      "save_note",
+      "save_profile_entry",
+      "save_theme",
+      "score_with_dossier",
       "search_jobs",
+      "send_application_email",
+      "send_email_reply",
       "set_application_status",
+      "set_base_theme",
+      "set_document_look",
+      "settle_apply",
+      "sort_profile_entries",
+      "start_apply",
+      "test_connection",
+      "undo_status_change",
+      "update_application",
+      "update_email",
+      "update_google_settings",
+      "update_job_agent",
+      "update_postings",
+      "update_profile_basics",
+      "update_settings",
+      "update_startup",
+      "write_application_email",
+      "zip_all_pdfs",
     ]);
+    // Reading never changes anything, and every tool that sends or deletes says so, for Claude to ask first.
+    for (const entry of tools.filter(({ name }) => /^(get|list|read)_/.test(name))) expect(entry.annotations?.readOnlyHint, entry.name).toBe(true);
+    for (const entry of tools.filter(({ name }) => /^(send|delete|remove)_/.test(name))) expect(entry.annotations?.destructiveHint, entry.name).toBe(true);
   });
 
   it("gives Claude the profile without contact details", async () => {

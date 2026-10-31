@@ -3,10 +3,12 @@ import "server-only";
 import { z } from "zod";
 
 import { JobStatus } from "@/generated/prisma/enums";
+import { ActionError } from "@/lib/action";
 import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { extractProfile } from "@/lib/ai/tasks";
-import { IMPORT_PROFILE_STEPS, importedProfileSchema } from "@/lib/profile-import";
+import { IMPORT_PROFILE_STEPS, importedProfileSchema, type ImportedProfile, type ImportMode } from "@/lib/profile-import";
+import { applyImportedProfile } from "@/lib/profile-import-apply";
 import { prisma } from "@/lib/prisma";
 import { MAX_RESUME_CHARACTERS } from "@/lib/resume-text";
 
@@ -41,4 +43,21 @@ export async function discardProfileImports(id?: string): Promise<void> {
   const unfinished = await prisma.job.findMany({ where: { ...where, status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } }, select: { id: true } });
   for (const job of unfinished) await cancelJob(job.id);
   await prisma.job.deleteMany({ where });
+}
+
+/**
+ * Merges the profile read from a resume into the profile, or replaces it.
+ * Nothing goes into the profile before this: the read profile waits in its
+ * job, and is taken from there rather than from the browser. Then the job is
+ * deleted, with the resume's text. Answers with what was applied.
+ */
+export async function applyProfileImportJob(jobId: string, mode: ImportMode): Promise<ImportedProfile> {
+  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { type: true, status: true, result: true } });
+  if (job?.type !== importProfileJob.type || job.status !== JobStatus.DONE) {
+    throw new ActionError("That resume isn't read yet, or it's no longer there. Choose the file again.");
+  }
+  const { profile } = importProfileJob.result.parse(job.result);
+  await applyImportedProfile(prisma, profile, mode);
+  await prisma.job.deleteMany({ where: { id: jobId } });
+  return profile;
 }

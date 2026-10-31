@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import type { Prisma, Startup } from "@/generated/prisma/client";
 import { ApplicationStatus, StartupStatus } from "@/generated/prisma/enums";
+import { ActionError } from "@/lib/action";
 import type { ProfileData } from "@/lib/profile";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
@@ -229,6 +230,30 @@ export async function updateStartup(id: string, change: { status?: StartupStatus
   if (change.notes !== undefined) data.notes = change.notes.slice(0, 5_000);
   const { count } = await prisma.startup.updateMany({ where: { id }, data });
   return count > 0 ? getStartup(id) : null;
+}
+
+/**
+ * Links an application written to a startup elsewhere, e.g. by Claude
+ * through the connector (#221), as "Write to them" links the one it starts:
+ * Startups opens it from there, counts the startup as contacted once it's
+ * sent, and keeps people's addresses. Returns null when the startup is gone.
+ */
+export async function linkStartupApplication(id: string, applicationId: string): Promise<StartupView | null> {
+  const row = await prisma.startup.findUnique({ where: { id } });
+  if (!row) return null;
+  if (row.applicationId === applicationId) return startupView(row);
+  // Startups offers no "Write to them" then.
+  if (row.noApplicationsFrom) throw new ActionError(`Their site says they don't take unsolicited applications: ${row.noApplicationsFrom}. Apply through a posted job instead.`);
+  const application = await prisma.application.findUnique({ where: { id: applicationId }, select: { awaitingReview: true, startup: { select: { company: true } } } });
+  if (!application) throw new ActionError("That application no longer exists.");
+  if (application.awaitingReview) throw new ActionError("That application is a job agent draft waiting for review. Approve it first.");
+  // One startup per application: checked here rather than left to the unique index.
+  if (application.startup) throw new ActionError(`That application is already linked to ${application.startup.company}.`);
+  const { count } = await prisma.startup.updateMany({ where: { id, applicationId: null }, data: { applicationId } });
+  if (count === 0) throw new ActionError(`${row.company} is already linked to another application.`);
+  // An application already sent counts at once, as the list would count it.
+  await markSentAsContacted();
+  return getStartup(id);
 }
 
 /** "Remove and don't bring back": deletes the startup, keeping only hashes so a refresh leaves it out. An application made from it stays. */

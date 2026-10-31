@@ -12,6 +12,8 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { job: { findMany: vi.fn(async () => []) } } }));
 vi.mock("@/lib/jobs/runner", () => ({ cancelJob: vi.fn() }));
 vi.mock("@/lib/backups", () => ({ writeBackup: vi.fn(async () => "dossier-backup-before-import-2026-09-28-120000.json") }));
+const forgotten = vi.hoisted(() => ({ calls: [] as string[] }));
+vi.mock("@/lib/connector/removed-entries", () => ({ forgetRemovedProfileEntries: () => void forgotten.calls.push("forget") }));
 const summary = { applications: 2, roles: 3, skills: 7, themes: 0, notes: 1 };
 vi.mock("@/lib/data-import", () => ({
   parseExport: vi.fn(() => ({ ok: true, data: { exportedAt: new Date("2026-09-27T10:00:00Z") } })),
@@ -48,9 +50,11 @@ describe("POST /api/import (E10-6)", () => {
     const order: string[] = [];
     vi.mocked(writeBackup).mockImplementationOnce(async () => (order.push("backup"), "backup.json"));
     vi.mocked(importExport).mockImplementationOnce(async () => void order.push("import"));
+    forgotten.calls = order;
     const response = await post();
     expect(await response.json()).toEqual({ incoming: summary, backup: "backup.json" });
-    expect(order).toEqual(["backup", "import"]);
+    // Profile entries Claude removed belonged to the replaced profile, so they can't come back.
+    expect(order).toEqual(["backup", "import", "forget"]);
   });
 
   it("refuses a file that isn't an export", async () => {
