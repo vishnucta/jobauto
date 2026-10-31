@@ -22,7 +22,17 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**"],
-      exclude: ["src/generated/**", "src/test/**", "**/*.d.ts"],
+      exclude: [
+        "src/generated/**",
+        "src/test/**",
+        "**/*.d.ts",
+        // The apply assistant's browser driving (jobauto fork) needs a visible
+        // browser window, which CI's unit tests don't have: scripts/try-apply.ts
+        // runs it against e2e/fixtures/apply-form.html instead.
+        "src/lib/apply/run.ts",
+        "src/lib/apply/form.ts",
+        "src/lib/apply/browser.ts",
+      ],
       reporter: ["text-summary", "json-summary", "html"],
       reportsDirectory: "coverage",
       thresholds: {

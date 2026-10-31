@@ -9,7 +9,7 @@ import type { SettingsData } from "@/lib/settings";
 
 import { hostOf } from "./ats";
 import { planFor } from "./plan";
-import { isWatching } from "./run";
+import { isWatching } from "./watches";
 import { filledSchema, unfilledSchema } from "./run-types";
 import type { ApplyAttemptView, ApplyPlanView, ApplyTabData } from "./view";
 

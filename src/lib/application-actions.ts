@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
+import { deleteApplyRuns } from "@/lib/apply/files";
 import { cancelApplicationJobs } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
 
@@ -34,12 +35,15 @@ export const setArchived = action(z.object({ id: z.string().min(1), archived: z.
 /**
  * Deletes an application with its documents and their versions, chat,
  * notes, status history and background jobs, whose inputs and results hold
- * the posting and the documents too (the database cascades).
+ * the posting and the documents too (the database cascades), and its apply
+ * runs with the PDFs and screenshots they kept.
  */
 export const deleteApplication = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
   await cancelApplicationJobs(id);
+  const runs = await prisma.applyAttempt.findMany({ where: { applicationId: id }, select: { id: true } });
   const { count } = await prisma.application.deleteMany({ where: { id } });
   if (count === 0) throw new ActionError(GONE);
+  await deleteApplyRuns(runs.map((run) => run.id));
   refreshEverything();
   return null;
 });

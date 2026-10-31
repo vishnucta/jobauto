@@ -44,6 +44,11 @@ beforeEach(async () => {
   dataDir.path = await mkdtemp(path.join(tmpdir(), "dossier-delete-"));
   await mkdir(path.join(dataDir.path, "backups"));
   await writeFile(path.join(dataDir.path, "backups", "dossier-backup-nightly-2026-09-27-030000.json"), "{}");
+  // The apply assistant's run folders and its browser profile (Phase A).
+  await mkdir(path.join(dataDir.path, "apply", "run-1"), { recursive: true });
+  await writeFile(path.join(dataDir.path, "apply", "run-1", "filled.png"), "");
+  await mkdir(path.join(dataDir.path, "apply-browser", "Default"), { recursive: true });
+  await writeFile(path.join(dataDir.path, "apply-browser", "Default", "Cookies"), "");
   redirected.to = "";
   await resetDatabase(prisma());
   await seedBuiltIns(prisma());
@@ -58,7 +63,7 @@ afterAll(async () => {
 });
 
 describe("deleteEverything (E10-8)", () => {
-  it("wipes all user data and the backups, keeps the built-in themes, and lands on the dashboard", async () => {
+  it("wipes all user data, the backups and the apply assistant's files, keeps the built-in themes, and lands on the dashboard", async () => {
     // A saved posting from Find jobs goes too (E14-9).
     await prisma().posting.create({ data: { source: "JSEARCH", externalId: "job-1", savedAt: new Date() } });
     await prisma().postingSearch.create({ data: { source: "JSEARCH", query: {}, postings: [] } });

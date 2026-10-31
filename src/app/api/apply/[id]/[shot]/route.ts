@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { NextResponse } from "next/server";
 
-import { applyDir, SCREENSHOTS } from "@/lib/apply/run";
+import { applyDir, SCREENSHOTS } from "@/lib/apply/files";
 import { prisma } from "@/lib/prisma";
 import { route } from "@/lib/route";
 

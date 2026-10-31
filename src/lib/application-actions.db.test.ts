@@ -14,6 +14,8 @@ vi.mock("@/lib/auth/session", () => ({
   getSession: async () => ({ persistent: false, issuedAt: new Date(), expiresAt: new Date(Date.now() + 60_000) }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const { deleteApplyRuns } = vi.hoisted(() => ({ deleteApplyRuns: vi.fn<(attemptIds: readonly string[]) => Promise<void>>() }));
+vi.mock("@/lib/apply/files", () => ({ deleteApplyRuns }));
 
 const prisma = () => db.client!;
 const updatedAt = new Date("2026-09-20T10:00:00Z");
@@ -73,6 +75,15 @@ describe("deleteApplication (E9-5)", () => {
     ]);
     expect(counts).toEqual([0, 0, 0, 0, 0, 0]);
     expect(await prisma().job.findMany({ select: { id: true } })).toEqual([{ id: "other" }]);
+  });
+
+  it("deletes its apply runs, and the PDFs and screenshots they kept (Phase A)", async () => {
+    await prisma().applyAttempt.createMany({ data: [{ id: "run-1", applicationId: "app-1" }, { id: "run-2", applicationId: "app-1" }] });
+    deleteApplyRuns.mockReset().mockResolvedValue(undefined);
+    expect(await deleteApplication({ id: "app-1" })).toEqual({ ok: true, data: null });
+    expect(await prisma().applyAttempt.count()).toBe(0);
+    expect(deleteApplyRuns).toHaveBeenCalledOnce();
+    expect([...deleteApplyRuns.mock.calls[0][0]].sort()).toEqual(["run-1", "run-2"]);
   });
 
 

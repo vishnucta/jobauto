@@ -26,12 +26,14 @@ import { applyStatusChange } from "@/lib/status-changes";
 import { applyAdvice, fieldsForAdvice } from "./advice";
 import { buildAnswerSet, PRIVATE_KEYS } from "./answers";
 import { applyContext } from "./browser";
+import { applyDir, applyProfileDir, SCREENSHOTS } from "./files";
 import { looksLikeCaptcha, looksSubmitted } from "./confirmation";
 import { describeKey, planFill, type FillAction, type FileKind, type FillPlan } from "./fields";
 import { clickApplyEntry, clickSubmit, dismissCookieBanner, executeFill, formStillThere, frameUrls, hasForm, pageText, scanControls } from "./form";
 import { planFor } from "./plan";
 import type { Filled, UnfilledList } from "./run-types";
 import { APPLY_STEPS } from "./steps";
+import { addWatch, stopWatching } from "./watches";
 
 // One run of the apply assistant (Phase A): the application's PDFs are
 // printed, the employer's page opens in the visible browser, the form is
@@ -42,11 +44,7 @@ import { APPLY_STEPS } from "./steps";
 // safe, Send is pressed for her. Every outcome is written to the
 // ApplyAttempt row the Apply tab shows.
 
-/** Where an attempt's PDFs and screenshots are kept. */
-export const applyDir = (attemptId: string) => path.join(env.DOSSIER_DATA_DIR, "apply", attemptId);
-/** The browser's own profile, kept between runs. */
-export const applyProfileDir = () => path.join(env.DOSSIER_DATA_DIR, "apply-browser");
-export const SCREENSHOTS = { filled: "filled.png", confirmation: "confirmation.png" } as const;
+export { isWatching, stopWatching } from "./watches";
 
 
 export type ApplyOutcome = { status: ApplyAttemptStatus; note: string };
@@ -72,12 +70,6 @@ const WATCH_INTERVAL_MS = 2_500;
 const WATCH_FOR_MS = 45 * 60_000;
 const AUTO_SUBMIT_WAIT_MS = 20_000;
 
-// Attempts waiting on the user, with the page to watch. On globalThis so
-// the dev server's hot reloads keep them.
-type Watch = { page: Page; timer: ReturnType<typeof setInterval> };
-const globalForWatch = globalThis as unknown as { applyWatches?: Map<string, Watch> };
-const watches: Map<string, Watch> = (globalForWatch.applyWatches ??= new Map());
-
 async function update(attemptId: string, data: Prisma.ApplyAttemptUpdateInput): Promise<void> {
   await prisma.applyAttempt.updateMany({ where: { id: attemptId }, data });
 }
@@ -87,19 +79,6 @@ async function end(attemptId: string, status: ApplyAttemptStatus, note: string, 
   if (status !== ApplyAttemptStatus.WAITING) stopWatching(attemptId);
   await update(attemptId, { status, note, finishedAt: status === ApplyAttemptStatus.WAITING ? null : new Date(), ...extra });
   return { status, note };
-}
-
-/** Stops watching an attempt's page; the page stays open. */
-export function stopWatching(attemptId: string): void {
-  const watch = watches.get(attemptId);
-  if (!watch) return;
-  clearInterval(watch.timer);
-  watches.delete(attemptId);
-}
-
-/** Whether the server is still watching an attempt's page. */
-export function isWatching(attemptId: string): boolean {
-  return watches.has(attemptId);
 }
 
 async function screenshot(page: Page, attemptId: string, name: string): Promise<boolean> {
@@ -147,7 +126,7 @@ function startWatching(attemptId: string, applicationId: string, page: Page): vo
     })();
   }, WATCH_INTERVAL_MS);
   timer.unref?.();
-  watches.set(attemptId, { page, timer });
+  addWatch(attemptId, { page, timer });
 }
 
 /** "I sent it" / "I didn't send it" on the Apply tab: ends an attempt by the user's word. */
