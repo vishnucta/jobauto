@@ -8,7 +8,7 @@
   Your job search, on your own server: one profile, a tailored resume and cover letter for every job, and every application tracked from draft to offer.
 </p>
 
-> **About this fork (jobauto).** A personal fork of [Dossier](https://github.com/AienTech/dossier) for job hunting in Germany. Added so far: Groq as an AI provider, an **Apply** tab that opens the employer's own application form in a real browser window, fills it from the profile and a set of saved standard answers, attaches the resume and cover letter as PDFs and then hands over for the final Send, plus Chrome/Edge fallbacks so PDF export works on Windows without a separate Chromium download. The apply assistant needs a screen: run the app on the computer you apply from. It only works on the page you opened for that application, visibly, and you press Send yourself; some job boards' terms forbid automated tools, so apply by hand there. Everything else, including the links and badges below, is upstream Dossier's. Modified from Dossier 1.9.2 since 29 October 2026 (see the git log). Same AGPL-3.0 license.
+> **About this fork (jobauto).** A personal fork of [Dossier](https://github.com/AienTech/dossier) for job hunting in Germany. Added so far: Groq as an AI provider, an **Apply** tab that opens the employer's own application form in a real browser window, fills it from the profile and a set of saved standard answers, attaches the resume and cover letter as PDFs and then hands over for the final Send, plus Chrome/Edge fallbacks so PDF export works on Windows without a separate Chromium download. The apply assistant needs a screen: run the app on the computer you apply from. To set it up on a Windows laptop, follow [Install it on Windows from GitHub](#install-it-on-windows-from-github). It only works on the page you opened for that application, visibly, and you press Send yourself; some job boards' terms forbid automated tools, so apply by hand there. Everything else, including the links and badges below, is upstream Dossier's. Modified from Dossier 1.9.2 since 29 October 2026 (see the git log). Same AGPL-3.0 license.
 
 <p align="center">
   <a href="https://github.com/AienTech/dossier/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/AienTech/dossier?label=release"></a>
@@ -71,6 +71,133 @@ It's for one person on a small server: one password, your data in your own Postg
 </table>
 
 <sub>The screenshots show the demo data: Jane Doe is made up.</sub>
+
+## Install it on Windows from GitHub
+
+These steps set the app up on a Windows 10 or 11 laptop, without Docker. The first time takes about 30 minutes. After that, starting it is a double-click.
+
+Type the commands in **PowerShell**: open the Start menu, type `PowerShell` and open **Windows PowerShell**. Run one line at a time, and wait until it has finished before the next. Yellow warnings are normal.
+
+### 1. Install the tools (once)
+
+```powershell
+winget install -e --id Git.Git
+winget install -e --id OpenJS.NodeJS.LTS
+winget install -e --id PostgreSQL.PostgreSQL.18 --interactive
+```
+
+- If winget asks you to agree to its source terms, type `Y` and press Enter.
+- When Windows asks **Do you want to allow this app to make changes to your device?**, click **Yes**.
+- The PostgreSQL installer opens its own window. Click **Next** through it. When it asks for a **password for the database superuser**, choose one with only letters and numbers, and write it down: step 3 needs it. Keep the port **5432**. At the end, untick **Stack Builder** and click **Finish**.
+
+Then **close PowerShell and open it again**, so that it finds the new tools, and run:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+npm install -g corepack
+corepack enable
+```
+
+The first line lets PowerShell run the `npm` and `yarn` commands: if it asks, type `Y` and press Enter. The other two install Yarn, which this project uses instead of npm.
+
+### 2. Get the app (once)
+
+```powershell
+cd $HOME
+git clone https://github.com/vishnucta/jobauto.git
+cd jobauto
+yarn install
+```
+
+This puts the app in a folder called `jobauto` in your user folder. If it asks whether Corepack may download Yarn, type `Y` and press Enter. `yarn install` downloads everything the app needs, which takes a few minutes.
+
+### 3. Make your settings file (once)
+
+The app reads its password and secrets from a file called `.env` in the `jobauto` folder. It stays on your laptop and never goes to GitHub.
+
+```powershell
+Copy-Item .env.example .env
+yarn hash-password
+```
+
+Type the password you want to sign in to the app with, then the same again. You won't see it while you type. It prints one long line that starts with `argon2id:`. Select that line with the mouse, press **Ctrl+C**, and open the file:
+
+```powershell
+notepad .env
+```
+
+Paste the line right after `DOSSIER_PASSWORD=`, so that it reads `DOSSIER_PASSWORD=argon2id:…`. Leave Notepad open, and in PowerShell make a random secret:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Copy what it prints and paste it right after `DOSSIER_SECRET=`. Last, in the `DATABASE_URL` line, put your database password from step 1 in place of the second `postgres`:
+
+```
+DATABASE_URL="postgresql://postgres:YOUR-DATABASE-PASSWORD@localhost:5432/dossier"
+```
+
+Save the file and close Notepad. Keep `.env` private, and don't lose it: it holds your sign-in, and `DOSSIER_SECRET` unlocks the API keys the app saves.
+
+### 4. Set up the database (once)
+
+```powershell
+yarn prisma generate
+yarn prisma migrate deploy
+yarn prisma db seed
+```
+
+The second command creates the database the first time. Ignore any message that suggests updating Prisma.
+
+### 5. Start it
+
+```powershell
+cd $HOME\jobauto
+yarn dev
+```
+
+Open **http://localhost:3000** in your browser and sign in with your password. Leave the PowerShell window open while you use the app. The first pages take a little while to load. To stop the app, press **Ctrl+C** in that window, or close it.
+
+If Windows asks whether Node.js may use the network, click **Cancel** and the app opens only on this laptop. Allow it on **Private networks** only if you want to open the app from your phone on your home Wi-Fi.
+
+To start it with a double-click from now on, run this once. It puts **Jobauto** on your desktop:
+
+```powershell
+Set-Content "$([Environment]::GetFolderPath('Desktop'))\Jobauto.cmd" "@echo off`r`ncd /d `"$HOME\jobauto`"`r`nstart `"`" http://localhost:3000`r`nyarn dev"
+```
+
+The browser opens before the app is ready: if it can't connect, wait a few seconds and refresh.
+
+### 6. First steps in the app
+
+1. **Settings → AI provider**: choose **Groq** and paste a free API key from [console.groq.com](https://console.groq.com), or **Anthropic** with a key from [platform.claude.com](https://platform.claude.com). Press **Test connection**.
+2. **Settings → Job search**: choose **Bundesagentur für Arbeit**, which is free and needs no key, and tick **I understand, and choose this source myself**.
+3. **Profile → Import from a resume**: upload your CV and check what it read. Moving over from another computer instead? There, use **Settings → Your data → Export everything** with **Include my API keys** ticked. Here, use **Import** in **Settings → Your data** and choose that file. Delete the file afterwards: it holds your profile and your keys in plain text.
+4. **Find jobs**, open a posting and create an application. On its **Apply** tab, **Open and fill it in** opens the employer's form in a browser window and fills it in. Check everything in that window, and press Send yourself.
+
+### Updating to a new version
+
+Stop the app with **Ctrl+C**, then:
+
+```powershell
+cd $HOME\jobauto
+git pull
+yarn install
+yarn prisma generate
+yarn prisma migrate deploy
+```
+
+Start it again as in step 5. Your data stays in your own database.
+
+### If something goes wrong
+
+- **"running scripts is disabled on this system"**: run the `Set-ExecutionPolicy` line from step 1 again.
+- **"Can't reach database server"** or **"Authentication failed"**: the password in `DATABASE_URL` isn't your PostgreSQL password, or PostgreSQL isn't running. Open **Services** from the Start menu and start **postgresql-x64-18**.
+- **"That's not the password set on the server"**: run `yarn hash-password` again, replace the `DOSSIER_PASSWORD` line in `.env`, and restart the app.
+- **"Port 3000 is in use"**: the app is already running in another window. Use that one, or close it first.
+- **An error page right after updating**: stop the app with **Ctrl+C** and start it again.
+- **PDFs don't download**: the app prints them with Chrome or Edge. Edge comes with Windows; if it was removed, install Chrome.
 
 ## Run it on your computer
 
