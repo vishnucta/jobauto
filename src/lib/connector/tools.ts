@@ -1,24 +1,19 @@
 import "server-only";
 
-import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { ApplicationStatus, DocumentKind } from "@/generated/prisma/enums";
 import { approveCandidate } from "@/lib/agent/draft";
 import { isAiUsable } from "@/lib/ai/config";
-import { profileForPrompt } from "@/lib/ai/tasks/prompt-parts";
 import { scoreFrom } from "@/lib/ai/tasks/score-posting";
-import { unitsSchema } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
-import { fullText } from "@/lib/job-search/find";
-import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, postingText, RADII_KM, type FoundPosting, type PostedWithin, type SearchQuery, type ShownPosting } from "@/lib/job-search/search";
+import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
 import { getJob, startJob } from "@/lib/jobs/runner";
-import { withoutPrivateParts } from "@/lib/letter-frame";
-import { fetchPosting } from "@/lib/posting-fetch";
 import { saveScore } from "@/lib/posting-scores";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
-import { foundFromPosting, storePosting } from "@/lib/postings";
+import { foundFromPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { statusInfo } from "@/lib/status";
@@ -26,7 +21,16 @@ import { applyStatusChange } from "@/lib/status-changes";
 import { appVersion } from "@/lib/version";
 
 import { connectorDraftJob } from "./draft";
-import { readPastedPosting } from "./handoff";
+import { documentText, failure, postingLine, postingSource, resolvePosting, text, type ToolContext } from "./kit";
+import { registerAgentTools } from "./tools/agent";
+import { registerApplicationTools } from "./tools/applications";
+import { registerApplyTools } from "./tools/apply";
+import { registerDocumentTools } from "./tools/documents";
+import { registerInboxTools } from "./tools/inbox";
+import { registerPostingTools } from "./tools/postings";
+import { registerProfileTools } from "./tools/profile";
+import { registerSettingsTools } from "./tools/settings";
+import { registerTaskTools } from "./tools/tasks";
 import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writtenLetterSchema, writtenMatchSchema, writtenResumeSchema } from "./write";
 
 // The Claude connector's tools (#221, src/app/api/mcp), adapted from Anirudh
@@ -36,92 +40,7 @@ import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writte
 // deletes or archives. Contact details, private notes and the letter's
 // sender and signature stay out of what Claude is given.
 
-const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
-const failure = (message: string): CallToolResult => ({ content: [{ type: "text", text: message }], isError: true });
-
 const POSTED = POSTED_WITHIN.map((option) => option.value) as [PostedWithin, ...PostedWithin[]];
-
-/** A posting as Claude sees it in a list: numbered, without its whole text. */
-function postingLine(posting: ShownPosting | FoundPosting, number: number) {
-  const state = "state" in posting ? posting.state : null;
-  return {
-    number,
-    title: posting.title,
-    company: posting.company,
-    place: posting.place,
-    remote: posting.remote,
-    salary: posting.salary || undefined,
-    posted: posting.postedAt?.slice(0, 10),
-    via: posting.via || undefined,
-    url: posting.url || undefined,
-    saved: state?.saved || undefined,
-    applied: state?.applicationId ? true : undefined,
-    fit: state?.score ?? undefined,
-    snippet: posting.description.replace(/\s+/g, " ").slice(0, 280),
-  };
-}
-
-/** The text of a tailored document's parts, in order. */
-function documentText(units: unknown): string {
-  const parsed = unitsSchema.safeParse(units);
-  if (!parsed.success) return "";
-  return withoutPrivateParts(parsed.data)
-    .map((unit) => `## ${unit.label || unit.id}\n${unit.text}`)
-    .join("\n\n");
-}
-
-/** Where a posting comes from, in a tool's input. */
-const postingSource = {
-  posting_id: z.string().max(100).optional().describe("A posting Dossier handed over, by its posting_id"),
-  paste_id: z.string().max(100).optional().describe("A pasted posting Dossier handed over, by its paste_id"),
-  search_id: z.string().max(100).optional().describe("A search from search_jobs"),
-  number: z.number().int().min(1).optional().describe("The posting's number in that search"),
-  posting_url: z.url({ protocol: /^https?$/ }).max(2000).optional().describe("The posting's web address"),
-  posting_text: z.string().max(100_000).optional().describe("The posting's text, pasted"),
-};
-
-type PostingSource = { posting_id?: string; paste_id?: string; search_id?: string; number?: number; posting_url?: string; posting_text?: string };
-type ResolvedPosting = { text: string; url: string; postingId: string | null; title?: string; company?: string; place?: string };
-
-/** The whole text of a posting from a search, one handed over, a link or pasted text, or what's wrong. */
-async function resolvePosting(source: PostingSource): Promise<ResolvedPosting | { error: string }> {
-  if (source.posting_id) {
-    const row = await prisma.posting.findUnique({ where: { id: source.posting_id } });
-    if (!row) return { error: "That posting is no longer in Dossier. Open it again from Find jobs." };
-    const found = foundFromPosting(row);
-    const description = found.complete ? found.description : ((await fullText(found)) ?? found.description);
-    if (!description.trim()) return { error: "That posting has no text to write from. Give its link as posting_url instead." };
-    return { text: postingText({ ...found, description }), url: found.url, postingId: row.id, title: found.title, company: found.company, place: found.place };
-  }
-  if (source.paste_id) {
-    const pasted = await readPastedPosting(source.paste_id);
-    if (!pasted) return { error: "That pasted posting is no longer kept. Paste it into New application again, or here as posting_text." };
-    return { text: pasted.text, url: pasted.url, postingId: null };
-  }
-  if (source.search_id) {
-    const search = await prisma.postingSearch.findUnique({ where: { id: source.search_id }, select: { postings: true } });
-    const kept = foundPostingSchema.array().catch([]).parse(search?.postings ?? []);
-    const found = source.number ? kept[source.number - 1] : undefined;
-    if (!found) return { error: "There's no such posting in that search. Use a number from search_jobs." };
-    const description = (await fullText(found)) ?? found.description;
-    if (!description.trim()) return { error: "That posting has no text to write from. Give its link as posting_url instead." };
-    return {
-      text: postingText({ ...found, description }),
-      url: found.url,
-      postingId: (await storePosting(found)).id,
-      title: found.title,
-      company: found.company,
-      place: found.place,
-    };
-  }
-  if (source.posting_url) {
-    const fetched = await fetchPosting(source.posting_url);
-    if (!fetched.ok) return { error: `${fetched.error} Paste the posting's text as posting_text instead.` };
-    return { text: fetched.text, url: fetched.url, postingId: null };
-  }
-  if (source.posting_text?.trim()) return { text: source.posting_text.trim(), url: "", postingId: null };
-  return { error: "Give posting_id, paste_id, search_id and number, posting_url, or posting_text." };
-}
 
 /** Dossier as an MCP server, for one request; `origin` is the address links in answers point to. */
 export function createDossierServer(origin: string): McpServer {
@@ -138,17 +57,6 @@ export function createDossierServer(origin: string): McpServer {
         "show the user a short summary, then save it with save_application. Read or update applications with the other tools. " +
         "Nothing is ever sent for the user: drafts wait in Dossier for them to review and download as PDFs.",
     },
-  );
-
-  server.registerTool(
-    "get_profile",
-    {
-      title: "Read the profile",
-      description:
-        "The user's profile in Dossier: headline, summary, facts about them, skills, languages, experience, projects, education and publications, with the ids save_application uses. Contact details and links are left out.",
-      annotations: { readOnlyHint: true },
-    },
-    async () => text({ ...JSON.parse(profileForPrompt(await loadProfile())), link: linkTo("/profile") }),
   );
 
   server.registerTool(
@@ -471,6 +379,17 @@ export function createDossierServer(origin: string): McpServer {
       return text({ id, status: statusInfo(status).label, changed: result.outcome !== "unchanged" });
     },
   );
+
+  const context: ToolContext = { server, linkTo };
+  registerProfileTools(context);
+  registerDocumentTools(context);
+  registerApplicationTools(context);
+  registerApplyTools(context);
+  registerPostingTools(context);
+  registerTaskTools(context);
+  registerAgentTools(context);
+  registerInboxTools(context);
+  registerSettingsTools(context);
 
   return server;
 }

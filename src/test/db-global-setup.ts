@@ -7,5 +7,7 @@ export default function setup() {
   execFileSync("yarn", ["prisma", "migrate", "deploy"], {
     env: { ...process.env, DATABASE_URL: testDatabaseUrl() },
     stdio: "pipe",
+    // On Windows `yarn` is a .cmd script, which Node only starts through a shell.
+    shell: process.platform === "win32",
   });
 }
