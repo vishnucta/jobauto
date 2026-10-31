@@ -5,6 +5,7 @@ import { activityTimeline } from "@/lib/activity";
 import { isAiConfigured } from "@/lib/ai/config";
 import { editsSchema, matchSchema, matchScore } from "@/lib/application-data";
 import { loadApplication, loadDocuments, readJson } from "@/lib/application-documents";
+import { loadApplyTab } from "@/lib/apply/view-data";
 import { formatShortDate } from "@/lib/dates";
 import { resolveFileName } from "@/lib/file-name";
 import { refineJobKey } from "@/lib/jobs/refine";
@@ -53,6 +54,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       loadThemes(),
     ]);
 
+  const apply = await loadApplyTab(application, profile, settings, timeZone);
   const match = readJson(matchSchema, application.match);
   const messages = application.messages
     .map((message, index) => ({
@@ -134,6 +136,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       letterDate={letterDate}
       score={match && match.items.length > 0 ? matchScore(match) : null}
       initialTab={tabFrom(tab)}
+      apply={apply}
       aiReady={aiReady}
       rewriting={rewriting}
       messages={messages}

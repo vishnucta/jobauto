@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <title>Acme GmbH – Online-Bewerbung</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+      label { display: block; margin-top: 0.75rem; font-weight: 600; }
+      input, select, textarea { width: 100%; padding: 0.4rem; margin-top: 0.2rem; }
+      fieldset { margin-top: 1rem; }
+      .cookie { position: fixed; bottom: 0; left: 0; right: 0; background: #333; color: #fff; padding: 1rem; display: flex; justify-content: space-between; }
+      .hidden-input { position: absolute; left: -9999px; }
+    </style>
+  </head>
+  <body>
+    <div class="cookie" id="cookie">
+      <span>Wir verwenden Cookies.</span>
+      <button type="button" onclick="document.getElementById('cookie').remove()">Alle akzeptieren</button>
+    </div>
+
+    <main id="posting">
+      <h1>Financial Analyst – Regulatory Reporting (m/w/d)</h1>
+      <p>Acme GmbH, Hamburg. English is our working language.</p>
+      <button type="button" id="apply-entry" onclick="document.getElementById('posting').hidden = true; document.getElementById('form').hidden = false;">Jetzt online bewerben</button>
+    </main>
+
+    <form id="form" hidden onsubmit="return submitted(event)">
+      <h2>Ihre Bewerbung</h2>
+      <label for="anrede">Anrede *</label>
+      <select id="anrede" required>
+        <option value="">Bitte wählen</option>
+        <option value="f">Frau</option>
+        <option value="m">Herr</option>
+        <option value="d">Divers</option>
+      </select>
+      <label for="vorname">Vorname *</label>
+      <input id="vorname" name="first_name" required />
+      <label for="nachname">Nachname *</label>
+      <input id="nachname" name="last_name" required />
+      <label for="email">E-Mail-Adresse *</label>
+      <input id="email" type="email" name="email" required />
+      <label for="tel">Telefon</label>
+      <input id="tel" type="tel" name="phone" />
+      <label for="strasse">Straße und Hausnummer</label>
+      <input id="strasse" name="street" />
+      <label for="plz">PLZ</label>
+      <input id="plz" name="zip" />
+      <label for="ort">Ort</label>
+      <input id="ort" name="city" />
+      <label for="land">Land</label>
+      <select id="land" name="country">
+        <option value="">Bitte wählen</option>
+        <option value="AT">Österreich</option>
+        <option value="CH">Schweiz</option>
+        <option value="DE">Deutschland</option>
+      </select>
+      <label for="linkedin">LinkedIn-Profil</label>
+      <input id="linkedin" type="url" name="linkedin" />
+      <label for="gehalt">Gehaltsvorstellung (brutto/Jahr)</label>
+      <input id="gehalt" type="number" name="salary" />
+      <label for="eintritt">Frühestmöglicher Eintrittstermin</label>
+      <input id="eintritt" type="date" name="start_date" />
+      <label for="frist">Kündigungsfrist</label>
+      <input id="frist" name="notice" />
+
+      <fieldset>
+        <legend>Besitzen Sie eine gültige Arbeitserlaubnis für Deutschland? *</legend>
+        <label><input type="radio" name="permit" value="1" required /> Ja</label>
+        <label><input type="radio" name="permit" value="0" /> Nein</label>
+      </fieldset>
+
+      <label for="deutsch">Deutschkenntnisse</label>
+      <select id="deutsch" name="german">
+        <option value="">Bitte wählen</option>
+        <option value="1">Grundkenntnisse (A1–A2)</option>
+        <option value="2">Gut (B1–B2)</option>
+        <option value="3">Verhandlungssicher (C1–C2)</option>
+        <option value="4">Muttersprache</option>
+      </select>
+      <label for="englisch">Englischkenntnisse</label>
+      <select id="englisch" name="english">
+        <option value="">Bitte wählen</option>
+        <option value="1">Grundkenntnisse</option>
+        <option value="2">Gut</option>
+        <option value="3">Verhandlungssicher</option>
+      </select>
+
+      <label for="cv">Lebenslauf (PDF) *</label>
+      <input id="cv" type="file" name="cv" accept=".pdf" required class="hidden-input" />
+      <button type="button" onclick="document.getElementById('cv').click()">Datei auswählen</button>
+      <label for="letter">Anschreiben</label>
+      <input id="letter" type="file" name="cover_letter" accept=".pdf" />
+      <label for="more">Weitere Unterlagen</label>
+      <input id="more" type="file" name="documents" multiple />
+
+      <label for="msg">Nachricht an uns</label>
+      <textarea id="msg" name="message" rows="5"></textarea>
+
+      <label><input type="checkbox" name="privacy" required /> Ich habe die Datenschutzerklärung gelesen und akzeptiere sie. *</label>
+      <label><input type="checkbox" name="newsletter" /> Ich möchte über weitere Stellen informiert werden.</label>
+      <label for="src">Wie sind Sie auf uns aufmerksam geworden?</label>
+      <input id="src" name="source" />
+
+      <p><button type="submit">Bewerbung absenden</button></p>
+    </form>
+
+    <section id="thanks" hidden>
+      <h2>Vielen Dank für Ihre Bewerbung!</h2>
+      <p>Wir melden uns in Kürze bei Ihnen.</p>
+    </section>
+
+    <script>
+      function submitted(event) {
+        event.preventDefault();
+        const form = document.getElementById("form");
+        const data = {};
+        for (const element of form.elements) {
+          if (!element.name) continue;
+          if (element.type === "file") data[element.name] = Array.from(element.files, (file) => file.name);
+          else if (element.type === "checkbox" || element.type === "radio") { if (element.checked) data[element.name] = element.value; }
+          else data[element.name] = element.value;
+        }
+        window.__submitted = data;
+        form.remove();
+        document.getElementById("thanks").hidden = false;
+        history.pushState({}, "", "#danke");
+        return false;
+      }
+    </script>
+  </body>
+</html>

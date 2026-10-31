@@ -306,6 +306,8 @@ enum AiProvider {
   MISTRAL
   /// LM Studio on the user's own hardware (#210).
   LMSTUDIO
+  /// Groq's hosted API: OpenAI-compatible, with a free tier (bewerbung fork).
+  GROQ
 }
 
 enum Creativity {
@@ -452,11 +454,59 @@ model Application {
   facts               Fact[]
   /// Its background jobs, deleted with it (their inputs and results hold the posting and the documents).
   jobs                Job[]
+  /// Runs of the apply assistant on the employer's page (Phase A), deleted with it.
+  applyAttempts       ApplyAttempt[]
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
   @@index([status])
   @@index([updatedAt])
+}
+
+/// Where a run of the apply assistant stands (Phase A, src/lib/apply).
+enum ApplyAttemptStatus {
+  /// The browser is opening the page and filling the form.
+  OPENING
+  /// Filled in as far as it could; the user checks the browser window and presses Send.
+  WAITING
+  /// The page confirmed the application, or the user said she sent it.
+  SUBMITTED
+  /// The window was closed, or the user said she didn't send it.
+  ABANDONED
+  /// The page couldn't be opened or worked.
+  FAILED
+}
+
+/// One run of the apply assistant on an employer's page (Phase A): what it
+/// filled, what it left to the user, and how it ended. The screenshots
+/// live in DOSSIER_DATA_DIR/apply/<id>/.
+model ApplyAttempt {
+  id            String             @id @default(cuid())
+  applicationId String
+  application   Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// The page it opened.
+  url           String             @default("")
+  /// The applicant tracking system behind it (src/lib/apply/ats.ts), e.g. "personio".
+  ats           String             @default("unknown")
+  status        ApplyAttemptStatus @default(OPENING)
+  /// Whether it was allowed to press Send itself.
+  autoSubmit    Boolean            @default(false)
+  /// What it filled, as a JSON list of { label, key, value } (contact details without their value).
+  filled        Json?
+  /// What it left to the user, as a JSON list of { label, required, reason }.
+  unfilled      Json?
+  /// A CAPTCHA stood on the page.
+  captcha       Boolean            @default(false)
+  /// What to tell the user about how it went.
+  note          String             @default("")
+  /// Whether screenshots of the filled form and of the confirmation were saved.
+  screenshot    Boolean            @default(false)
+  confirmation  Boolean            @default(false)
+  startedAt     DateTime           @default(now())
+  finishedAt    DateTime?
+  updatedAt     DateTime           @updatedAt
+
+  @@index([applicationId, startedAt])
 }
 
 /// One status change. Keeps the application's furthestStage and sentAt from

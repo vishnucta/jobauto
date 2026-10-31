@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated/prisma/enums";
+import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import { EMPTY_QUERY, JOB_SOURCES, JSEARCH_HOSTS, searchQuerySchema } from "@/lib/job-search/search";
 import { startupsRefreshSchema } from "@/lib/startups/types";
 
@@ -185,6 +186,10 @@ export const settingsSchema = z.object({
   latestVersionUrl: z.string().nullable().catch(null),
   updateCheckDay: z.string().nullable().catch(null),
   updateDismissed: z.string().nullable().catch(null),
+  // The apply assistant (Phase A, src/lib/apply): the standard answers
+  // employers' forms ask for and the profile doesn't hold, and whether it
+  // may press Send itself.
+  applyAnswers: json(applyAnswersSchema).catch(DEFAULT_APPLY_ANSWERS),
   // Gmail and Calendar (E15). Off until the Google account is connected.
   // The OAuth client, entered in Settings → Google. Null means "not set in the
   // app": DOSSIER_GOOGLE_CLIENT_ID and DOSSIER_GOOGLE_CLIENT_SECRET decide.

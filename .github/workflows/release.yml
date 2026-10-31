@@ -19,6 +19,8 @@ concurrency:
 jobs:
   release:
     name: Release
+    # Releases and the "latest" image are upstream's; forks skip this.
+    if: github.repository == 'AienTech/dossier'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

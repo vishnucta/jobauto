@@ -70,6 +70,7 @@ describe("stored settings", () => {
       agentMaxDrafts: 3,
       agentAutoDraft: false,
       agentRuns: [],
+      applyAnswers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
       startupsViewedAt: null,
       startupsLastRefresh: null,
       updateCheck: true,

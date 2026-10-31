@@ -37,7 +37,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
   protected readonly client: OpenAI;
 
   constructor(
-    readonly kind: "OPENAI" | "LOCAL" | "MISTRAL" | "LMSTUDIO",
+    readonly kind: "OPENAI" | "LOCAL" | "MISTRAL" | "LMSTUDIO" | "GROQ",
     private readonly baseURL: string,
     apiKey: string | null,
     model: string | null,

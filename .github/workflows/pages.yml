@@ -31,6 +31,8 @@ concurrency:
 jobs:
   deploy:
     name: Publish the website
+    # The website is upstream's; forks don't publish it.
+    if: github.repository == 'AienTech/dossier'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

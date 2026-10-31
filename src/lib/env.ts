@@ -10,7 +10,7 @@ const SECRET_MIN_LENGTH = 32;
 const GENERATE_SECRET = "for example the output of `openssl rand -base64 32`";
 const HASH_PASSWORD = "Make one with `docker run --rm -it ghcr.io/aientech/dossier hash-password`";
 
-export const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio"] as const;
+export const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio", "groq"] as const;
 export const JOB_SOURCE_NAMES = ["jsearch", "adzuna", "arbeitsagentur", "off"] as const;
 
 // An empty value (`DOSSIER_AI_KEY=` in .env) counts as unset.
@@ -130,6 +130,15 @@ const schema = z.object({
       .trim()
       .toLowerCase()
       .pipe(z.enum(["on", "off"], { error: (issue) => `DOSSIER_JOBS_ARBEITSAGENTUR must be on or off (got "${String(issue.input)}").` })),
+  ),
+  // Which browser prints PDFs and opens employers' pages: chromium
+  // (Playwright's own build, installed with `yarn playwright install
+  // chromium`), chrome or msedge (the ones on this computer). Unset, each
+  // use tries its own order and takes the first that starts.
+  DOSSIER_BROWSER_CHANNEL: optional(
+    z.enum(["chromium", "chrome", "msedge"], {
+      error: (issue) => `DOSSIER_BROWSER_CHANNEL must be chromium, chrome or msedge (got "${String(issue.input)}").`,
+    }),
   ),
   // Google sign-in for Gmail and Calendar (E15-1): an OAuth client of type
   // "Web application". Settings → Google can save one instead, which wins.

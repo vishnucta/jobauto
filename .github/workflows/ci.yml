@@ -171,7 +171,8 @@ jobs:
   image:
     name: Production image
     needs: [checked, check, e2e]
-    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Only upstream publishes images; forks keep the checks and skip this job.
+    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'AienTech/dossier' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -56,3 +56,10 @@ next-env.d.ts
 /e2e/.auth/
 /playwright-report/
 /test-results/
+
+# Local one-off scripts (profile imports and the like): personal data, never published
+/scripts/local/
+
+# The apply assistant's screenshots and browser profile, should DOSSIER_DATA_DIR ever point into the checkout
+/apply/
+/apply-browser/

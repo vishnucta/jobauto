@@ -33,6 +33,7 @@ describe("AiProviderSection", () => {
       "LM Studio",
       "OpenAI-compatible",
       "Anthropic",
+      "Groq",
       "Mistral",
     ]);
     expect(screen.getByRole("radio", { name: "Local model" })).toBeChecked();
@@ -51,7 +52,7 @@ describe("AiProviderSection", () => {
     expect(screen.getByRole("note")).toHaveTextContent(/depend on your account with Anthropic\.$/);
     expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "Stored encrypted on your server");
     await waitFor(() =>
-      expect(saveAiProvider).toHaveBeenCalledWith({ provider: "ANTHROPIC", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5" }),
+      expect(saveAiProvider).toHaveBeenCalledWith({ provider: "ANTHROPIC", baseUrl: "https://api.anthropic.com", model: "claude-opus-5-5" }),
     );
   });
 

@@ -2,6 +2,9 @@ import "server-only";
 
 import { chromium, type Browser } from "playwright-core";
 
+import { channelOrder, launchWithFallback } from "@/lib/browser/launch";
+import { env } from "@/lib/env";
+
 import { PRINT_TOKEN_HEADER, signPrintToken } from "./print-token";
 
 // PDFs are printed by headless Chromium from the app's own print pages, so
@@ -36,13 +39,28 @@ function appOrigin(): string {
   return `http://localhost:${process.env.PORT ?? 3000}`;
 }
 
+/** DOSSIER_BROWSER_CHANNEL, when set; the environment isn't needed otherwise (tests run without one). */
+function preferredChannel() {
+  try {
+    return env.DOSSIER_BROWSER_CHANNEL;
+  } catch {
+    return undefined;
+  }
+}
+
 function browser(): Promise<Browser> {
   if (!pool.browser) {
-    const launching = chromium
-      .launch({
-        // Docker gives /dev/shm only 64 MB.
-        args: ["--disable-dev-shm-usage"],
-      })
+    // Playwright's own Chromium first; without it (a laptop that never ran
+    // `playwright install`), the Chrome or Edge that's there (bewerbung fork).
+    const launching = launchWithFallback(
+      (options) =>
+        chromium.launch({
+          ...options,
+          // Docker gives /dev/shm only 64 MB.
+          args: ["--disable-dev-shm-usage"],
+        }),
+      channelOrder(preferredChannel(), ["chromium", "chrome", "msedge"]),
+    )
       .then((launched) => {
         // A crashed or closed browser is replaced on the next render.
         launched.on("disconnected", () => {

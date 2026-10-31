@@ -8,6 +8,8 @@
   Your job search, on your own server: one profile, a tailored resume and cover letter for every job, and every application tracked from draft to offer.
 </p>
 
+> **About this fork (jobauto).** A personal fork of [Dossier](https://github.com/AienTech/dossier) for job hunting in Germany. Added so far: Groq as an AI provider, an **Apply** tab that opens the employer's own application form in a real browser window, fills it from the profile and a set of saved standard answers, attaches the resume and cover letter as PDFs and then hands over for the final Send, plus Chrome/Edge fallbacks so PDF export works on Windows without a separate Chromium download. The apply assistant needs a screen: run the app on the computer you apply from. It only works on the page you opened for that application, visibly, and you press Send yourself; some job boards' terms forbid automated tools, so apply by hand there. Everything else, including the links and badges below, is upstream Dossier's. Modified from Dossier 1.9.2 since 29 October 2026 (see the git log). Same AGPL-3.0 license.
+
 <p align="center">
   <a href="https://github.com/AienTech/dossier/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/AienTech/dossier?label=release"></a>
   <a href="https://github.com/AienTech/dossier/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/AienTech/dossier/actions/workflows/ci.yml/badge.svg"></a>
@@ -19,7 +21,7 @@
 
 Dossier keeps your career history in one profile and turns it into a clean resume. For every job you apply to, it reads the posting, shows how you match, and drafts a tailored resume and cover letter that only use facts from your profile. You refine them in a chat, download them as PDFs and track each application from draft to offer.
 
-It's for one person on a small server: one password, your data in your own PostgreSQL database, and an AI model of your choice. That can be a local model through Ollama or LM Studio, so your profile and documents stay on your own hardware, or a hosted one (any OpenAI-compatible API, Anthropic or Mistral), which then receives what it writes from. [Privacy](https://github.com/AienTech/dossier/wiki/Privacy) says what goes where.
+It's for one person on a small server: one password, your data in your own PostgreSQL database, and an AI model of your choice. That can be a local model through Ollama or LM Studio, so your profile and documents stay on your own hardware, or a hosted one (any OpenAI-compatible API, Anthropic, Mistral or Groq), which then receives what it writes from. [Privacy](https://github.com/AienTech/dossier/wiki/Privacy) says what goes where.
 
 **Get started:** [run it on your computer](#run-it-on-your-computer) in a few minutes, or [self-host it](#self-hosting) on a server. The [installation guide](https://github.com/AienTech/dossier/wiki) covers every way: Docker with or without Compose, Node.js, a plain Ubuntu server, CapRover, Coolify and Dokploy.
 

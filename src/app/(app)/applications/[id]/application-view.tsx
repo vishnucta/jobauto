@@ -25,6 +25,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { defaultFrame, isFrameUnit, isParagraph, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
+import type { ApplyTabData } from "@/lib/apply/view";
 import { retry } from "@/lib/jobs/actions";
 import type { RefineResult } from "@/lib/jobs/refine";
 import type { RegenerateUnitResult } from "@/lib/jobs/regenerate-unit";
@@ -52,6 +53,7 @@ import {
   undoMessage,
 } from "./actions";
 import { ApplicationHeader } from "./application-header";
+import { ApplyTab } from "./apply-tab";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
 import { EmailTab, type Attachments } from "./email-tab";
@@ -159,6 +161,8 @@ export type ApplicationViewProps = {
   /** A reply still being written, e.g. since before a reload. */
   refining: string | null;
   suggestions: RefineSuggestions;
+  /** The Apply tab (Phase A of the bewerbung fork). */
+  apply: ApplyTabData;
 };
 
 /**
@@ -195,6 +199,7 @@ export function ApplicationView({
   messages,
   refining,
   suggestions,
+  apply,
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -646,6 +651,7 @@ export function ApplicationView({
           <TabsTrigger value="resume">Resume</TabsTrigger>
           <TabsTrigger value="letter">Cover letter</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
+          <TabsTrigger value="apply">{apply.attempts[0]?.status === "WAITING" ? "Apply · waiting for you" : apply.attempts[0]?.status === "SUBMITTED" ? "Apply · sent" : "Apply"}</TabsTrigger>
           {gmail && (gmail.reading || gmail.emails.length > 0) && (
             <TabsTrigger value="conversation">
               {waiting > 0 ? `Conversation · ${waiting} new` : gmail.emails.length > 0 ? `Conversation · ${gmail.emails.length}` : "Conversation"}
@@ -739,6 +745,10 @@ export function ApplicationView({
             attachments={attachments}
             gmail={gmail && { sender: gmail.sender, sentBefore: gmail.sentBefore }}
           />
+        </TabsContent>
+
+        <TabsContent value="apply" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
+          <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} />
         </TabsContent>
 
         <TabsContent value="conversation" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

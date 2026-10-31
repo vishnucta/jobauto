@@ -125,6 +125,15 @@ const props: ApplicationViewProps = {
   messages: [],
   refining: null,
   suggestions: { resume: ["Make the summary shorter"], letter: ["Make it more formal"], email: ["Shorter, under 100 words"] },
+  apply: {
+    plan: { kind: "none" },
+    answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
+    attempts: [],
+    running: null,
+    hasResume: true,
+    hasLetter: true,
+    missing: [],
+  },
 };
 
 beforeEach(() => {
@@ -149,7 +158,7 @@ describe("the document tabs (E8-2)", () => {
   it("has Resume, Cover letter, Email and the posting with its match", () => {
     render(<ApplicationView {...props} />);
     const tabs = within(screen.getByRole("tablist", { name: "Application" })).getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Resume", "Cover letter", "Email", "Job posting · 5/7 match", "Notes"]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Resume", "Cover letter", "Email", "Apply", "Job posting · 5/7 match", "Notes"]);
     expect(screen.getByRole("tab", { name: "Resume" })).toHaveAttribute("aria-selected", "true");
   });
 
