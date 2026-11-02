@@ -176,8 +176,11 @@ That writes `dist\jobauto-windows-2026.11.0.zip`, about 12 MB. Publish it as a r
 ```powershell
 git tag -a jobauto-2026.11.0 -m "Windows zip 2026.11.0"
 git push origin main --tags
+gh repo set-default vishnucta/jobauto
 gh release create jobauto-2026.11.0 dist\jobauto-windows-2026.11.0.zip --title "jobauto 2026.11.0" --notes "What changed."
 ```
+
+The `set-default` line is needed once per clone: with an `upstream` remote present, gh would otherwise address upstream Dossier.
 
 Before publishing, test the zip on a clean Windows: **Windows Sandbox** (turn it on under *Turn Windows features on or off*, then drag the zip into it) or a fresh virtual machine. Run `Install.cmd`, start the app and sign in, run `Install.cmd` again to see it update, then `Uninstall.cmd`. For scripted tests the installer takes `-NonInteractive -Password … -DatabaseUrl … -SkipTools -NoShortcuts -NoStart`, and `uninstall.ps1` takes `-Yes` and `-DropDatabase`.
 
