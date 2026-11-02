@@ -20,6 +20,7 @@ export type JobSearchConfig = {
   /** Whether the choice is saved in Settings, rather than coming from DOSSIER_JOBS_SOURCE. */
   saved: boolean;
   jsearch: { key: string | null; host: JSearchHost; keyState: JobKeyState };
+  serpapi: { key: string | null; keyState: JobKeyState };
   adzuna: { appId: string; key: string | null; keyState: JobKeyState };
   /**
    * The Bundesagentur für Arbeit (#223): whether this server offers it, and
@@ -28,14 +29,21 @@ export type JobSearchConfig = {
   arbeitsagentur: { offered: boolean; acceptedAt: string | null };
 };
 
-type SavedJobSettings = Pick<SettingsData, "jobSource" | "jsearchKeyEnc" | "jsearchHost" | "adzunaAppId" | "adzunaKeyEnc" | "arbeitsagenturAcceptedAt">;
+type SavedJobSettings = Pick<SettingsData, "jobSource" | "jsearchKeyEnc" | "jsearchHost" | "serpapiKeyEnc" | "adzunaAppId" | "adzunaKeyEnc" | "arbeitsagenturAcceptedAt">;
 type JobEnv = Pick<
   Env,
-  "DOSSIER_JOBS_SOURCE" | "DOSSIER_JSEARCH_KEY" | "DOSSIER_JSEARCH_HOST" | "DOSSIER_ADZUNA_APP_ID" | "DOSSIER_ADZUNA_KEY" | "DOSSIER_JOBS_ARBEITSAGENTUR"
+  | "DOSSIER_JOBS_SOURCE"
+  | "DOSSIER_JSEARCH_KEY"
+  | "DOSSIER_JSEARCH_HOST"
+  | "DOSSIER_SERPAPI_KEY"
+  | "DOSSIER_ADZUNA_APP_ID"
+  | "DOSSIER_ADZUNA_KEY"
+  | "DOSSIER_JOBS_ARBEITSAGENTUR"
 >;
 
 const FROM_ENV: Record<NonNullable<Env["DOSSIER_JOBS_SOURCE"]>, JobSource | null> = {
   jsearch: "JSEARCH",
+  serpapi: "SERPAPI",
   adzuna: "ADZUNA",
   arbeitsagentur: "ARBEITSAGENTUR",
   off: null,
@@ -67,6 +75,7 @@ export function resolveJobSearchConfig(saved: SavedJobSettings, source: JobEnv, 
       // An environment key goes with the environment's host, when it names one.
       host: jsearchKey.keyState === "env" && source.DOSSIER_JSEARCH_HOST ? source.DOSSIER_JSEARCH_HOST : saved.jsearchHost,
     },
+    serpapi: keyOf(saved.serpapiKeyEnc, source.DOSSIER_SERPAPI_KEY, secret),
     adzuna: {
       appId: saved.adzunaAppId ?? source.DOSSIER_ADZUNA_APP_ID ?? "",
       ...keyOf(saved.adzunaKeyEnc, source.DOSSIER_ADZUNA_KEY, secret),
@@ -95,6 +104,7 @@ export function jobSearchView(config: JobSearchConfig): JobSearchSettingsView {
   return {
     source: config.source ?? "OFF",
     jsearch: { host: config.jsearch.host, keyState: config.jsearch.keyState },
+    serpapi: { keyState: config.serpapi.keyState },
     adzuna: { appId: config.adzuna.appId, keyState: config.adzuna.keyState },
     arbeitsagentur: config.arbeitsagentur,
   };
@@ -123,6 +133,11 @@ export function credentialsFor<S extends JobSource>(config: JobSearchConfig, sou
       const { key, host, keyState } = config.jsearch;
       if (!key) throw missing(keyState);
       return { key, host } as SourceCredentials[S];
+    }
+    case "SERPAPI": {
+      const { key, keyState } = config.serpapi;
+      if (!key) throw missing(keyState);
+      return { key } as SourceCredentials[S];
     }
     case "ADZUNA": {
       const { appId, key, keyState } = config.adzuna;

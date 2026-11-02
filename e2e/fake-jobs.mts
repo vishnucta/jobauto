@@ -8,6 +8,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 const port = Number(process.env.FAKE_JOBS_PORT ?? 3998);
 /** The JSearch key the app is given in e2e/support.ts. */
 const JSEARCH_KEY = "e2e-jsearch-key";
+/** The SerpApi key, for runs that choose it by hand (DOSSIER_SERPAPI_KEY). */
+const SERPAPI_KEY = "e2e-serpapi-key";
 
 const job = (id: string, title: string, company: string, extra: Record<string, unknown> = {}) => ({
   job_id: id,
@@ -30,6 +32,19 @@ const firstPage = [
   job("e2e-tulip", "UX Designer", "Tulip Health", { job_is_remote: true, job_location: "Anywhere  •  via Indeed" }),
 ];
 const secondPage = [job("e2e-canal", "Design Systems Designer", "Canal Software")];
+
+/** The same posting as SerpApi's google_jobs engine writes it. */
+const googleJob = (item: ReturnType<typeof job>) => ({
+  job_id: btoa(JSON.stringify({ htidocid: item.job_id })),
+  title: item.job_title,
+  company_name: item.employer_name,
+  location: String(item.job_location).split("•")[0].trim(),
+  via: item.job_publisher,
+  description: item.job_description,
+  extensions: ["2 days ago"],
+  detected_extensions: { posted_at: "2 days ago", ...(item.job_is_remote ? { work_from_home: true } : {}) },
+  apply_options: [{ title: item.job_publisher, link: item.job_apply_link }],
+});
 
 function send(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "content-type": "application/json" });
@@ -114,6 +129,18 @@ createServer((request, response) => {
     if (/nothing/i.test(url.searchParams.get("query") ?? "")) return send(response, 200, { status: "OK", data: { jobs: [], cursor: null } });
     const second = url.searchParams.get("cursor") === "PAGE-2";
     return send(response, 200, { status: "OK", request_id: "e2e", data: second ? { jobs: secondPage, cursor: null } : { jobs: firstPage, cursor: "PAGE-2" } });
+  }
+
+  if (url.pathname === "/serpapi/search.json") {
+    if (url.searchParams.get("api_key") !== SERPAPI_KEY) return send(response, 401, { error: "Invalid API key. Your API key should be here: https://serpapi.com/manage-api-key" });
+    searches += 1;
+    if (/nothing/i.test(url.searchParams.get("q") ?? "")) return send(response, 200, { search_metadata: { status: "Success" }, error: "Google hasn't returned any results for this query." });
+    const second = url.searchParams.get("next_page_token") === "PAGE-2";
+    return send(response, 200, {
+      search_metadata: { status: "Success" },
+      jobs_results: (second ? secondPage : firstPage).map(googleJob),
+      ...(second ? {} : { serpapi_pagination: { next_page_token: "PAGE-2" } }),
+    });
   }
 
   if (url.pathname.startsWith("/adzuna/")) {

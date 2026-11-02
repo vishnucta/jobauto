@@ -35,7 +35,7 @@ import { failure, postingLine, started, text, type ToolContext } from "../kit";
 
 const LISTS = ["saved", "dismissed", "searches"] as const;
 /** The From filter's sources, as the URL spells them (?from=client). */
-const FROM = ["jsearch", "adzuna", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
+const FROM = ["jsearch", "serpapi", "adzuna", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
 const CHANGES = ["save", "unsave", "dismiss", "restore"] as const;
 
 /** What each change does, as the button on a posting does it. */
@@ -138,7 +138,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         "With a search_id: the postings that search found, numbered, without asking the job source again.",
       inputSchema: z.object({
         view: z.enum(LISTS).optional().describe("Only this list: saved, dismissed or searches. Without it, all three."),
-        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, adzuna, arbeitsagentur, or client for what AI clients added"),
+        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, arbeitsagentur, or client for what AI clients added"),
         search_id: z.string().min(1).max(100).optional().describe("A past search, to list the postings it found instead"),
         from: z.number().int().min(1).optional().describe("Where each list (or the search) starts. Defaults to 1."),
         limit: z.number().int().min(1).max(100).optional().describe("At most this many per list. Defaults to 20."),

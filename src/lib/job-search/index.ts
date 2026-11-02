@@ -9,6 +9,7 @@ import { adzuna } from "./adzuna";
 import { arbeitsagentur } from "./arbeitsagentur";
 import { jsearch } from "./jsearch";
 import { postingKey, type FoundPosting, type JobSource, type SearchPage, type SearchQuery } from "./search";
+import { serpapi } from "./serpapi";
 import { sourceCovers } from "./sources";
 
 // Searching the chosen job source from the server (E14-1). Results are
@@ -21,6 +22,7 @@ export { JobSearchError } from "./errors";
 
 const ADAPTERS: { [S in JobSource]: JobSourceAdapter<S> } = {
   JSEARCH: jsearch,
+  SERPAPI: serpapi,
   ADZUNA: adzuna,
   ARBEITSAGENTUR: arbeitsagentur,
 };

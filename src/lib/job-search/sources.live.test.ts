@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 import { adzuna } from "./adzuna";
 import { arbeitsagentur } from "./arbeitsagentur";
 import { EMPTY_QUERY } from "./search";
+import { serpapi } from "./serpapi";
 
 // Checks against the real Adzuna and Arbeitsagentur services, skipped unless
 // asked for. The Arbeitsagentur needs no key and costs nothing; Adzuna
-// spends two calls from the day's allowance:
+// spends two calls from the day's allowance, SerpApi two from the month's:
 //
 //   JOBS_LIVE=arbeitsagentur docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
 //   JOBS_LIVE=adzuna ADZUNA_TEST_APP_ID=… ADZUNA_TEST_KEY=… docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
+//   JOBS_LIVE=serpapi SERPAPI_TEST_KEY=… docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
 
 const live = new Set((process.env.JOBS_LIVE ?? "").split(",").map((name) => name.trim()));
 const adzunaKey = { appId: process.env.ADZUNA_TEST_APP_ID ?? "", key: process.env.ADZUNA_TEST_KEY ?? "" };
@@ -32,5 +34,16 @@ describe.runIf(live.has("adzuna") && adzunaKey.appId && adzunaKey.key)("Adzuna (
     expect(page.postings.length).toBeGreaterThan(0);
     expect(page.postings.every((posting) => posting.title && !posting.complete)).toBe(true);
     expect((await adzuna.search({ ...query, keywords: "software developer" }, adzunaKey, page.next)).postings.length).toBeGreaterThan(0);
+  });
+});
+
+describe.runIf(live.has("serpapi"))("SerpApi (live)", { timeout: 30_000 }, () => {
+  it("finds postings in Hamburg with their whole text, and pages by token", async () => {
+    const credentials = { key: process.env.SERPAPI_TEST_KEY ?? "" };
+    const page = await serpapi.search(query, credentials, null);
+    expect(page.postings.length).toBeGreaterThan(0);
+    expect(page.postings[0]).toMatchObject({ source: "SERPAPI", complete: true });
+    expect(page.next).not.toBeNull();
+    expect((await serpapi.search(query, credentials, page.next)).postings.length).toBeGreaterThan(0);
   });
 });

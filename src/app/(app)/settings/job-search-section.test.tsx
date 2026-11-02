@@ -18,6 +18,7 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unk
 const off: JobSearchSettingsView = {
   source: "OFF",
   jsearch: { host: "openwebninja", keyState: "none" },
+  serpapi: { keyState: "none" },
   adzuna: { appId: "", keyState: "none" },
   arbeitsagentur: { offered: true, acceptedAt: null },
 };
@@ -35,11 +36,12 @@ beforeEach(() => {
 });
 
 describe("JobSearchSection", () => {
-  it("offers the three sources and Off, as a radio group, Off by default", () => {
+  it("offers the four sources and Off, as a radio group, Off by default", () => {
     render(<JobSearchSection initial={off} />);
     expect(screen.getByRole("heading", { name: "Job search" })).toBeInTheDocument();
     expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual([
       "JSearch",
+      "SerpApi",
       "Adzuna",
       "Bundesagentur für Arbeit",
       "Off",
@@ -79,6 +81,15 @@ describe("JobSearchSection", () => {
     await userEvent.click(screen.getByRole("radio", { name: "RapidAPI" }));
     expect(saveJobSearchDetails).toHaveBeenCalledWith({ jsearchHost: "rapidapi" });
     expect(await screen.findByRole("link", { name: "JSearch on RapidAPI" })).toBeInTheDocument();
+  });
+
+  it("asks SerpApi for its key, and says a test spends a search", async () => {
+    render(<JobSearchSection initial={withSource({ source: "SERPAPI" })} />);
+    expect(screen.getByRole("note")).toHaveTextContent("Your searches (keywords, place and filters) go to SerpApi.");
+    expect(screen.getByRole("link", { name: "SerpApi" })).toHaveAttribute("href", "https://serpapi.com/manage-api-key");
+    expect(screen.getByRole("status")).toHaveTextContent("a test uses one search from your plan");
+    await userEvent.type(screen.getByLabelText("API key"), "serp_secret{Enter}");
+    expect(saveJobSourceKey).toHaveBeenCalledWith({ source: "SERPAPI", change: { action: "set", value: "serp_secret" } });
   });
 
   it("asks Adzuna for an app ID and key, saving the ID when you leave it", async () => {
@@ -126,7 +137,7 @@ describe("JobSearchSection", () => {
 
   it("leaves the Arbeitsagentur out when the server doesn't offer it", () => {
     render(<JobSearchSection initial={withSource({ arbeitsagentur: { offered: false, acceptedAt: null } })} />);
-    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "Adzuna", "Off"]);
+    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "SerpApi", "Adzuna", "Off"]);
   });
 
   it("shows keys from the environment and keys that can't be read", () => {

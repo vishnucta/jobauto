@@ -7,6 +7,7 @@ export type JobKeyState = "none" | "set" | "unreadable" | "env";
 export type JobSearchSettingsView = {
   source: JobSource | "OFF";
   jsearch: { host: JSearchHost; keyState: JobKeyState };
+  serpapi: { keyState: JobKeyState };
   adzuna: { appId: string; keyState: JobKeyState };
   /** Whether this server offers the Bundesagentur für Arbeit, and when its note was accepted (#223). */
   arbeitsagentur: { offered: boolean; acceptedAt: string | null };
@@ -49,6 +50,16 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     description: "Postings from LinkedIn, Indeed, Glassdoor and company sites, through Google for Jobs.",
     tag: "Most countries · free key with 200 searches a month",
     keyUrl: "https://www.openwebninja.com/api/jsearch",
+    quotaPeriod: "this month",
+    attribution: null,
+    attributionLink: null,
+    countries: null,
+  },
+  SERPAPI: {
+    name: "SerpApi",
+    description: "Google for Jobs through SerpApi: postings from LinkedIn, Indeed, company sites and more, with their whole text.",
+    tag: "Most countries · free key with 250 searches a month",
+    keyUrl: "https://serpapi.com/manage-api-key",
     quotaPeriod: "this month",
     attribution: null,
     attributionLink: null,

@@ -12,7 +12,7 @@ import { countryCodeFor } from "./countries";
 // job ad is a "posting".
 
 /** The job sources Dossier can search (E14-1 to E14-3), in the order Settings lists them; one is chosen there. */
-export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.ADZUNA, PostingSource.ARBEITSAGENTUR] as const;
+export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.SERPAPI, PostingSource.ADZUNA, PostingSource.ARBEITSAGENTUR] as const;
 export type JobSource = (typeof JOB_SOURCES)[number];
 
 /** Where a posting can come from: a job source, or an AI client that found it itself (add_found_jobs). */

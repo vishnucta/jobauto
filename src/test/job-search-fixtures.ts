@@ -162,3 +162,67 @@ export const arbeitsagenturDetails = {
   stellenangebotsBeschreibung: "**Wer wir sind**\r\nHafenlogik baut Software für den Hafen.\r\n\r\n\r\n**Was du machst**\n- APIs bauen\n- Tests schreiben",
   referenznummer: "10001-1003486534-S",
 };
+
+/** A SerpApi job_id: base64 JSON around Google's own id for the posting, with a long token after it. */
+const serpapiJobId = (docId: string) => btoa(JSON.stringify({ job_title: "Senior Product Designer, Payments", htidocid: docId, fc: "f".repeat(600) }));
+
+/** SerpApi's google_jobs engine: the posting's whole text, its age in words, and the apply links by site. */
+const ledgerlyOnGoogle = {
+  title: "Senior Product Designer, Payments",
+  company_name: "Ledgerly",
+  location: "Hamburg, Germany",
+  via: "LinkedIn",
+  share_link: "https://www.google.com/search?ibp=htl;jobs&q=product+designer+in+Hamburg#htivrt=jobs&htidocid=LEDGERLY-42",
+  thumbnail: "https://example.com/ledgerly.png",
+  extensions: ["4 days ago", "Full-time"],
+  detected_extensions: { posted_at: "4 days ago", schedule_type: "Full-time", salary: "75K–90K a year" },
+  description: "Ledgerly is hiring a Senior Product Designer for its payments team.\n\nYou'll design checkout flows.\n\n• 5+ years of product design\n• Figma",
+  job_highlights: [{ title: "Qualifications", items: ["5+ years of product design", "Figma"] }],
+  apply_options: [
+    { title: "LinkedIn", link: "https://www.linkedin.com/jobs/view/1234567890?utm_source=google_jobs_apply" },
+    { title: "Ledgerly Careers", link: "https://careers.ledgerly.example/jobs/42" },
+  ],
+  job_id: serpapiJobId("LEDGERLY-42"),
+};
+
+const northwindOnGoogle = {
+  title: "UX Researcher",
+  company_name: "Northwind Studio",
+  location: "Anywhere",
+  via: "via Indeed",
+  share_link: "https://www.google.com/search?ibp=htl;jobs#htivrt=jobs&htidocid=NORTHWIND-7",
+  extensions: ["2 hours ago", "Work from home", "Full-time"],
+  detected_extensions: { posted_at: "2 hours ago", schedule_type: "Full-time", work_from_home: true },
+  description: "Northwind Studio is looking for a UX Researcher, fully remote within Germany.",
+  apply_options: [{ title: "Indeed", link: "https://de.indeed.com/viewjob?jk=abc123&from=serp" }],
+  // Not every job_id decodes: this one is kept by its hash.
+  job_id: "not-base64-json",
+};
+
+/** SerpApi's search.json for google_jobs: the jobs, and a token for the next page. */
+export const serpapiPage = {
+  search_metadata: { id: "serp-1", status: "Success" },
+  search_parameters: { engine: "google_jobs", q: "product designer in Hamburg", gl: "de", hl: "en" },
+  jobs_results: [
+    ledgerlyOnGoogle,
+    northwindOnGoogle,
+    // Repeated across sites: kept once.
+    ledgerlyOnGoogle,
+    // Without an id: skipped.
+    { title: "No id" },
+  ],
+  serpapi_pagination: { next_page_token: "TOKEN-PAGE-2", next: "https://serpapi.com/search.json?engine=google_jobs&next_page_token=TOKEN-PAGE-2" },
+};
+
+/** The last page: no pagination at all. */
+export const serpapiLastPage = { search_metadata: { id: "serp-2", status: "Success" }, jobs_results: [northwindOnGoogle] };
+
+/** Nothing found: a 200 with an error, as SerpApi answers it. */
+export const serpapiNoResults = {
+  search_metadata: { id: "serp-3", status: "Success" },
+  search_information: { jobs_results_state: "Fully empty" },
+  error: "Google hasn't returned any results for this query.",
+};
+
+/** What SerpApi says to a key it doesn't know, with a 401. */
+export const serpapiKeyError = { error: "Invalid API key. Your API key should be here: https://serpapi.com/manage-api-key" };

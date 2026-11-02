@@ -92,7 +92,7 @@ describe("Settings → Job agent (E16-7)", () => {
 
   it("says it doesn't search the Bundesagentur für Arbeit (#223)", () => {
     open({ source: "ARBEITSAGENTUR" });
-    expect(screen.getByRole("note")).toHaveTextContent("The agent doesn't search the Bundesagentur für Arbeit. Choose JSearch or Adzuna in Settings → Job search for it.");
+    expect(screen.getByRole("note")).toHaveTextContent("The agent doesn't search the Bundesagentur für Arbeit. Choose JSearch, SerpApi or Adzuna in Settings → Job search for it.");
     expect(screen.getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
   });
 

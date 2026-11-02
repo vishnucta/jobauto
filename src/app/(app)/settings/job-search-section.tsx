@@ -75,7 +75,7 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
     apply(toastResult(await track(saveJobSearchDetails({ adzunaAppId: appId }))));
   };
 
-  const saveKey = async (keySource: "JSEARCH" | "ADZUNA", change: { action: "set"; value: string } | { action: "clear" }) => {
+  const saveKey = async (keySource: "JSEARCH" | "SERPAPI" | "ADZUNA", change: { action: "set"; value: string } | { action: "clear" }) => {
     changed();
     return apply(toastResult(await track(saveJobSourceKey({ source: keySource, change }))));
   };
@@ -145,6 +145,15 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
                 />
               </>
             )}
+            {source === "SERPAPI" && (
+              <KeyField
+                label="API key"
+                keyState={view.serpapi.keyState}
+                envName="DOSSIER_SERPAPI_KEY"
+                getKey={{ href: SOURCE_INFO.SERPAPI.keyUrl!, text: "SerpApi" }}
+                onSave={(change) => saveKey("SERPAPI", change)}
+              />
+            )}
             {source === "ADZUNA" && (
               <div className="grid grid-cols-1 gap-x-[18px] gap-y-5 sm:grid-cols-2">
                 <Input
@@ -168,7 +177,7 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
             {source === "ARBEITSAGENTUR" && (
               <>
                 <ArbeitsagenturNote accepted={Boolean(view.arbeitsagentur.acceptedAt)} onAccept={acceptArbeitsagentur} />
-                <p className="text-sm text-muted">No key needed. The job agent doesn&apos;t search this source; choose JSearch or Adzuna for it.</p>
+                <p className="text-sm text-muted">No key needed. The job agent doesn&apos;t search this source; choose JSearch, SerpApi or Adzuna for it.</p>
               </>
             )}
 
@@ -275,7 +284,7 @@ function ConnectionStatus({ connection, source }: { connection: Connection; sour
         ? ["bg-error", "text-error", connection.message]
         : connection.status === "testing"
           ? ["bg-status-offer", "text-muted", "Sending a small search…"]
-          : ["bg-faint", "text-muted", source === "JSEARCH" ? "Not tested since your last change · a test uses one search from your plan" : "Not tested since your last change"];
+          : ["bg-faint", "text-muted", source === "JSEARCH" || source === "SERPAPI" ? "Not tested since your last change · a test uses one search from your plan" : "Not tested since your last change"];
   return (
     <p role="status" className={cn("flex items-center gap-2 text-control", text)}>
       <span aria-hidden className={cn("size-2 flex-none rounded-full", dot)} />

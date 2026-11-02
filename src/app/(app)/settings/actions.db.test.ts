@@ -157,6 +157,7 @@ describe("job search settings (E14-4)", () => {
       data: {
         source: "JSEARCH",
         jsearch: { host: "openwebninja", keyState: "none" },
+        serpapi: { keyState: "none" },
         adzuna: { appId: "", keyState: "none" },
         arbeitsagentur: { offered: true, acceptedAt: null },
       },

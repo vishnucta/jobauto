@@ -11,6 +11,7 @@ export type { JSearchHost };
 /** What each source needs to be asked. */
 export type SourceCredentials = {
   JSEARCH: { key: string; host: JSearchHost };
+  SERPAPI: { key: string };
   ADZUNA: { appId: string; key: string };
   ARBEITSAGENTUR: Record<string, never>;
 };

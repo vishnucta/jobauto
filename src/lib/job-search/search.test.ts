@@ -43,6 +43,7 @@ describe("search in the URL", () => {
     expect(viewHref("saved", "CLIENT")).toBe("/jobs?view=saved&from=client");
     expect(sourceFilterFromParams({ from: "client" })).toBe("CLIENT");
     expect(sourceFilterFromParams({ from: "JSearch" })).toBe("JSEARCH");
+    expect(sourceFilterFromParams({ from: "serpapi" })).toBe("SERPAPI");
     expect(sourceFilterFromParams({ from: "other" })).toBeNull();
     expect(sourceFilterFromParams({})).toBeNull();
   });

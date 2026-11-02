@@ -152,6 +152,7 @@ export const settingsSchema = z.object({
   jsearchKeyEnc: z.string().nullable().catch(null),
   /** Where the JSearch key is from: OpenWeb Ninja, or the RapidAPI marketplace. */
   jsearchHost: z.enum(JSEARCH_HOSTS).catch("openwebninja"),
+  serpapiKeyEnc: z.string().nullable().catch(null),
   adzunaAppId: z.string().nullable().catch(null),
   adzunaKeyEnc: z.string().nullable().catch(null),
   /** When "I understand" was ticked under the Bundesagentur für Arbeit's note (#223); its searches wait for it. */

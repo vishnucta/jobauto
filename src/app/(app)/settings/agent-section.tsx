@@ -93,7 +93,7 @@ export function AgentSection({
       {source === "ARBEITSAGENTUR" ? (
         // It searches on its own, which the BA's terms forbid most clearly (#223).
         <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
-          The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch or Adzuna in{" "}
+          The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch, SerpApi or Adzuna in{" "}
           <Link href="/settings?section=jobs" className="font-medium text-warning underline underline-offset-2">
             Settings → Job search
           </Link>{" "}

@@ -178,6 +178,7 @@ async function settingsView() {
       problem: jobSourceProblem(jobSearch),
       jsearch_host: jobs.jsearch.host,
       jsearch_key: jobs.jsearch.keyState,
+      serpapi_key: jobs.serpapi.keyState,
       adzuna_app_id: jobs.adzuna.appId || null,
       adzuna_key: jobs.adzuna.keyState,
       arbeitsagentur: { offered: jobs.arbeitsagentur.offered, understood: jobs.arbeitsagentur.acceptedAt !== null },
@@ -495,7 +496,7 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       title: "Test a connection",
       description:
         "Tests the AI provider or the job source in Dossier's settings, as their Test connection buttons do: whether it answered and how fast, or what's wrong. " +
-        "Testing JSearch uses one search from the user's plan.",
+        "Testing JSearch or SerpApi uses one search from the user's plan.",
       inputSchema: z.object({ connection: z.enum(["ai_provider", "job_source"]) }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },

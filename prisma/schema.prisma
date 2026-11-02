@@ -632,6 +632,7 @@ model Note {
 /// own and added through the connector's add_found_jobs.
 enum PostingSource {
   JSEARCH
+  SERPAPI
   ADZUNA
   ARBEITSAGENTUR
   CLIENT
