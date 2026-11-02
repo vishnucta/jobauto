@@ -1,0 +1,1 @@
+ALTER TYPE "AiProvider" ADD VALUE 'DEEPSEEK';

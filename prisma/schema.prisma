@@ -308,6 +308,8 @@ enum AiProvider {
   LMSTUDIO
   /// Groq's hosted API: OpenAI-compatible, with a free tier (bewerbung fork).
   GROQ
+  /// DeepSeek's hosted API: OpenAI-compatible, pay per use (bewerbung fork).
+  DEEPSEEK
 }
 
 enum Creativity {

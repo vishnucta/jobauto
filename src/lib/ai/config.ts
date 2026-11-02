@@ -27,6 +27,7 @@ export const PROVIDER_DEFAULTS: Record<AiProvider, { baseUrl: string; model: str
   [AiProvider.ANTHROPIC]: { baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5", timeoutSeconds: 120 },
   [AiProvider.MISTRAL]: { baseUrl: "https://api.mistral.ai/v1", model: "mistral-medium-latest", timeoutSeconds: 120 },
   [AiProvider.GROQ]: { baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b", timeoutSeconds: 120 },
+  [AiProvider.DEEPSEEK]: { baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", timeoutSeconds: 120 },
   // As generous as a local model, and loading one can take a while too.
   [AiProvider.LMSTUDIO]: { baseUrl: "http://host.docker.internal:1234", model: null, timeoutSeconds: 300 },
 };
@@ -37,6 +38,7 @@ const FROM_ENV: Record<NonNullable<Env["DOSSIER_AI_PROVIDER"]>, AiProvider> = {
   anthropic: AiProvider.ANTHROPIC,
   mistral: AiProvider.MISTRAL,
   groq: AiProvider.GROQ,
+  deepseek: AiProvider.DEEPSEEK,
   lmstudio: AiProvider.LMSTUDIO,
 };
 
@@ -128,6 +130,7 @@ export async function isAiUsable(): Promise<boolean> {
   if (!(await isAiConfigured())) return false;
   const config = await loadAiConfig();
   if (!config.model || config.apiKeyProblem) return false;
-  const needsKey = config.provider === AiProvider.ANTHROPIC || config.provider === AiProvider.MISTRAL || config.provider === AiProvider.GROQ;
+  const needsKey =
+    config.provider === AiProvider.ANTHROPIC || config.provider === AiProvider.MISTRAL || config.provider === AiProvider.GROQ || config.provider === AiProvider.DEEPSEEK;
   return !needsKey || Boolean(config.apiKey);
 }

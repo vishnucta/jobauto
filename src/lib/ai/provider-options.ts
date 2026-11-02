@@ -96,6 +96,18 @@ export const PROVIDER_OPTIONS: readonly {
     defaultModel: "mistral-medium-latest",
     apiKey: { label: "API key" },
   },
+  {
+    value: AiProvider.DEEPSEEK,
+    name: "DeepSeek",
+    vendor: "DeepSeek",
+    description: "DeepSeek's V4 models (Flash and Pro) through your own API key.",
+    tag: "Hosted · low cost · pay per use",
+    local: false,
+    defaultUrl: "https://api.deepseek.com",
+    urlPlaceholder: "https://api.deepseek.com",
+    defaultModel: "deepseek-v4-flash",
+    apiKey: { label: "API key", hint: "From platform.deepseek.com → API keys, after topping up a few euros. What Dossier writes from goes to DeepSeek's servers in China." },
+  },
 ];
 
 export function providerOption(provider: AiProvider) {
