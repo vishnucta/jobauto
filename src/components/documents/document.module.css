@@ -130,15 +130,24 @@
 
 /* ─── Columns and sections ─────────────────────────────────────────────── */
 
-.columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: calc(var(--u) * var(--gap));
+/*
+ * In a single column the sections simply stack: not a one-column grid, which
+ * Chromium can't paginate once a page ends in a run of breaks to avoid (a
+ * degree's title line, then a section title). It then moves the whole grid to
+ * the next page and leaves the header alone on the first (bewerbung fork).
+ */
+.columns > .column + .column {
+  margin-top: calc(var(--u) * var(--gap));
 }
 
 .split .columns {
+  display: grid;
   grid-template-columns: calc(var(--u) * var(--sidebar-width)) minmax(0, 1fr);
   column-gap: calc(var(--u) * var(--sidebar-gap));
+}
+
+.split .columns > .column + .column {
+  margin-top: 0;
 }
 
 .column {
@@ -189,6 +198,11 @@
   gap: calc(var(--u) * 12);
   break-after: avoid;
   break-inside: avoid;
+}
+
+/* One with nothing after it, a degree without notes, may end a page: otherwise the breaks to avoid run on into the next section's title. */
+.entryHead:last-child {
+  break-after: auto;
 }
 
 .entryTitle {
