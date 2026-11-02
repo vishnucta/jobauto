@@ -4,7 +4,7 @@ import { AgentCandidateStatus, JobStatus } from "@/generated/prisma/enums";
 import { formatDateTime } from "@/lib/dates";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { countryName } from "@/lib/job-search/countries";
-import { describeSearch, postedAgo, type JobSource } from "@/lib/job-search/search";
+import { describeSearch, postedAgo, type JobSource, type PostingOrigin } from "@/lib/job-search/search";
 import { SOURCE_INFO } from "@/lib/job-search/sources";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
@@ -26,7 +26,7 @@ export type AgentCandidateView = {
   facts: string;
   /** "Posted 2 days ago · via LinkedIn on JSearch". */
   origin: string;
-  source: JobSource;
+  source: PostingOrigin;
   url: string;
   score: number;
   reasons: string[];

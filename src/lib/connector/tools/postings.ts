@@ -1,13 +1,25 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import { isAiUsable } from "@/lib/ai/config";
 import { countryName } from "@/lib/job-search/countries";
-import { describeSearch, postingKey, searchRunHref, viewHref, type FoundPosting, type ShownPosting } from "@/lib/job-search/search";
-import { SOURCE_INFO } from "@/lib/job-search/sources";
+import {
+  DEFAULT_RADIUS_KM,
+  describeSearch,
+  linkKey,
+  postingKey,
+  safeLink,
+  searchRunHref,
+  viewHref,
+  type FoundPosting,
+  type ShownPosting,
+} from "@/lib/job-search/search";
+import { searchSourceName, SOURCE_INFO } from "@/lib/job-search/sources";
 import { startScoring } from "@/lib/jobs/score-posting";
-import { listSearches, loadSearch, removeSearch } from "@/lib/posting-searches";
+import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
 import { dismissPosting, foundFromPosting, listPostings, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { lastKnownTimeZone } from "@/lib/time-zone";
@@ -55,8 +67,65 @@ async function postingFor(ref: { number?: number; posting_id?: string }, searche
   return posting;
 }
 
+/** One job an AI client found, as add_found_jobs takes it. */
+const foundJob = z.object({
+  title: z.string().trim().min(1).max(500),
+  company: z.string().trim().max(300).default(""),
+  place: z.string().trim().max(300).default("").describe("City or region, as the posting says"),
+  url: z.url({ protocol: /^https?$/ }).max(2000).describe("The posting's own page, where it can be read and applied to"),
+  description: z.string().max(100_000).default("").describe("The posting's text, or what you know of it; Dossier reads the page itself when this is short"),
+  salary: z.string().trim().max(200).default(""),
+  posted: z.iso.date().optional().describe("When it was posted, e.g. 2026-10-28"),
+  remote: z.boolean().optional(),
+  found_on: z.string().trim().max(100).default("").describe("The site you found it on, e.g. LinkedIn or the company's careers page"),
+});
+
+/**
+ * A job an AI client found, in the shape every posting has. Its id comes from
+ * its link, so the same job added twice is the same posting in Saved.
+ */
+function postingFromClient(job: z.output<typeof foundJob>): FoundPosting {
+  const url = safeLink(job.url);
+  return {
+    source: "CLIENT",
+    externalId: createHash("sha256").update(linkKey(url) || url).digest("hex").slice(0, 32),
+    title: job.title,
+    company: job.company,
+    place: job.place,
+    remote: job.remote ?? null,
+    salary: job.salary,
+    postedAt: job.posted ? new Date(`${job.posted}T00:00:00Z`).toISOString() : null,
+    url,
+    via: job.found_on,
+    description: job.description.trim(),
+    complete: false,
+  };
+}
+
+/** Why a job an AI client gave wasn't added, as the client tells the user, with the id to find it by. */
+function skippedWhere(known: KnownJob) {
+  switch (known.where) {
+    case "application":
+      return { reason: "already applied to", application_id: known.applicationId };
+    case "saved":
+      return { reason: "already saved", posting_id: known.postingId };
+    case "dismissed":
+      return { reason: "dismissed before", posting_id: known.postingId };
+    case "search":
+      return {
+        reason: known.source === "CLIENT" ? `already added by ${known.addedBy || "an AI client"}` : `already found by ${SOURCE_INFO[known.source].name}`,
+        search_id: known.searchId,
+        number: known.number,
+      };
+    case "agent":
+      return { reason: "the job agent already found it" };
+    case "twice":
+      return { reason: "twice in this list" };
+  }
+}
+
 /** Registers these tools on the connector's server. */
-export function registerPostingTools({ server, linkTo }: ToolContext): void {
+export function registerPostingTools({ server, linkTo, clientName = "" }: ToolContext): void {
   server.registerTool(
     "list_postings",
     {
@@ -82,7 +151,7 @@ export function registerPostingTools({ server, linkTo }: ToolContext): void {
         return text({
           search_id: search.id,
           searched: describeSearch(search.query, countryName(search.query.country)),
-          source: SOURCE_INFO[search.source].name,
+          source: searchSourceName(search.source, search.addedBy),
           ran: search.ranAt,
           found: search.postings.length,
           more_available: search.next !== null,
@@ -101,7 +170,7 @@ export function registerPostingTools({ server, linkTo }: ToolContext): void {
               searched: describeSearch(search.query, countryName(search.query.country)),
               ran: `${day} at ${search.time}`,
               found: search.found,
-              source: SOURCE_INFO[search.source].name,
+              source: searchSourceName(search.source, search.addedBy),
             })),
           );
           answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(viewHref("history")) };
@@ -111,6 +180,66 @@ export function registerPostingTools({ server, linkTo }: ToolContext): void {
         }
       }
       return text(answer);
+    },
+  );
+
+  server.registerTool(
+    "add_found_jobs",
+    {
+      title: "Add jobs you found",
+      description:
+        "Adds jobs you found yourself (by searching the web, not with search_jobs) to Find jobs, as a search of their own marked as found by an AI client and named by you, " +
+        "kept apart from what the job source found. Give what you searched for and each job's title, company, place and link; add its text when you have it. " +
+        "Only add real postings you saw, with their own links: never make one up. Nothing is added twice: jobs Dossier already has (in any kept search, by link or as the same opening on another site; saved; dismissed; applied to; " +
+        "or found by the job agent) are left out and listed as skipped with where each one is, so tell the user. Answers with a search_id and numbers, which list_postings, get_posting, update_postings, " +
+        "save_job_scores, score_with_dossier and save_application take like any other search's.",
+      inputSchema: z.object({
+        client: z.string().trim().max(60).optional().describe("Your own name, e.g. 'Claude Code' or 'Gemini CLI', shown with the search"),
+        searched: z
+          .object({
+            keywords: z.string().trim().min(1).max(200).describe("What you searched for, e.g. 'Financial Analyst'"),
+            place: z.string().trim().max(200).default(""),
+            country: z
+              .string()
+              .trim()
+              .toLowerCase()
+              .regex(/^([a-z]{2})?$/)
+              .default("")
+              .describe("ISO code, e.g. 'de'"),
+            remote_only: z.boolean().default(false),
+          })
+          .describe("The search you ran"),
+        jobs: z.array(foundJob).min(1).max(50),
+        add_known: z.boolean().default(false).describe("Also add jobs Dossier already has: only when the user says a skipped one is a different opening"),
+      }),
+      annotations: { readOnlyHint: false, openWorldHint: false },
+    },
+    async ({ client, searched, jobs, add_known }) => {
+      const query = { keywords: searched.keywords, place: searched.place, country: searched.country, radiusKm: DEFAULT_RADIUS_KM, remoteOnly: searched.remote_only, postedWithin: "any" as const };
+      const addedBy = (client || clientName).slice(0, 60);
+      const { id, skipped } = await addClientSearch({ addedBy, query, postings: jobs.map(postingFromClient), addKnown: add_known });
+      const leftOut = skipped.map(({ posting, known }) => ({ title: posting.title, company: posting.company || undefined, url: posting.url, ...skippedWhere(known) }));
+      if (!id) {
+        return text({
+          added: 0,
+          skipped: leftOut,
+          message: "Dossier already has every one of those jobs, so nothing was added: tell the user where each one is. Pass add_known only when the user says one is a different opening.",
+          link: linkTo(viewHref("history")),
+        });
+      }
+      const search = await loadSearch(id, { timeZone: await lastKnownTimeZone() });
+      if (!search) return failure("Dossier couldn't keep those jobs. Try again in a moment.");
+      const kept = "Added to Find jobs as a search of its own, marked as found by an AI client.";
+      return text({
+        search_id: search.id,
+        searched: describeSearch(search.query, countryName(search.query.country)),
+        source: searchSourceName(search.source, search.addedBy),
+        added: search.postings.length,
+        postings: search.postings.map((posting, index) => ({ ...postingLine(posting, index + 1), dismissed: posting.state.dismissed || undefined })),
+        skipped: leftOut.length > 0 ? leftOut : undefined,
+        message: leftOut.length > 0 ? `${kept} ${leftOut.length === 1 ? "One job" : `${leftOut.length} jobs`} Dossier already had ${leftOut.length === 1 ? "was" : "were"} left out: see skipped for where each one is.` : kept,
+        link: linkTo(searchRunHref(search.id)),
+      });
     },
   );
 

@@ -625,11 +625,14 @@ model Note {
 
 // ─── Job search (E14) ────────────────────────────────────────────────────────
 
-/// The job sources Find jobs can search (E14-1 to E14-3).
+/// Where a posting came from: the job sources Find jobs can search (E14-1 to
+/// E14-3), or CLIENT for postings an AI client (Claude, Gemini…) found on its
+/// own and added through the connector's add_found_jobs.
 enum PostingSource {
   JSEARCH
   ADZUNA
   ARBEITSAGENTUR
+  CLIENT
 }
 
 /// A posting from Find jobs that the user kept (E14-5): saved, dismissed, or
@@ -760,6 +763,8 @@ model PostingSearch {
   found     Int           @default(0)
   /// What to ask the source for the next page; null on the last one.
   next      String?
+  /// For a CLIENT search: the AI client that added it, e.g. "Gemini CLI".
+  addedBy   String        @default("")
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 

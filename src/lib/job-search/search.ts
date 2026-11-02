@@ -13,7 +13,14 @@ import { countryCodeFor } from "./countries";
 
 /** The job sources Dossier can search (E14-1 to E14-3), in the order Settings lists them; one is chosen there. */
 export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.ADZUNA, PostingSource.ARBEITSAGENTUR] as const;
-export type JobSource = PostingSource;
+export type JobSource = (typeof JOB_SOURCES)[number];
+
+/** Where a posting can come from: a job source, or an AI client that found it itself (add_found_jobs). */
+export const POSTING_SOURCES = [...JOB_SOURCES, PostingSource.CLIENT] as const;
+export type PostingOrigin = PostingSource;
+
+/** Whether postings from here can be searched again, paged or fetched through a job source. */
+export const isJobSource = (source: PostingOrigin): source is JobSource => source !== PostingSource.CLIENT;
 
 /** Where a JSearch key comes from: OpenWeb Ninja directly, or the RapidAPI marketplace. */
 export const JSEARCH_HOSTS = ["openwebninja", "rapidapi"] as const;
@@ -63,7 +70,7 @@ export const EMPTY_QUERY: SearchQuery = {
 
 /** A posting as a source found it, in one shape for every source. */
 export const foundPostingSchema = z.object({
-  source: z.enum(JOB_SOURCES),
+  source: z.enum(POSTING_SOURCES),
   /** The source's own id for it. */
   externalId: z.string().min(1).max(500),
   title: z.string().max(500),
@@ -115,7 +122,9 @@ export type SearchOutcome = { ok: true; postings: ShownPosting[]; next: string |
 /** A search kept with what it found (E14-10), as Find jobs opens it. */
 export type StoredSearch = {
   id: string;
-  source: JobSource;
+  source: PostingOrigin;
+  /** For a CLIENT search: the AI client that added it. */
+  addedBy: string;
   query: SearchQuery;
   /** "today at 14:32", "yesterday at 09:05", "on Thu 1 Oct at 18:20", in the user's time zone. */
   ranAt: string;
@@ -127,7 +136,7 @@ export type StoredSearch = {
 export type PastSearchDay = {
   /** "Today", "Yesterday" or "Thu 1 Oct". */
   day: string;
-  searches: { id: string; source: JobSource; query: SearchQuery; found: number; time: string }[];
+  searches: { id: string; source: PostingOrigin; addedBy: string; query: SearchQuery; found: number; time: string }[];
 };
 
 /** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line. */
@@ -138,7 +147,7 @@ export function describeSearch(query: SearchQuery, countryName: string): string 
 }
 
 /** Identifies a posting across searches. */
-export const postingKey = (posting: { source: JobSource; externalId: string }) => `${posting.source}:${posting.externalId}`;
+export const postingKey = (posting: { source: PostingOrigin; externalId: string }) => `${posting.source}:${posting.externalId}`;
 
 /** A link from a source, kept only when it's a web address, so it can't run script as an href. */
 export function safeLink(value: string | null | undefined): string {
@@ -149,6 +158,35 @@ export function safeLink(value: string | null | undefined): string {
   } catch {
     return "";
   }
+}
+
+/** Lower case, letters and digits only, accents dropped: "Café  GmbH" and "cafe gmbh" are the same. */
+export const normalText = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+/** "(m/w/d)", "(w/m/d)", "(f/m/x)", "(all genders)" and the like, which sites write differently for the same opening. */
+const GENDER_MARK = /\(\s*(?:all genders|[a-z](?:\s*[/|]\s*[a-z]){1,3})\s*\)|\b[mwfd](?:\s*\/\s*[mwfdx]){1,2}\b/giu;
+
+/**
+ * What identifies a job across sources (add_found_jobs leaves out what Dossier
+ * has): its link without tracking parameters, and the same opening as other
+ * sites write it, by company, title without gender marks, and the city alone.
+ * A job without a link or without company and title has fewer keys.
+ */
+export function jobKeys(job: Pick<FoundPosting, "url" | "title" | "company" | "place">): string[] {
+  const keys: string[] = [];
+  const link = linkKey(job.url);
+  if (link) keys.push(`link:${link}`);
+  const company = normalText(job.company);
+  const title = normalText(job.title.replace(GENDER_MARK, " "));
+  const city = normalText(job.place.split(/[,(/·|–]/)[0] ?? "");
+  if (company && title) keys.push(`job:${company}|${title}|${city}`);
+  return keys;
 }
 
 // Query parameters that only say where a click came from.

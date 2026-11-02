@@ -93,6 +93,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     // The jobauto fork's tools cover what the screens do (src/lib/connector/tools/*).
     expect(tools.map((entry) => entry.name).sort()).toEqual([
       "act_on_agent_find",
+      "add_found_jobs",
       "add_match_skill",
       "cancel_task",
       "check_draft",

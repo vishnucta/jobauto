@@ -7,7 +7,7 @@ import { isAiConfigured, isAiUsable } from "@/lib/ai/config";
 import { handOffFoundPosting, handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { fullText } from "@/lib/job-search/find";
-import { foundPostingSchema, JOB_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
+import { foundPostingSchema, POSTING_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
 import { startScoring } from "@/lib/jobs/score-posting";
 import { removeSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { dismissPosting, savePosting, storePosting, unmarkPosting } from "@/lib/postings";
@@ -17,7 +17,7 @@ import { saveSettings } from "@/lib/settings-data";
 // Postings come back from the screen as the search gave them, checked
 // against the posting shape.
 
-const postingRef = z.object({ source: z.enum(JOB_SOURCES), externalId: z.string().min(1).max(500) });
+const postingRef = z.object({ source: z.enum(POSTING_SOURCES), externalId: z.string().min(1).max(500) });
 const searchId = z.string().min(1).max(100);
 
 /** "I understand" under the Bundesagentur für Arbeit's note (#223), for a BA choice made before it, or by DOSSIER_JOBS_SOURCE. */

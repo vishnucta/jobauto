@@ -16,6 +16,7 @@ import {
   safeLink,
   searchHref,
   searchQuerySchema,
+  jobKeys,
   viewFromParams,
   viewHref,
 } from "./search";
@@ -56,6 +57,20 @@ describe("search in the URL", () => {
     expect(searchQuerySchema.parse({ ...EMPTY_QUERY, keywords: " designer ", country: "DE" })).toMatchObject({ keywords: "designer", country: "de" });
     expect(searchQuerySchema.safeParse({ ...EMPTY_QUERY, radiusKm: 30 }).success).toBe(false);
     expect(searchQuerySchema.safeParse({ ...EMPTY_QUERY, country: "deu" }).success).toBe(false);
+  });
+});
+
+describe("job keys (what add_found_jobs leaves out)", () => {
+  it("names a job by its link without tracking, and by company, title without gender marks and city", () => {
+    expect(jobKeys({ url: "https://www.jobs.example/p1?utm_source=x", title: "Product Designer (m/w/d)", company: "Acme GmbH", place: "Berlin, Germany" })).toEqual([
+      "link:jobs.example/p1",
+      "job:acme gmbh|product designer|berlin",
+    ]);
+    expect(jobKeys({ url: "https://other.example/pd", title: "Product  Designer w/m/d", company: "ACME GmbH", place: "Berlin (Mitte)" })[1]).toBe("job:acme gmbh|product designer|berlin");
+    expect(jobKeys({ url: "https://other.example/pd", title: "Senior Analyst (all genders)", company: "Café Müller", place: "" })[1]).toBe("job:cafe muller|senior analyst|");
+    // Without company and title there's only the link; without a link only the opening.
+    expect(jobKeys({ url: "https://jobs.example/p2", title: "Designer", company: "", place: "Berlin" })).toEqual(["link:jobs.example/p2"]);
+    expect(jobKeys({ url: "", title: "Designer", company: "Acme", place: "Berlin" })).toEqual(["job:acme|designer|berlin"]);
   });
 });
 

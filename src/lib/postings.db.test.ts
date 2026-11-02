@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PostingSource } from "@/generated/prisma/enums";
-import { JOB_SOURCES, type FoundPosting } from "@/lib/job-search/search";
+import { JOB_SOURCES, POSTING_SOURCES, type FoundPosting } from "@/lib/job-search/search";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { countPostings, dismissPosting, foundFromPosting, listPostings, postingStates, savePosting, storePosting, unmarkPosting } from "./postings";
@@ -34,8 +34,9 @@ beforeEach(() => resetDatabase(prisma()));
 afterAll(() => prisma().$disconnect());
 
 describe("postings", () => {
-  it("lists the same sources as the schema's enum", () => {
-    expect([...JOB_SOURCES].sort()).toEqual(Object.values(PostingSource).sort());
+  it("lists the same sources as the schema's enum, with CLIENT only as where a posting came from", () => {
+    expect([...POSTING_SOURCES].sort()).toEqual(Object.values(PostingSource).sort());
+    expect([...JOB_SOURCES].sort()).toEqual(Object.values(PostingSource).filter((source) => source !== "CLIENT").sort());
   });
 
   it("saves a posting with everything the screen needs, and reads it back in the same shape", async () => {

@@ -75,8 +75,11 @@ function guardTools(server: McpServer): McpServer {
   return server;
 }
 
-/** Dossier as an MCP server, for one request; `origin` is the address links in answers point to. */
-export function createDossierServer(origin: string): McpServer {
+/**
+ * Dossier as an MCP server, for one request; `origin` is the address links in
+ * answers point to, `clientName` the name the client signed in with.
+ */
+export function createDossierServer(origin: string, clientName = ""): McpServer {
   const linkTo = (path: string) => `${origin}${path}`;
   const server = guardTools(
     new McpServer(
@@ -85,7 +88,8 @@ export function createDossierServer(origin: string): McpServer {
         instructions:
           "Dossier is the user's own job search app: one profile, tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
           "Its tools do what its screens do. " +
-          "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs; score postings yourself and save the scores with save_job_scores, " +
+          "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs; " +
+          "jobs you find yourself on the web go into Find jobs with add_found_jobs, kept apart from the job source's as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
           "or have Dossier's AI score them with score_with_dossier; keep or drop postings with update_postings. " +
           "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
           "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application. " +
@@ -420,7 +424,7 @@ export function createDossierServer(origin: string): McpServer {
     },
   );
 
-  const context: ToolContext = { server, linkTo };
+  const context: ToolContext = { server, linkTo, clientName };
   registerProfileTools(context);
   registerDocumentTools(context);
   registerApplicationTools(context);

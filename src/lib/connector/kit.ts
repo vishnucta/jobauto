@@ -22,6 +22,8 @@ export type ToolContext = {
   server: McpServer;
   /** The app's address for a path, e.g. linkTo("/profile"). */
   linkTo: (path: string) => string;
+  /** The name the client signed in with, e.g. "Claude Code"; "" when unknown. */
+  clientName?: string;
 };
 
 /** An answer: a string as is, anything else as indented JSON. */

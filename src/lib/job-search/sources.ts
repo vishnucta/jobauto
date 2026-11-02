@@ -1,4 +1,4 @@
-import type { JobSource, JSearchHost } from "./search";
+import type { JobSource, JSearchHost, PostingOrigin } from "./search";
 
 /** What Settings → Job search may know about a source's key: never the key itself. "env" means it comes from the environment. */
 export type JobKeyState = "none" | "set" | "unreadable" | "env";
@@ -43,7 +43,7 @@ export type SourceInfo = {
   countries: readonly string[] | null;
 };
 
-export const SOURCE_INFO: Record<JobSource, SourceInfo> = {
+export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
   JSEARCH: {
     name: "JSearch",
     description: "Postings from LinkedIn, Indeed, Glassdoor and company sites, through Google for Jobs.",
@@ -75,7 +75,23 @@ export const SOURCE_INFO: Record<JobSource, SourceInfo> = {
     attributionLink: null,
     countries: ["de"],
   },
+  // Not a source to choose: postings an AI client (Claude, Gemini…) found itself and added through the connector.
+  CLIENT: {
+    name: "AI client",
+    description: "Postings an AI client like Claude or Gemini found on the web and added to Dossier.",
+    tag: "Added through the connector",
+    keyUrl: null,
+    quotaPeriod: null,
+    attribution: null,
+    attributionLink: null,
+    countries: null,
+  },
 };
+
+/** "AI client · Gemini CLI": where a kept search came from, naming the client that added it. */
+export function searchSourceName(source: PostingOrigin, addedBy = ""): string {
+  return source === "CLIENT" && addedBy ? `${SOURCE_INFO.CLIENT.name} · ${addedBy}` : SOURCE_INFO[source].name;
+}
 
 /** Whether a source lists jobs in a country ("de"). */
 export function sourceCovers(source: JobSource, country: string): boolean {
@@ -97,12 +113,12 @@ export const ARBEITSAGENTUR_NOTE =
   "and the BA's terms of use don't allow automated access. You choose this source on your own responsibility, and it can stop working at any time.";
 
 /** A BA posting's own page on arbeitsagentur.de, which its results always link to, even when they have a link of their own. */
-export function arbeitsagenturPage(posting: { source: JobSource; externalId: string }): string | null {
+export function arbeitsagenturPage(posting: { source: PostingOrigin; externalId: string }): string | null {
   return posting.source === "ARBEITSAGENTUR" ? `https://www.arbeitsagentur.de/jobsuche/jobdetail/${encodeURIComponent(posting.externalId)}` : null;
 }
 
 /** Where a posting's attribution links (www.adzuna.de for one of Adzuna's German postings); null when it's plain text. */
-export function attributionHref(source: JobSource, postingUrl: string): string | null {
+export function attributionHref(source: PostingOrigin, postingUrl: string): string | null {
   const link = SOURCE_INFO[source].attributionLink;
   if (!link) return null;
   const host = URL.canParse(postingUrl) ? new URL(postingUrl) : null;

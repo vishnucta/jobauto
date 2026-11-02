@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import { fitBand, type PostingFit } from "@/lib/fit";
 import type { JobView } from "@/lib/jobs/runner";
 import { postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
-import { arbeitsagenturPage, SOURCE_INFO } from "@/lib/job-search/sources";
+import { arbeitsagenturPage, searchSourceName } from "@/lib/job-search/sources";
 
 import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
 import { useStartApplication } from "./use-start-application";
@@ -38,6 +38,9 @@ export type PostingResultsProps = {
 );
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/** "Found by an AI client" on a posting Claude, Gemini… added itself, so Saved shows it apart from the job source's. */
+const foundBy = (posting: FoundPosting) => (posting.source === "CLIENT" ? "Found by an AI client" : "");
 
 /**
  * Postings in a list, and the selected one's whole text beside it, or above
@@ -175,7 +178,7 @@ export function PostingResults(props: PostingResultsProps) {
         <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 text-meta text-muted", mode !== "search" && visible.length === 0 && "hidden")}>
           <span>
             {props.mode === "search"
-              ? `${plural(postings.length, "posting", "postings")} from ${SOURCE_INFO[props.search.source].name}${next ? ", more to come" : ""} · searched ${props.search.ranAt}`
+              ? `${plural(postings.length, "posting", "postings")} from ${searchSourceName(props.search.source, props.search.addedBy)}${next ? ", more to come" : ""} · ${props.search.source === "CLIENT" ? "added" : "searched"} ${props.search.ranAt}`
               : mode === "saved"
                 ? plural(visible.length, "saved posting", "saved postings")
                 : `${plural(visible.length, "dismissed posting", "dismissed postings")}, kept out of your searches`}
@@ -340,7 +343,7 @@ function PostingList({
               <span className="text-meta text-muted">{[posting.company, posting.place, posting.remote ? "Remote" : ""].filter(Boolean).join(" · ")}</span>
               <span className="flex items-center justify-between gap-3">
                 <span className="min-w-0 truncate text-xs text-muted">
-                  {[postedAgo(posting.postedAt, now), posting.via && `via ${posting.via}`, posting.salary].filter(Boolean).join(" · ")}
+                  {[postedAgo(posting.postedAt, now), posting.via && `via ${posting.via}`, foundBy(posting), posting.salary].filter(Boolean).join(" · ")}
                 </span>
                 <SourceAttribution source={posting.source} url={posting.url} placeholder />
               </span>
@@ -482,8 +485,8 @@ function PostingDetail({
           {posting.title || "Untitled posting"}
         </h2>
         <p className="text-sm text-muted">{[posting.company, posting.place, posting.remote ? "Remote" : "", posting.salary].filter(Boolean).join(" · ")}</p>
-        {(ago || posting.via) && (
-          <p className="text-meta text-muted">{[ago && `Posted ${ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago}`, posting.via && `via ${posting.via}`].filter(Boolean).join(" · ")}</p>
+        {(ago || posting.via || foundBy(posting)) && (
+          <p className="text-meta text-muted">{[ago && `Posted ${ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago}`, posting.via && `via ${posting.via}`, foundBy(posting)].filter(Boolean).join(" · ")}</p>
         )}
       </div>
 

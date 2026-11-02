@@ -213,6 +213,76 @@ describe("Find jobs through the Claude connector", () => {
     expect(await tool("update_postings", { search_id: "gone", changes: [{ action: "save", number: 1 }] })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
   });
 
+  it("keeps jobs an AI client found itself as a search of their own, named by the client, and leaves out what Dossier already has", async () => {
+    const job = (title: string, url: string) => ({ title, company: "Acme", place: "Hamburg", url, description: `${title}: Excel, reporting.`, found_on: "LinkedIn", posted: "2026-10-28" });
+    const jsearch = await storeSearch([found("p1", "Product Designer")], new Date("2026-10-20T09:00:00Z"));
+    const added = await tool("add_found_jobs", {
+      client: "Gemini CLI",
+      searched: { keywords: "financial analyst", place: "Hamburg", country: "de" },
+      // The same page twice, once with a tracking parameter, is one posting.
+      jobs: [job("Financial Analyst", "https://jobs.example/fa?utm_source=x"), job("Junior Analyst", "https://jobs.example/ja"), job("Financial Analyst again", "https://jobs.example/fa")],
+    });
+    expect(added.isError).toBe(false);
+    const searchId = added.json.search_id as string;
+    expect(added.json).toMatchObject({
+      searched: "financial analyst · Hamburg, 25 km",
+      source: "AI client · Gemini CLI",
+      added: 2,
+      postings: [
+        { number: 1, title: "Financial Analyst", company: "Acme", place: "Hamburg", posted: "2026-10-28", via: "LinkedIn", url: "https://jobs.example/fa?utm_source=x" },
+        { number: 2, title: "Junior Analyst" },
+      ],
+      skipped: [{ title: "Financial Analyst again", reason: "twice in this list" }],
+      link: `https://dossier.example/jobs?search=${searchId}`,
+    });
+
+    // Listed with the job source's searches, saying who added it, and saved or dismissed like any other.
+    expect((await tool("list_postings", { view: "searches" })).json).toMatchObject({
+      searches: { total: 2, searches: [{ search_id: searchId, source: "AI client · Gemini CLI", found: 2 }, { search_id: jsearch.id, source: "JSearch" }] },
+    });
+    expect((await tool("update_postings", { search_id: searchId, changes: [{ action: "save", number: 1 }, { action: "dismiss", number: 2 }] })).json).toMatchObject({
+      updated: [
+        { number: 1, saved: true },
+        { number: 2, dismissed: true },
+      ],
+    });
+    expect(await prisma().posting.findMany({ where: { source: "CLIENT" }, select: { title: true }, orderBy: { title: "asc" } })).toEqual([{ title: "Financial Analyst" }, { title: "Junior Analyst" }]);
+
+    // Nothing is added twice: what a job source found (by link, or the same opening on another site), what's saved or dismissed, stay out, each with where it is.
+    const again = await tool("add_found_jobs", {
+      searched: { keywords: "analyst" },
+      jobs: [
+        job("Junior Analyst", "https://jobs.example/ja"),
+        { title: "Product Designer", company: "Acme", place: "Berlin", url: "https://jobs.example/p1?ref=mail" },
+        { title: "Product Designer (m/w/d)", company: "Acme", place: "Berlin, Germany", url: "https://other.example/pd" },
+        job("Financial Analyst", "https://jobs.example/fa"),
+        job("Data Analyst", "https://jobs.example/da"),
+      ],
+    });
+    expect(again.json).toMatchObject({
+      source: "AI client · Claude",
+      searched: "analyst",
+      added: 1,
+      postings: [{ number: 1, title: "Data Analyst" }],
+      skipped: [
+        { title: "Junior Analyst", reason: "dismissed before", posting_id: expect.any(String) },
+        { title: "Product Designer", reason: "already found by JSearch", search_id: jsearch.id, number: 1 },
+        { title: "Product Designer (m/w/d)", reason: "already found by JSearch", search_id: jsearch.id, number: 1 },
+        { title: "Financial Analyst", reason: "already saved", posting_id: expect.any(String) },
+      ],
+    });
+
+    // Every one known: nothing is added and no search is kept. add_known adds them anyway, for openings the user says differ.
+    const none = await tool("add_found_jobs", { searched: { keywords: "analyst" }, jobs: [job("Data Analyst", "https://jobs.example/da")] });
+    expect(none.isError).toBe(false);
+    expect(none.json).toMatchObject({ added: 0, skipped: [{ title: "Data Analyst", reason: "already added by Claude", search_id: again.json.search_id, number: 1 }] });
+    expect(none.json.search_id).toBeUndefined();
+    expect((await tool("add_found_jobs", { searched: { keywords: "analyst" }, jobs: [job("Junior Analyst", "https://jobs.example/ja")], add_known: true })).json).toMatchObject({
+      added: 1,
+      postings: [{ number: 1, title: "Junior Analyst", dismissed: true }],
+    });
+  });
+
   it("removes a past search, and keeps the postings saved from it", async () => {
     const search = await storeSearch([found("p1", "Product Designer")]);
     await savePosting(found("p1", "Product Designer"));

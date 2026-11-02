@@ -61,7 +61,7 @@ const posting = (id: string, extra: Partial<ShownPosting> = {}): ShownPosting =>
   ...extra,
 });
 
-const stored = (postings: ShownPosting[], next: string | null = null): StoredSearch => ({ id: "run-1", source: "JSEARCH", query, ranAt: "today at 14:32", postings, next });
+const stored = (postings: ShownPosting[], next: string | null = null): StoredSearch => ({ id: "run-1", source: "JSEARCH", addedBy: "", query, ranAt: "today at 14:32", postings, next });
 
 const screenProps: ComponentProps<typeof JobsScreen> = {
   source: "JSEARCH",
@@ -386,11 +386,12 @@ describe("past searches (E14-10)", () => {
     {
       day: "Today",
       searches: [
-        { id: "s1", source: "JSEARCH" as const, query: { ...query, radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const }, found: 16, time: "14:32" },
-        { id: "s2", source: "JSEARCH" as const, query: { ...query, keywords: "researcher", place: "" }, found: 1, time: "09:05" },
+        { id: "s1", source: "JSEARCH" as const, addedBy: "", query: { ...query, radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const }, found: 16, time: "14:32" },
+        { id: "s2", source: "JSEARCH" as const, addedBy: "", query: { ...query, keywords: "researcher", place: "" }, found: 1, time: "09:05" },
       ],
     },
-    { day: "Mon 28 Sep", searches: [{ id: "s3", source: "ADZUNA" as const, query: { ...query, keywords: "writer" }, found: 0, time: "10:00" }] },
+    { day: "Mon 28 Sep", searches: [{ id: "s3", source: "ADZUNA" as const, addedBy: "", query: { ...query, keywords: "writer" }, found: 0, time: "10:00" }] },
+    { day: "Sun 27 Sep", searches: [{ id: "s4", source: "CLIENT" as const, addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
   ];
 
   it("lists them by day, each opening without asking the source again", () => {
@@ -402,6 +403,11 @@ describe("past searches (E14-10)", () => {
       ["researcher · Germany09:05 · 1 posting · JSearch", "/jobs?search=s2"],
     ]);
     expect(within(screen.getByRole("region", { name: "Mon 28 Sep" })).getByRole("link")).toHaveTextContent("writer · Hamburg, 25 km10:00 · 0 postings · Adzuna");
+  });
+
+  it("names the AI client that added a search, apart from the job sources", () => {
+    renderScreen({ view: "history", history });
+    expect(within(screen.getByRole("region", { name: "Sun 27 Sep" })).getByRole("link")).toHaveTextContent("analyst · Hamburg, 25 km18:20 · 4 postings · AI client · Gemini CLI");
   });
 
   it("removes a search", async () => {

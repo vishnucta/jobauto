@@ -1,20 +1,11 @@
 import { createHash } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { linkKey, type FoundPosting } from "@/lib/job-search/search";
+import { linkKey, normalText, type FoundPosting } from "@/lib/job-search/search";
 
 // The job agent's candidates (E16): postings it found and scored. A dismissed
 // one stays, so the posting never comes back, but keeps only what dedupe
 // needs.
-
-/** Lower case, letters and digits only, accents dropped: "Café  GmbH" and "cafe gmbh" are the same. */
-const normal = (value: string) =>
-  value
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
 
 /**
  * The dedupe key: a hash of the link without tracking parameters, else of
@@ -24,7 +15,7 @@ const normal = (value: string) =>
  */
 export function agentDedupeKey(posting: Pick<FoundPosting, "source" | "externalId" | "url" | "title" | "company" | "place">): string {
   const link = linkKey(posting.url);
-  const facts = [posting.company, posting.title, posting.place].map(normal);
+  const facts = [posting.company, posting.title, posting.place].map(normalText);
   const basis = link ? `link:${link}` : facts.some(Boolean) ? `job:${facts.join("|")}` : `id:${posting.source}:${posting.externalId}`;
   return createHash("sha256").update(basis).digest("hex");
 }

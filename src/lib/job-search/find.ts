@@ -1,9 +1,11 @@
 import "server-only";
 
+import { fetchPosting } from "@/lib/posting-fetch";
+
 import { credentialsFor, loadJobSearchConfig, requestContext } from "./config";
 import { JobSearchError } from "./errors";
 import { postingDetails, searchPostings } from "./index";
-import type { FoundPosting, JobSource, SearchPage, SearchProblem, SearchQuery } from "./search";
+import { isJobSource, type FoundPosting, type JobSource, type SearchPage, type SearchProblem, type SearchQuery } from "./search";
 
 // Asking a job source from Find jobs (E14-6): a page of postings, or what
 // went wrong in words for the screen. Kept searches are in
@@ -36,6 +38,11 @@ export async function askSource(
  */
 export async function fullText(posting: FoundPosting): Promise<string | null> {
   if (posting.complete) return posting.description;
+  // An AI client's posting has no job source to ask: read its own page.
+  if (!isJobSource(posting.source)) {
+    const page = posting.url ? await fetchPosting(posting.url) : null;
+    return page?.ok ? page.text : null;
+  }
   try {
     return await postingDetails(posting.source, credentialsFor(await loadJobSearchConfig(), posting.source), posting, requestContext(posting.source));
   } catch (error) {

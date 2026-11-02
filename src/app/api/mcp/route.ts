@@ -1,6 +1,6 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
-import { connectorSince, mcpUrl, SCOPE, verifyAccessToken } from "@/lib/connector/oauth";
+import { connectorSince, mcpUrl, readClient, SCOPE, verifyAccessToken } from "@/lib/connector/oauth";
 import { createDossierServer } from "@/lib/connector/tools";
 import { publicOrigin } from "@/lib/google/origin";
 import { logServerError } from "@/lib/log";
@@ -12,8 +12,10 @@ import { logServerError } from "@/lib/log";
 // off in Settings, and needs an access token from Dossier's own sign-in
 // (src/lib/connector/oauth.ts); the proxy lets it through without a session.
 
-// The address links in answers point to comes along with the token's details.
-const handler = createMcpHandler(({ authInfo }) => createDossierServer(typeof authInfo?.extra?.origin === "string" ? authInfo.extra.origin : ""), {
+// The address links in answers point to, and the name the client signed in
+// with, come along with the token's details.
+const extraString = (value: unknown) => (typeof value === "string" ? value : "");
+const handler = createMcpHandler(({ authInfo }) => createDossierServer(extraString(authInfo?.extra?.origin), extraString(authInfo?.extra?.client)), {
   onerror: (error) => logServerError("Claude connector", error),
 });
 
@@ -32,7 +34,8 @@ async function handle(request: Request): Promise<Response> {
   const access = await verifyAccessToken(token);
   if (!access) return unauthorized(origin);
   try {
-    return await handler.fetch(request, { authInfo: { token: token!, clientId: access.clientId, scopes: [SCOPE], extra: { origin } } });
+    const client = (await readClient(access.clientId))?.name ?? "";
+    return await handler.fetch(request, { authInfo: { token: token!, clientId: access.clientId, scopes: [SCOPE], extra: { origin, client } } });
   } catch (error) {
     logServerError(`Claude connector ${mcpUrl(origin)}`, error);
     return Response.json({ jsonrpc: "2.0", error: { code: -32603, message: "Dossier couldn't answer that." }, id: null }, { status: 500 });
