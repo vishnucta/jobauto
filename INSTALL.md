@@ -171,7 +171,7 @@ cd jobauto
 powershell -ExecutionPolicy Bypass -File installer\make-bundle.ps1 -Version 2026.11.0
 ```
 
-That writes `dist\jobauto-windows-2026.11.0.zip`, a few MB. Publish it as a release whose tag is the version with a `jobauto-` prefix, which `Update.cmd` compares with the installed `VERSION`:
+That writes `dist\jobauto-windows-2026.11.0.zip`, about 12 MB. Publish it as a release whose tag is the version with a `jobauto-` prefix, which `Update.cmd` compares with the installed `VERSION`:
 
 ```powershell
 git tag -a jobauto-2026.11.0 -m "Windows zip 2026.11.0"
