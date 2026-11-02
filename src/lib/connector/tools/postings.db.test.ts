@@ -98,7 +98,14 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<{
 
 const storeSearch = (postings: unknown[], createdAt?: Date) =>
   prisma().postingSearch.create({
-    data: { source: "JSEARCH", query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, postings: postings as object[], found: postings.length, next: "page:2", createdAt },
+    data: {
+      sources: ["JSEARCH"],
+      query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" },
+      postings: postings as object[],
+      found: postings.length,
+      cursors: { JSEARCH: "page:2" },
+      createdAt,
+    },
   });
 
 describe("Find jobs through the Claude connector", () => {

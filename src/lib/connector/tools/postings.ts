@@ -18,7 +18,7 @@ import {
   type PostingOrigin,
   type ShownPosting,
 } from "@/lib/job-search/search";
-import { searchSourceName, SOURCE_INFO } from "@/lib/job-search/sources";
+import { describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 import { startScoring } from "@/lib/jobs/score-posting";
 import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
 import { dismissPosting, foundFromPosting, listPostings, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
@@ -157,10 +157,11 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         return text({
           search_id: search.id,
           searched: describeSearch(search.query, countryName(search.query.country)),
-          source: searchSourceName(search.source, search.addedBy),
+          source: searchSourcesName(search.sources, search.addedBy),
+          problems: search.problems.length > 0 ? search.problems.map(describeSourceProblem) : undefined,
           ran: search.ranAt,
           found: search.postings.length,
-          more_available: search.next !== null,
+          more_available: search.more,
           postings: search.postings
             .slice(start, start + take)
             .map((posting, index) => ({ ...postingLine(posting, start + index + 1), dismissed: posting.state.dismissed || undefined })),
@@ -172,13 +173,13 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         if (list === "searches") {
           const searches = (await listSearches({ timeZone })).flatMap(({ day, searches }) =>
             searches
-              .filter((search) => fromSource(search.source))
+              .filter((search) => search.sources.some(fromSource))
               .map((search) => ({
                 search_id: search.id,
                 searched: describeSearch(search.query, countryName(search.query.country)),
                 ran: `${day} at ${search.time}`,
                 found: search.found,
-                source: searchSourceName(search.source, search.addedBy),
+                source: searchSourcesName(search.sources, search.addedBy),
               })),
           );
           answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(viewHref("history", origin)) };
@@ -241,7 +242,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       return text({
         search_id: search.id,
         searched: describeSearch(search.query, countryName(search.query.country)),
-        source: searchSourceName(search.source, search.addedBy),
+        source: searchSourcesName(search.sources, search.addedBy),
         added: search.postings.length,
         postings: search.postings.map((posting, index) => ({ ...postingLine(posting, index + 1), dismissed: posting.state.dismissed || undefined })),
         skipped: leftOut.length > 0 ? leftOut : undefined,

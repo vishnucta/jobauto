@@ -48,6 +48,7 @@ export function postingLine(posting: ShownPosting | FoundPosting, number: number
     salary: posting.salary || undefined,
     posted: posting.postedAt?.slice(0, 10),
     via: posting.via || undefined,
+    also_on: posting.alsoOn?.length ? posting.alsoOn.map((source) => source.toLowerCase()) : undefined,
     url: posting.url || undefined,
     saved: state?.saved || undefined,
     applied: state?.applicationId ? true : undefined,

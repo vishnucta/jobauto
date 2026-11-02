@@ -18,9 +18,12 @@ import {
   searchQuerySchema,
   jobKeys,
   sourceFilterFromParams,
+  uniquePostings,
   viewFromParams,
   viewHref,
+  type FoundPosting,
 } from "./search";
+import { describeSourceProblem, searchSourcesName } from "./sources";
 
 describe("search in the URL", () => {
   it("round-trips a search", () => {
@@ -223,5 +226,65 @@ describe("cache", () => {
     expect(cached("k0", 1)).toBeUndefined();
     expect(cached("k1", 1)).toBe(1);
     expect(cached("k200", 1)).toBe(200);
+  });
+});
+
+describe("uniquePostings: one posting per job across sources", () => {
+  const found = (source: "JSEARCH" | "SERPAPI" | "ADZUNA", externalId: string, extra: Partial<FoundPosting> = {}): FoundPosting => ({
+    source,
+    externalId,
+    title: "Financial Analyst (m/w/d)",
+    company: "Ledgerly",
+    place: "Hamburg, Germany",
+    remote: null,
+    salary: "",
+    postedAt: null,
+    url: "",
+    via: "",
+    description: "The whole posting.",
+    complete: true,
+    ...extra,
+  });
+
+  it("keeps the same opening once, preferring the one with its whole text, and notes the other sources on it", () => {
+    const merged = uniquePostings([
+      found("ADZUNA", "a1", { description: "The start…", complete: false, url: "https://www.adzuna.de/land/ad/1" }),
+      // The same job by company, title (gender marks aside) and city…
+      found("JSEARCH", "j1", { title: "Financial Analyst (w/m/d)", url: "https://careers.ledgerly.example/jobs/42" }),
+      // …and by its link, tracking aside.
+      found("SERPAPI", "s1", { url: "https://careers.ledgerly.example/jobs/42?utm_source=google_jobs_apply" }),
+      found("SERPAPI", "s2", { title: "Controller", company: "Other GmbH", url: "https://other.example/2" }),
+    ]);
+    expect(merged.map((posting) => [posting.source, posting.externalId, posting.alsoOn])).toEqual([
+      ["JSEARCH", "j1", ["ADZUNA", "SERPAPI"]],
+      ["SERPAPI", "s2", undefined],
+    ]);
+    expect(merged[0].complete).toBe(true);
+  });
+
+  it("leaves out jobs a kept search already holds, by any key", () => {
+    expect(uniquePostings([found("JSEARCH", "j1")], ["JSEARCH:j1"])).toEqual([]);
+    expect(uniquePostings([found("SERPAPI", "s9", { url: "https://x.example/9" })], ["job:ledgerly|financial analyst|hamburg"])).toEqual([]);
+    expect(uniquePostings([found("SERPAPI", "s9", { url: "https://x.example/9" })], ["link:x.example/9"])).toEqual([]);
+    expect(uniquePostings([found("SERPAPI", "s9", { title: "Other", url: "https://x.example/10" })], ["link:x.example/9"])).toHaveLength(1);
+  });
+});
+
+describe("naming a search's sources", () => {
+  it("joins job sources, and names the AI client that added a search", () => {
+    expect(searchSourcesName(["JSEARCH"])).toBe("JSearch");
+    expect(searchSourcesName(["JSEARCH", "SERPAPI"])).toBe("JSearch and SerpApi");
+    expect(searchSourcesName(["JSEARCH", "SERPAPI", "ADZUNA"])).toBe("JSearch, SerpApi and Adzuna");
+    expect(searchSourcesName(["CLIENT"], "Gemini CLI")).toBe("AI client · Gemini CLI");
+    expect(searchSourcesName(["CLIENT"])).toBe("AI client");
+  });
+
+  it("says who stood in for a source that didn't answer", () => {
+    expect(describeSourceProblem({ source: "JSEARCH", problem: "quota", message: "You've used up your JSearch searches for this month.", fallback: "SERPAPI" })).toBe(
+      "You've used up your JSearch searches for this month. Searched SerpApi instead.",
+    );
+    expect(describeSourceProblem({ source: "ADZUNA", problem: "no-key", message: "Add your Adzuna app ID and key in Settings → Job search first." })).toBe(
+      "Add your Adzuna app ID and key in Settings → Job search first.",
+    );
   });
 });

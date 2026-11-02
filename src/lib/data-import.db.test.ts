@@ -149,19 +149,30 @@ describe("importExport (E10-6)", () => {
 
   it("restores past searches with what they found (E14-10)", async () => {
     await prisma().postingSearch.create({
-      data: { source: "JSEARCH", query: { keywords: "designer" }, postings: [{ externalId: "job-1" }], found: 1, next: "cursor:2", createdAt: now },
+      data: { sources: ["JSEARCH", "SERPAPI"], query: { keywords: "designer" }, postings: [{ externalId: "job-1" }], found: 1, cursors: { JSEARCH: "cursor:2" }, createdAt: now },
     });
     const file = await asFile();
     expect(file.searches).toHaveLength(1);
     await prisma().postingSearch.deleteMany();
     await importExport(prisma(), file);
     expect(await prisma().postingSearch.findFirstOrThrow()).toMatchObject({
+      sources: ["JSEARCH", "SERPAPI"],
       query: { keywords: "designer" },
       postings: [{ externalId: "job-1" }],
       found: 1,
-      next: "cursor:2",
+      cursors: { JSEARCH: "cursor:2" },
+      problems: [],
       createdAt: now,
     });
+
+    // A file from before searches of several sources: one source and its next page.
+    await prisma().postingSearch.deleteMany();
+    const { sources, cursors, problems, ...older } = file.searches[0];
+    void sources;
+    void cursors;
+    void problems;
+    await importExport(prisma(), { ...file, searches: [{ ...older, source: "JSEARCH", next: "cursor:9" }] });
+    expect(await prisma().postingSearch.findFirstOrThrow()).toMatchObject({ sources: ["JSEARCH"], cursors: { JSEARCH: "cursor:9" }, problems: [] });
   });
 
   it("restores the job agent's candidates and drafts, so what it saw stays seen (E16)", async () => {

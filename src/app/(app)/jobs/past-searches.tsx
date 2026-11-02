@@ -8,7 +8,7 @@ import { toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import type { Country } from "@/lib/job-search/countries";
 import { describeSearch, searchRunHref, type PastSearchDay } from "@/lib/job-search/search";
-import { searchSourceName } from "@/lib/job-search/sources";
+import { searchSourcesName } from "@/lib/job-search/sources";
 
 import { removeJobSearch } from "./actions";
 
@@ -67,7 +67,7 @@ export function PastSearches({
                   <Link href={searchRunHref(search.id)} className="flex min-w-0 flex-col gap-0.5 text-ink hover:text-ink">
                     <span className="truncate text-field font-medium">{what}</span>
                     <span className="text-meta text-muted">
-                      {search.time} · {search.found === 1 ? "1 posting" : `${search.found} postings`} · {searchSourceName(search.source, search.addedBy)}
+                      {search.time} · {search.found === 1 ? "1 posting" : `${search.found} postings`} · {searchSourcesName(search.sources, search.addedBy)}
                     </span>
                   </Link>
                   <Button variant="text" size="sm" aria-label={`Remove the search “${what}” from ${search.time}`} onClick={() => void remove(search.id)}>

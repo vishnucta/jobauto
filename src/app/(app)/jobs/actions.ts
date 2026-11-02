@@ -7,7 +7,7 @@ import { isAiConfigured, isAiUsable } from "@/lib/ai/config";
 import { handOffFoundPosting, handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { fullText } from "@/lib/job-search/find";
-import { foundPostingSchema, POSTING_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
+import { foundPostingSchema, JOB_SOURCES, POSTING_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
 import { startScoring } from "@/lib/jobs/score-posting";
 import { removeSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { dismissPosting, savePosting, storePosting, unmarkPosting } from "@/lib/postings";
@@ -28,8 +28,11 @@ export const acceptArbeitsagenturNote = action(z.object({}), async () => {
   return null;
 });
 
-/** "Search": asks the chosen source and keeps the search with what it found; gives its id, or what went wrong. */
-export const runJobSearch = action(z.object({ query: searchQuerySchema }), ({ query }) => runSearch(query));
+/** "Search": asks the ticked sources and keeps the search with what they found; gives its id, or what went wrong. */
+export const runJobSearch = action(
+  z.object({ query: searchQuerySchema, sources: z.array(z.enum(JOB_SOURCES)).min(1, "Choose at least one source.") }),
+  ({ query, sources }) => runSearch(query, sources),
+);
 
 /** "Show more": the next page, added to the kept search. */
 export const showMorePostings = action(z.object({ searchId }), ({ searchId }) => showMoreFor(searchId));

@@ -68,7 +68,7 @@ describe("deleteEverything (E10-8)", () => {
   it("wipes all user data, the backups and the apply assistant's files, keeps the built-in themes, and lands on the dashboard", async () => {
     // A saved posting from Find jobs goes too (E14-9).
     await prisma().posting.create({ data: { source: "JSEARCH", externalId: "job-1", savedAt: new Date() } });
-    await prisma().postingSearch.create({ data: { source: "JSEARCH", query: {}, postings: [] } });
+    await prisma().postingSearch.create({ data: { sources: ["JSEARCH"], query: {}, postings: [] } });
     // And what the job agent found (E16).
     await prisma().agentCandidate.create({ data: { source: "JSEARCH", externalId: "job-1", dedupeKey: "key-1" } });
     await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "job-1", score: 80, reasons: [], redFlags: [], scoredWith: "score-posting@1" } });

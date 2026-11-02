@@ -1,28 +1,35 @@
 import "server-only";
 
+import { z } from "zod";
+
 import type { Prisma } from "@/generated/prisma/client";
 import { daysBetween, formatDay, formatTime } from "@/lib/dates";
-import { askSource } from "@/lib/job-search/find";
+import { loadJobSearchConfig } from "@/lib/job-search/config";
+import { askSources } from "@/lib/job-search/find";
 import {
+  cursorsSchema,
   EMPTY_QUERY,
   foundPostingSchema,
-  isJobSource,
+  JOB_SOURCES,
   jobKeys,
   postingKey,
   searchQuerySchema,
+  sourceProblemSchema,
   type FoundPosting,
+  type JobSource,
   type PastSearchDay,
   type PostingOrigin,
   type SearchProblem,
   type SearchQuery,
   type ShownPosting,
+  type SourceProblem,
   type StoredSearch,
 } from "@/lib/job-search/search";
 import { postingStates } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 
 // Searches kept with what they found (E14-10), until the user removes them,
-// so going back to one costs no searches from the source's plan.
+// so going back to one costs no searches from the sources' plans.
 
 /** The postings column, read back; a posting that no longer fits the shape is left out. */
 function postingsOf(value: Prisma.JsonValue): FoundPosting[] {
@@ -34,6 +41,9 @@ function postingsOf(value: Prisma.JsonValue): FoundPosting[] {
 }
 
 const queryOf = (value: Prisma.JsonValue): SearchQuery => searchQuerySchema.catch(EMPTY_QUERY).parse(value);
+const cursorsOf = (value: Prisma.JsonValue) => cursorsSchema.catch({}).parse(value);
+const problemsOf = (value: Prisma.JsonValue): SourceProblem[] => z.array(sourceProblemSchema).catch([]).parse(value);
+const hasMore = (value: Prisma.JsonValue) => Object.keys(cursorsOf(value)).length > 0;
 
 /** Postings with where each stands for the user now. */
 async function withStates(postings: FoundPosting[]): Promise<ShownPosting[]> {
@@ -48,15 +58,21 @@ function ranAtLabel(date: Date, timeZone?: string, now = new Date()): string {
   return `${day} at ${formatTime(date, timeZone)}`;
 }
 
-/** Runs a search on the chosen source and keeps it with its first page. */
-export async function runSearch(query: SearchQuery): Promise<{ ok: true; id: string } | SearchProblem> {
-  const answer = await askSource(query);
+/** The source chosen in Settings, as the one to search when none are given; none while job search is off. */
+async function defaultSources(): Promise<JobSource[]> {
+  const { source } = await loadJobSearchConfig();
+  return source ? [source] : [];
+}
+
+/** Runs a search on `sources` (the one chosen in Settings, unless given) and keeps it with its first page and what went wrong with any source. */
+export async function runSearch(query: SearchQuery, sources?: readonly JobSource[]): Promise<{ ok: true; id: string; problems: SourceProblem[] } | SearchProblem> {
+  const answer = await askSources(query, sources ?? (await defaultSources()));
   if (!answer.ok) return answer;
   const search = await prisma.postingSearch.create({
-    data: { source: answer.source, query, postings: answer.postings, found: answer.postings.length, next: answer.next },
+    data: { sources: answer.sources, query, postings: answer.postings, found: answer.postings.length, cursors: answer.cursors, problems: answer.problems },
     select: { id: true },
   });
-  return { ok: true, id: search.id };
+  return { ok: true, id: search.id, problems: answer.problems };
 }
 
 /** Where Dossier already has a job, so an AI client's add leaves it out: the most telling place when it's in several. */
@@ -76,7 +92,7 @@ export type KnownJob =
 export async function knownJobs(): Promise<Map<string, KnownJob>> {
   const [candidates, searches, postings, applications] = await Promise.all([
     prisma.agentCandidate.findMany({ select: { url: true, title: true, company: true, place: true } }),
-    prisma.postingSearch.findMany({ select: { id: true, source: true, addedBy: true, postings: true }, orderBy: { createdAt: "asc" } }),
+    prisma.postingSearch.findMany({ select: { id: true, addedBy: true, postings: true }, orderBy: { createdAt: "asc" } }),
     prisma.posting.findMany({
       where: { OR: [{ savedAt: { not: null } }, { dismissedAt: { not: null } }] },
       select: { id: true, url: true, title: true, company: true, place: true, savedAt: true, dismissedAt: true },
@@ -90,7 +106,7 @@ export async function knownJobs(): Promise<Map<string, KnownJob>> {
   // The least telling first: a later note for the same key wins.
   for (const candidate of candidates) note(candidate, { where: "agent" });
   for (const search of searches) {
-    postingsOf(search.postings).forEach((posting, index) => note(posting, { where: "search", searchId: search.id, number: index + 1, source: search.source, addedBy: search.addedBy }));
+    postingsOf(search.postings).forEach((posting, index) => note(posting, { where: "search", searchId: search.id, number: index + 1, source: posting.source, addedBy: search.addedBy }));
   }
   for (const posting of postings) if (posting.dismissedAt) note(posting, { where: "dismissed", postingId: posting.id });
   for (const posting of postings) if (posting.savedAt) note(posting, { where: "saved", postingId: posting.id });
@@ -138,7 +154,7 @@ export async function addClientSearch({
   }
   if (added.length === 0) return { id: null, added, skipped };
   const search = await prisma.postingSearch.create({
-    data: { source: "CLIENT", addedBy, query, postings: added, found: added.length, next: null },
+    data: { sources: ["CLIENT"], addedBy, query, postings: added, found: added.length },
     select: { id: true },
   });
   return { id: search.id, added, skipped };
@@ -152,34 +168,35 @@ export async function loadSearch(id?: string, { timeZone, now = new Date() }: { 
   if (!search) return null;
   return {
     id: search.id,
-    source: search.source,
+    sources: search.sources,
     addedBy: search.addedBy,
     query: queryOf(search.query),
     ranAt: ranAtLabel(search.createdAt, timeZone, now),
     postings: await withStates(postingsOf(search.postings)),
-    next: search.next,
+    more: hasMore(search.cursors),
+    problems: problemsOf(search.problems),
   };
 }
 
-/** "Show more": the next page from the search's own source, added to the kept search. */
-export async function showMoreFor(id: string): Promise<{ ok: true; postings: ShownPosting[]; next: string | null } | SearchProblem> {
+/** "Show more": the next page from each of the search's own sources that has one, added to the kept search without jobs it already holds. */
+export async function showMoreFor(id: string): Promise<{ ok: true; postings: ShownPosting[]; more: boolean; problems: SourceProblem[] } | SearchProblem> {
   const search = await prisma.postingSearch.findUnique({ where: { id } });
   if (!search) return { ok: false, problem: "changed", message: "That search is no longer kept. Search again." };
-  if (!search.next || !isJobSource(search.source)) return { ok: true, postings: [], next: null };
-  const answer = await askSource(queryOf(search.query), { source: search.source, next: search.next });
-  if (!answer.ok) return answer;
+  const cursors = cursorsOf(search.cursors);
+  const sources = JOB_SOURCES.filter((source) => cursors[source] !== undefined);
+  if (sources.length === 0) return { ok: true, postings: [], more: false, problems: [] };
   const kept = postingsOf(search.postings);
-  const seen = new Set(kept.map(postingKey));
-  const added = answer.postings.filter((posting) => !seen.has(postingKey(posting)));
-  const postings = [...kept, ...added];
-  await prisma.postingSearch.update({ where: { id }, data: { postings, found: postings.length, next: answer.next } });
-  return { ok: true, postings: await withStates(added), next: answer.next };
+  const answer = await askSources(queryOf(search.query), sources, { cursors, known: kept.flatMap((posting) => [postingKey(posting), ...jobKeys(posting)]) });
+  if (!answer.ok) return answer;
+  const postings = [...kept, ...answer.postings];
+  await prisma.postingSearch.update({ where: { id }, data: { postings, found: postings.length, cursors: answer.cursors } });
+  return { ok: true, postings: await withStates(answer.postings), more: Object.keys(answer.cursors).length > 0, problems: answer.problems };
 }
 
 /** Every kept search, newest first, grouped by the day it ran in the user's time zone. */
 export async function listSearches({ timeZone, now = new Date() }: { timeZone?: string; now?: Date } = {}): Promise<PastSearchDay[]> {
   const searches = await prisma.postingSearch.findMany({
-    select: { id: true, source: true, addedBy: true, query: true, found: true, createdAt: true },
+    select: { id: true, sources: true, addedBy: true, query: true, found: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
   const days: PastSearchDay[] = [];
@@ -187,7 +204,7 @@ export async function listSearches({ timeZone, now = new Date() }: { timeZone?: 
     const ago = daysBetween(search.createdAt, now, timeZone);
     const day = ago === 0 ? "Today" : ago === 1 ? "Yesterday" : formatDay(search.createdAt, timeZone, now);
     if (days.at(-1)?.day !== day) days.push({ day, searches: [] });
-    days.at(-1)!.searches.push({ id: search.id, source: search.source, addedBy: search.addedBy, query: queryOf(search.query), found: search.found, time: formatTime(search.createdAt, timeZone) });
+    days.at(-1)!.searches.push({ id: search.id, sources: search.sources, addedBy: search.addedBy, query: queryOf(search.query), found: search.found, time: formatTime(search.createdAt, timeZone) });
   }
   return days;
 }

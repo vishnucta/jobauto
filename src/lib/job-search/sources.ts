@@ -1,4 +1,4 @@
-import type { JobSource, JSearchHost, PostingOrigin } from "./search";
+import type { JobSource, JSearchHost, PostingOrigin, SourceProblem } from "./search";
 
 /** What Settings → Job search may know about a source's key: never the key itself. "env" means it comes from the environment. */
 export type JobKeyState = "none" | "set" | "unreadable" | "env";
@@ -99,9 +99,16 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
   },
 };
 
-/** "AI client · Gemini CLI": where a kept search came from, naming the client that added it. */
-export function searchSourceName(source: PostingOrigin, addedBy = ""): string {
-  return source === "CLIENT" && addedBy ? `${SOURCE_INFO.CLIENT.name} · ${addedBy}` : SOURCE_INFO[source].name;
+/** "JSearch and SerpApi", or "AI client · Gemini CLI": where a kept search's postings came from, naming the client that added them. */
+export function searchSourcesName(sources: readonly PostingOrigin[], addedBy = ""): string {
+  if (sources.includes("CLIENT")) return addedBy ? `${SOURCE_INFO.CLIENT.name} · ${addedBy}` : SOURCE_INFO.CLIENT.name;
+  const names = sources.map((source) => SOURCE_INFO[source].name);
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/** "You've used up your JSearch searches for this month. … Searched SerpApi instead.": a source's problem in a search that went on. */
+export function describeSourceProblem(problem: SourceProblem): string {
+  return problem.fallback ? `${problem.message} Searched ${SOURCE_INFO[problem.fallback].name} instead.` : problem.message;
 }
 
 /** Whether a source lists jobs in a country ("de"). */

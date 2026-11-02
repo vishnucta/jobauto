@@ -303,14 +303,21 @@ const posting = z.object({
   updatedAt: date,
 });
 
-/** A search kept with what it found (E14-10); its search and postings are checked when it's opened. */
+/**
+ * A search kept with what it found (E14-10); its search and postings are
+ * checked when it's opened. Files from before searches of several sources
+ * have one `source` and its `next` page, read into `sources` and `cursors`.
+ */
 const postingSearch = z.object({
   id: text,
-  source: z.enum(PostingSource),
+  sources: z.array(z.enum(PostingSource)).optional(),
+  source: z.enum(PostingSource).optional(),
   query: z.unknown(),
   postings: z.unknown(),
   found: int,
-  next: text.nullable(),
+  cursors: z.unknown().optional(),
+  problems: z.unknown().optional(),
+  next: text.nullable().optional(),
   createdAt: date,
   updatedAt: date,
 });

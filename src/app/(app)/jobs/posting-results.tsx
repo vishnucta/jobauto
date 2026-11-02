@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import { fitBand, type PostingFit } from "@/lib/fit";
 import type { JobView } from "@/lib/jobs/runner";
 import { postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
-import { arbeitsagenturPage, searchSourceName } from "@/lib/job-search/sources";
+import { arbeitsagenturPage, describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 
 import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
 import { useStartApplication } from "./use-start-application";
@@ -47,6 +47,9 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 /** "Found by an AI client" on a posting Claude, Gemini… added itself, so Saved shows it apart from the job source's. */
 const foundBy = (posting: FoundPosting) => (posting.source === "CLIENT" ? "Found by an AI client" : "");
 
+/** "Also on SerpApi": the other sources a search of several found the same job on. */
+const alsoOn = (posting: FoundPosting) => (posting.alsoOn?.length ? `Also on ${posting.alsoOn.map((source) => SOURCE_INFO[source].name).join(" and ")}` : "");
+
 /**
  * Postings in a list, and the selected one's whole text beside it, or above
  * it on narrow windows: what a kept search found (E14-6, E14-10), with
@@ -56,7 +59,7 @@ const foundBy = (posting: FoundPosting) => (posting.source === "CLIENT" ? "Found
 export function PostingResults(props: PostingResultsProps) {
   const { mode } = props;
   const [postings, setPostings] = useState(mode === "search" ? props.search.postings : props.postings);
-  const [next, setNext] = useState(mode === "search" ? props.search.next : null);
+  const [more, setMore] = useState(mode === "search" ? props.search.more : false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const inView = ({ state }: ShownPosting) => (mode === "saved" ? state.saved : mode === "dismissed" ? state.dismissed : showDismissed || !state.dismissed);
@@ -153,7 +156,7 @@ export function PostingResults(props: PostingResultsProps) {
   };
 
   const showMore = async () => {
-    if (props.mode !== "search" || !next || loadingMore) return;
+    if (props.mode !== "search" || !more || loadingMore) return;
     setLoadingMore(true);
     const result = await showMorePostings({ searchId: props.search.id });
     setLoadingMore(false);
@@ -161,7 +164,8 @@ export function PostingResults(props: PostingResultsProps) {
     if (!result.data.ok) return void toast(result.data.message);
     const seen = new Set(postings.map(postingKey));
     setPostings([...postings, ...result.data.postings.filter((posting) => !seen.has(postingKey(posting)))]);
-    setNext(result.data.next);
+    setMore(result.data.more);
+    for (const problem of result.data.problems) toast(describeSourceProblem(problem));
   };
 
   const searched = props.mode === "search" ? props.search.query : null;
@@ -182,10 +186,22 @@ export function PostingResults(props: PostingResultsProps) {
         jobId ? <ScoreWatcher key={jobId} jobId={jobId} onChange={(job) => scoringChanged(key, job)} /> : null,
       )}
       <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-3">
+        {props.mode === "search" && props.search.problems.length > 0 && (
+          <div role="note" className="flex flex-col gap-1 rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
+            {props.search.problems.map((problem) => (
+              <p key={problem.source}>{describeSourceProblem(problem)}</p>
+            ))}
+            {props.search.problems.some((problem) => problem.problem === "no-key" || problem.problem === "key" || problem.problem === "not-accepted") && (
+              <Link href="/settings?section=jobs" className="self-start font-medium underline underline-offset-2">
+                Settings → Job search
+              </Link>
+            )}
+          </div>
+        )}
         <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 text-meta text-muted", mode !== "search" && visible.length === 0 && "hidden")}>
           <span>
             {props.mode === "search"
-              ? `${plural(postings.length, "posting", "postings")} from ${searchSourceName(props.search.source, props.search.addedBy)}${next ? ", more to come" : ""} · ${props.search.source === "CLIENT" ? "added" : "searched"} ${props.search.ranAt}`
+              ? `${plural(postings.length, "posting", "postings")} from ${searchSourcesName(props.search.sources, props.search.addedBy)}${more ? ", more to come" : ""} · ${props.search.sources.includes("CLIENT") ? "added" : "searched"} ${props.search.ranAt}`
               : mode === "saved"
                 ? plural(visible.length, "saved posting", "saved postings")
                 : `${plural(visible.length, "dismissed posting", "dismissed postings")}, kept out of your searches`}
@@ -225,7 +241,7 @@ export function PostingResults(props: PostingResultsProps) {
           />
         )}
 
-        {next && (
+        {more && (
           <Button variant="secondary" className="self-start" onClick={() => void showMore()} aria-disabled={loadingMore || undefined}>
             {loadingMore ? "Loading more…" : "Show more"}
           </Button>
@@ -350,7 +366,7 @@ function PostingList({
               <span className="text-meta text-muted">{[posting.company, posting.place, posting.remote ? "Remote" : ""].filter(Boolean).join(" · ")}</span>
               <span className="flex items-center justify-between gap-3">
                 <span className="min-w-0 truncate text-xs text-muted">
-                  {[postedAgo(posting.postedAt, now), posting.via && `via ${posting.via}`, foundBy(posting), posting.salary].filter(Boolean).join(" · ")}
+                  {[postedAgo(posting.postedAt, now), posting.via && `via ${posting.via}`, foundBy(posting), alsoOn(posting), posting.salary].filter(Boolean).join(" · ")}
                 </span>
                 <SourceAttribution source={posting.source} url={posting.url} placeholder />
               </span>
@@ -492,8 +508,8 @@ function PostingDetail({
           {posting.title || "Untitled posting"}
         </h2>
         <p className="text-sm text-muted">{[posting.company, posting.place, posting.remote ? "Remote" : "", posting.salary].filter(Boolean).join(" · ")}</p>
-        {(ago || posting.via || foundBy(posting)) && (
-          <p className="text-meta text-muted">{[ago && `Posted ${ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago}`, posting.via && `via ${posting.via}`, foundBy(posting)].filter(Boolean).join(" · ")}</p>
+        {(ago || posting.via || foundBy(posting) || alsoOn(posting)) && (
+          <p className="text-meta text-muted">{[ago && `Posted ${ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago}`, posting.via && `via ${posting.via}`, foundBy(posting), alsoOn(posting)].filter(Boolean).join(" · ")}</p>
         )}
       </div>
 

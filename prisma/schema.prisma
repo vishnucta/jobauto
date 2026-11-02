@@ -756,20 +756,23 @@ model PostingScore {
 /// A search on Find jobs, kept with what it found until the user removes it
 /// (E14-10), so going back to it costs no searches from the source's plan.
 model PostingSearch {
-  id        String        @id @default(cuid())
-  source    PostingSource
+  id        String          @id @default(cuid())
+  /// The sources that answered, in the order Settings lists them; [CLIENT] for an AI client's.
+  sources   PostingSource[] @default([])
   /// The search as asked (searchQuerySchema in src/lib/job-search/search.ts).
   query     Json
   /// The postings found, in order (foundPostingSchema[]); "Show more" adds to them.
   postings  Json
   /// How many postings it holds, for the Past searches list.
-  found     Int           @default(0)
-  /// What to ask the source for the next page; null on the last one.
-  next      String?
+  found     Int             @default(0)
+  /// What to ask each source for its next page, by source (cursorsSchema); a source on its last page is left out.
+  cursors   Json            @default("{}")
+  /// The sources that didn't answer, and who stood in for them (sourceProblemSchema[]).
+  problems  Json            @default("[]")
   /// For a CLIENT search: the AI client that added it, e.g. "Gemini CLI".
-  addedBy   String        @default("")
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  addedBy   String          @default("")
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@index([createdAt])
 }

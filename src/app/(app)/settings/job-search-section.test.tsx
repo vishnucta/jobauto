@@ -163,3 +163,23 @@ describe("JobSearchSection", () => {
     expect(await screen.findByText("Something went wrong on the server. Please try again.")).toBeInTheDocument();
   });
 });
+
+describe("each tile says when its key is kept", () => {
+  it("marks the sources whose key is saved or from the server, and the Arbeitsagentur once its note is accepted", () => {
+    render(
+      <JobSearchSection
+        initial={withSource({
+          source: "JSEARCH",
+          jsearch: { host: "openwebninja", keyState: "set" },
+          serpapi: { keyState: "env" },
+          adzuna: { appId: "app-1", keyState: "none" },
+          arbeitsagentur: { offered: true, acceptedAt: ACCEPTED },
+        })}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "JSearch" })).toHaveAccessibleDescription(/Key saved/);
+    expect(screen.getByRole("radio", { name: "SerpApi" })).toHaveAccessibleDescription(/Key from the server/);
+    expect(screen.getByRole("radio", { name: "Adzuna" })).not.toHaveAccessibleDescription(/Key saved|Key from the server/);
+    expect(screen.getByRole("radio", { name: "Bundesagentur für Arbeit" })).toHaveAccessibleDescription(/Note accepted/);
+  });
+});

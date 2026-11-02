@@ -92,8 +92,14 @@ export const foundPostingSchema = z.object({
   description: z.string().max(100_000),
   /** False while the description is only the start of the posting. */
   complete: z.boolean(),
+  /** Other sources the same job was found on, in a search of several (uniquePostings). */
+  alsoOn: z.array(z.enum(POSTING_SOURCES)).optional(),
 });
 export type FoundPosting = z.output<typeof foundPostingSchema>;
+
+/** What to ask each source for its next page; a source on its last page is left out. */
+export const cursorsSchema = z.partialRecord(z.enum(JOB_SOURCES), z.string());
+export type Cursors = z.output<typeof cursorsSchema>;
 
 /** A page of results, and what to ask for the next page (null on the last one). */
 export type SearchPage = { postings: FoundPosting[]; next: string | null };
@@ -113,8 +119,23 @@ export type PostingState = {
 /** A posting as Find jobs shows it. */
 export type ShownPosting = FoundPosting & { state: PostingState };
 
+/** What can go wrong with a search, or with one source in it. */
+export const SEARCH_PROBLEMS = ["off", "not-accepted", "no-country", "no-key", "key", "quota", "country", "unavailable", "changed"] as const;
+
 /** What went wrong with a search, in words for the screen (E14-6). */
-export type SearchProblem = { ok: false; problem: "off" | "not-accepted" | "no-country" | "no-key" | "key" | "quota" | "country" | "unavailable" | "changed"; message: string };
+export type SearchProblem = { ok: false; problem: (typeof SEARCH_PROBLEMS)[number]; message: string };
+
+/** A source that didn't answer in a search that went on without it, and the ready source that stood in for it, when one did. */
+export const sourceProblemSchema = z.object({
+  source: z.enum(JOB_SOURCES),
+  problem: z.enum(SEARCH_PROBLEMS),
+  message: z.string(),
+  fallback: z.enum(JOB_SOURCES).optional(),
+});
+export type SourceProblem = z.output<typeof sourceProblemSchema>;
+
+/** A source as the search form's Source list offers it: ready, or why it can't be searched now. */
+export type SourceState = { source: JobSource; problem: string | null };
 
 /** What a search gives the screen: postings, or what went wrong. */
 export type SearchOutcome = { ok: true; postings: ShownPosting[]; next: string | null } | SearchProblem;
@@ -122,21 +143,25 @@ export type SearchOutcome = { ok: true; postings: ShownPosting[]; next: string |
 /** A search kept with what it found (E14-10), as Find jobs opens it. */
 export type StoredSearch = {
   id: string;
-  source: PostingOrigin;
+  /** The sources that answered, in Settings' order; [CLIENT] for an AI client's. */
+  sources: PostingOrigin[];
   /** For a CLIENT search: the AI client that added it. */
   addedBy: string;
   query: SearchQuery;
   /** "today at 14:32", "yesterday at 09:05", "on Thu 1 Oct at 18:20", in the user's time zone. */
   ranAt: string;
   postings: ShownPosting[];
-  next: string | null;
+  /** Whether a source still has a next page. */
+  more: boolean;
+  /** The sources that didn't answer, and who stood in for them. */
+  problems: SourceProblem[];
 };
 
 /** A search in the Past searches list, grouped by the day it ran. */
 export type PastSearchDay = {
   /** "Today", "Yesterday" or "Thu 1 Oct". */
   day: string;
-  searches: { id: string; source: PostingOrigin; addedBy: string; query: SearchQuery; found: number; time: string }[];
+  searches: { id: string; sources: PostingOrigin[]; addedBy: string; query: SearchQuery; found: number; time: string }[];
 };
 
 /** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line. */
@@ -206,6 +231,35 @@ export function linkKey(link: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * One posting per job across sources: the same opening from JSearch and
+ * SerpApi, or the same link twice, is kept once, by its keys (jobKeys and
+ * postingKey), preferring the one with its whole text and noting the other
+ * sources on it (alsoOn). Jobs whose keys are in `known` are left out: what a
+ * kept search already holds when a page is added.
+ */
+export function uniquePostings(postings: readonly FoundPosting[], known: Iterable<string> = []): FoundPosting[] {
+  const kept: FoundPosting[] = [];
+  const at = new Map<string, number>();
+  const taken = new Set(known);
+  for (const posting of postings) {
+    const keys = [postingKey(posting), ...jobKeys(posting)];
+    if (keys.some((key) => taken.has(key))) continue;
+    const index = keys.map((key) => at.get(key)).find((found) => found !== undefined);
+    if (index === undefined) {
+      kept.push(posting);
+      for (const key of keys) at.set(key, kept.length - 1);
+      continue;
+    }
+    const have = kept[index];
+    const alsoOn = [...new Set([...(have.alsoOn ?? []), ...(posting.alsoOn ?? []), have.source, posting.source])];
+    const better = posting.complete && !have.complete ? posting : have;
+    kept[index] = { ...better, alsoOn: alsoOn.filter((source) => source !== better.source) };
+    for (const key of keys) if (!at.has(key)) at.set(key, index);
+  }
+  return kept;
 }
 
 // ─── In the URL ──────────────────────────────────────────────────────────────

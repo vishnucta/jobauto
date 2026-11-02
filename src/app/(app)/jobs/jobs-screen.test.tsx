@@ -61,10 +61,26 @@ const posting = (id: string, extra: Partial<ShownPosting> = {}): ShownPosting =>
   ...extra,
 });
 
-const stored = (postings: ShownPosting[], next: string | null = null): StoredSearch => ({ id: "run-1", source: "JSEARCH", addedBy: "", query, ranAt: "today at 14:32", postings, next });
+const stored = (postings: ShownPosting[], more = false, extra: Partial<StoredSearch> = {}): StoredSearch => ({
+  id: "run-1",
+  sources: ["JSEARCH"],
+  addedBy: "",
+  query,
+  ranAt: "today at 14:32",
+  postings,
+  more,
+  problems: [],
+  ...extra,
+});
 
 const screenProps: ComponentProps<typeof JobsScreen> = {
   source: "JSEARCH",
+  sources: [
+    { source: "JSEARCH", problem: null },
+    { source: "SERPAPI", problem: null },
+    { source: "ADZUNA", problem: "Add your Adzuna app ID and key in Settings → Job search first." },
+    { source: "ARBEITSAGENTUR", problem: null },
+  ],
   countries,
   view: "search",
   query,
@@ -79,7 +95,7 @@ function renderScreen(props: Partial<ComponentProps<typeof JobsScreen>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-2" } });
+  vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-2", problems: [] } });
   vi.mocked(removeJobSearch).mockResolvedValue({ ok: true, data: null, toast: "Search removed." });
   vi.mocked(savePostingForLater).mockResolvedValue({ ok: true, data: { postingId: "p1" } });
   vi.mocked(unsavePosting).mockResolvedValue({ ok: true, data: null });
@@ -111,7 +127,7 @@ describe("the search form", () => {
     await userEvent.selectOptions(screen.getByLabelText("Within"), "50");
     await userEvent.click(screen.getByLabelText("Remote only"));
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, radiusKm: 50, remoteOnly: true } });
+    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, radiusKm: 50, remoteOnly: true }, sources: ["JSEARCH"] });
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-2", { scroll: false }));
   });
 
@@ -122,7 +138,7 @@ describe("the search form", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("JSearch isn't answering right now.");
     expect(router.push).not.toHaveBeenCalled();
 
-    vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-3" } });
+    vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-3", problems: [] } });
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-3", { scroll: false }));
     expect(runJobSearch).toHaveBeenCalledTimes(2);
@@ -173,7 +189,7 @@ describe("the search form", () => {
 
 describe("the results", () => {
   it("lists the postings and shows the first one's whole text", () => {
-    renderScreen({ search: stored([posting("a", { salary: "EUR 70,000 a year", remote: true }), posting("b")], "cursor:2") });
+    renderScreen({ search: stored([posting("a", { salary: "EUR 70,000 a year", remote: true }), posting("b")], true) });
     expect(screen.getByText("2 postings from JSearch, more to come · searched today at 14:32")).toBeInTheDocument();
     const list = screen.getByRole("list", { name: "Postings" });
     const items = within(list).getAllByRole("button", { name: /^Designer/ });
@@ -244,8 +260,8 @@ describe("the results", () => {
   });
 
   it("loads the next page into the kept search, once each", async () => {
-    vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: true, postings: [posting("b"), posting("c")], next: null } });
-    renderScreen({ search: stored([posting("a"), posting("b")], "cursor:2") });
+    vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: true, postings: [posting("b"), posting("c")], more: false, problems: [] } });
+    renderScreen({ search: stored([posting("a"), posting("b")], true) });
     await userEvent.click(screen.getByRole("button", { name: "Show more" }));
     expect(showMorePostings).toHaveBeenCalledWith({ searchId: "run-1" });
     expect(within(screen.getByRole("list", { name: "Postings" })).getAllByRole("listitem")).toHaveLength(3);
@@ -255,13 +271,13 @@ describe("the results", () => {
   it("runs the same search again, as a new one", async () => {
     renderScreen({ search: stored([posting("a")]) });
     await userEvent.click(screen.getByRole("button", { name: "Search again" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query });
+    expect(runJobSearch).toHaveBeenCalledWith({ query, sources: ["JSEARCH"] });
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-2", { scroll: false }));
   });
 
   it("says when the next page didn't come", async () => {
     vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: false, problem: "quota", message: "No searches left." } });
-    renderScreen({ search: stored([posting("a")], "cursor:2") });
+    renderScreen({ search: stored([posting("a")], true) });
     await userEvent.click(screen.getByRole("button", { name: "Show more" }));
     expect(toast).toHaveBeenCalledWith("No searches left.");
   });
@@ -386,12 +402,12 @@ describe("past searches (E14-10)", () => {
     {
       day: "Today",
       searches: [
-        { id: "s1", source: "JSEARCH" as const, addedBy: "", query: { ...query, radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const }, found: 16, time: "14:32" },
-        { id: "s2", source: "JSEARCH" as const, addedBy: "", query: { ...query, keywords: "researcher", place: "" }, found: 1, time: "09:05" },
+        { id: "s1", sources: ["JSEARCH" as const], addedBy: "", query: { ...query, radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const }, found: 16, time: "14:32" },
+        { id: "s2", sources: ["JSEARCH" as const], addedBy: "", query: { ...query, keywords: "researcher", place: "" }, found: 1, time: "09:05" },
       ],
     },
-    { day: "Mon 28 Sep", searches: [{ id: "s3", source: "ADZUNA" as const, addedBy: "", query: { ...query, keywords: "writer" }, found: 0, time: "10:00" }] },
-    { day: "Sun 27 Sep", searches: [{ id: "s4", source: "CLIENT" as const, addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
+    { day: "Mon 28 Sep", searches: [{ id: "s3", sources: ["ADZUNA" as const], addedBy: "", query: { ...query, keywords: "writer" }, found: 0, time: "10:00" }] },
+    { day: "Sun 27 Sep", searches: [{ id: "s4", sources: ["CLIENT" as const], addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
   ];
 
   it("lists them by day, each opening without asking the source again", () => {
@@ -515,8 +531,8 @@ describe("the From filter (E14-7): what AI clients found, apart from the job sou
 
   it("narrows Past searches the same way", () => {
     const history = [
-      { day: "Today", searches: [{ id: "s1", source: "JSEARCH" as const, addedBy: "", query, found: 16, time: "14:32" }] },
-      { day: "Sun 27 Sep", searches: [{ id: "s4", source: "CLIENT" as const, addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
+      { day: "Today", searches: [{ id: "s1", sources: ["JSEARCH" as const], addedBy: "", query, found: 16, time: "14:32" }] },
+      { day: "Sun 27 Sep", searches: [{ id: "s4", sources: ["CLIENT" as const], addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
     ];
     const { unmount } = renderScreen({ view: "history", history, from: "CLIENT" });
     expect(screen.queryByRole("region", { name: "Today" })).not.toBeInTheDocument();
@@ -524,5 +540,81 @@ describe("the From filter (E14-7): what AI clients found, apart from the job sou
     unmount();
     renderScreen({ view: "history", history, from: "ADZUNA" });
     expect(screen.getByText("No searches from Adzuna.")).toBeInTheDocument();
+  });
+});
+
+describe("the Source list: one or several sources for a search", () => {
+  it("starts from the Settings source, ticks more in a menu that stays open, and searches them together", async () => {
+    renderScreen();
+    const picker = screen.getByRole("button", { name: "Source" });
+    expect(picker).toHaveTextContent("JSearch");
+    expect(screen.getByText("Uses 1 search from JSearch")).toBeInTheDocument();
+
+    await userEvent.click(picker);
+    const menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitemcheckbox");
+    expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false"]);
+    // Adzuna has no key: listed, but not for ticking, and it says why.
+    expect(items[2]).toHaveAttribute("aria-disabled", "true");
+    expect(items[2]).toHaveTextContent("Add your Adzuna app ID and key in Settings → Job search first.");
+    expect(within(menu).getByRole("menuitem", { name: /Keys and sources in Settings/ })).toHaveAttribute("href", "/settings?section=jobs");
+
+    await userEvent.click(within(menu).getByRole("menuitemcheckbox", { name: /SerpApi/ }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(picker).toHaveTextContent("JSearch + SerpApi");
+    expect(screen.getByText("Uses 1 search each from JSearch and SerpApi")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(runJobSearch).toHaveBeenCalledWith({ query, sources: ["JSEARCH", "SERPAPI"] });
+  });
+
+  it("needs at least one source", async () => {
+    renderScreen();
+    await userEvent.click(screen.getByRole("button", { name: "Source" }));
+    await userEvent.click(within(await screen.findByRole("menu")).getByRole("menuitemcheckbox", { name: /JSearch/ }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Source" })).toHaveTextContent("Choose a source");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(screen.getByText("Choose at least one source.")).toBeInTheDocument();
+    expect(runJobSearch).not.toHaveBeenCalled();
+  });
+
+  it("opens a kept search with the sources it ran on, and names them over its postings", () => {
+    renderScreen({ search: stored([posting("a"), posting("b", { source: "SERPAPI" })], false, { sources: ["JSEARCH", "SERPAPI"] }) });
+    expect(screen.getByRole("button", { name: "Source" })).toHaveTextContent("JSearch + SerpApi");
+    expect(screen.getByText(/2 postings from JSearch and SerpApi · searched today at 14:32/)).toBeInTheDocument();
+  });
+
+  it("says what a source couldn't do beside the results, who stood in, and where to fix it", () => {
+    renderScreen({
+      search: stored([posting("a")], false, {
+        sources: ["ARBEITSAGENTUR"],
+        problems: [
+          { source: "SERPAPI", problem: "no-key", message: "Add your SerpApi key in Settings → Job search first." },
+          { source: "JSEARCH", problem: "quota", message: "You've used up your JSearch searches for this month.", fallback: "ARBEITSAGENTUR" },
+        ],
+      }),
+    });
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Add your SerpApi key in Settings → Job search first.");
+    expect(note).toHaveTextContent("You've used up your JSearch searches for this month. Searched Bundesagentur für Arbeit instead.");
+    expect(within(note).getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
+  });
+
+  it("says which other sources listed the same job", () => {
+    renderScreen({ search: stored([posting("a", { alsoOn: ["SERPAPI", "ADZUNA"] })]) });
+    expect(screen.getAllByText(/Also on SerpApi and Adzuna/).length).toBeGreaterThan(0);
+  });
+
+  it("toasts a source's problem when a next page comes without it", async () => {
+    vi.mocked(showMorePostings).mockResolvedValue({
+      ok: true,
+      data: { ok: true, postings: [posting("c")], more: false, problems: [{ source: "SERPAPI", problem: "unavailable", message: "SerpApi isn't answering right now. Try again in a minute." }] },
+    });
+    renderScreen({ search: stored([posting("a")], true, { sources: ["JSEARCH", "SERPAPI"] }) });
+    await userEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("SerpApi isn't answering right now. Try again in a minute."));
+    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 });

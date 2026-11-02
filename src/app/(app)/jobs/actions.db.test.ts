@@ -68,20 +68,21 @@ afterAll(() => prisma().$disconnect());
 describe("Find jobs actions", () => {
   it("runs a search and keeps it, adds its next page, and removes it (E14-10)", async () => {
     stubFetch(() => json({ ...jsearchV2LastPage, data: { ...jsearchV2LastPage.data, cursor: "MORE" } }));
-    const run = await runJobSearch({ query });
-    expect(run).toEqual({ ok: true, data: { ok: true, id: expect.any(String) } });
+    const run = await runJobSearch({ query, sources: ["JSEARCH"] });
+    expect(run).toEqual({ ok: true, data: { ok: true, id: expect.any(String), problems: [] } });
     const id = run.ok && run.data.ok ? run.data.id : "";
 
     stubFetch(() => json(jsearchV2LastPage));
-    expect(await showMorePostings({ searchId: id })).toEqual({ ok: true, data: { ok: true, postings: [], next: null } });
+    expect(await showMorePostings({ searchId: id })).toEqual({ ok: true, data: { ok: true, postings: [], more: false, problems: [] } });
 
     expect(await removeJobSearch({ id })).toEqual({ ok: true, data: null, toast: "Search removed. Saved postings from it stay in Saved." });
     expect(await prisma().postingSearch.count()).toBe(0);
   });
 
   it("says why a search didn't run", async () => {
-    expect(await runJobSearch({ query: { ...query, country: "" } })).toMatchObject({ ok: true, data: { ok: false, problem: "no-country" } });
-    expect(await runJobSearch({ query: { ...query, radiusKm: 33 as never } })).toMatchObject({ ok: false });
+    expect(await runJobSearch({ query: { ...query, country: "" }, sources: ["JSEARCH"] })).toMatchObject({ ok: true, data: { ok: false, problem: "no-country" } });
+    expect(await runJobSearch({ query: { ...query, radiusKm: 33 as never }, sources: ["JSEARCH"] })).toMatchObject({ ok: false });
+    expect(await runJobSearch({ query, sources: [] })).toMatchObject({ ok: false, error: "Some details aren't valid. Check the highlighted fields." });
   });
 
   it("saves, dismisses and brings back a posting, with a toast where one helps", async () => {

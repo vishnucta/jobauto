@@ -24,6 +24,21 @@ const CHOICES: readonly { value: Choice; name: string; description: string; tag:
   { value: "OFF", name: "Off", description: "Find jobs stays off, and no search leaves your server.", tag: "Nothing is sent anywhere" },
 ];
 
+/** "Key saved", "Key from the server" or "Note accepted": what a source's tile shows once it can be searched; null until then. */
+function keptLabel(source: JobSource, view: JobSearchSettingsView): string | null {
+  const key = (state: JobKeyState) => (state === "set" ? "Key saved" : state === "env" ? "Key from the server" : null);
+  switch (source) {
+    case "JSEARCH":
+      return key(view.jsearch.keyState);
+    case "SERPAPI":
+      return key(view.serpapi.keyState);
+    case "ADZUNA":
+      return view.adzuna.appId ? key(view.adzuna.keyState) : null;
+    case "ARBEITSAGENTUR":
+      return view.arbeitsagentur.acceptedAt ? "Note accepted" : null;
+  }
+}
+
 type Connection =
   | { status: "untested" }
   | { status: "testing" }
@@ -121,6 +136,12 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
             <span id={`job-source-${entry.value}`} className="flex flex-col gap-1.5">
               <span className="text-meta text-muted">{entry.description}</span>
               <span className="text-xs text-muted">{entry.tag}</span>
+              {entry.value !== "OFF" && keptLabel(entry.value, view) && (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-success">
+                  <span aria-hidden className="size-1.5 rounded-full bg-success" />
+                  {keptLabel(entry.value, view)}
+                </span>
+              )}
             </span>
           </RadioGroup.Item>
         ))}

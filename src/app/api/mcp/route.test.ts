@@ -12,8 +12,8 @@ vi.mock("@/lib/profile-data", async () => {
 });
 const searches = vi.hoisted(() => ({ ran: [] as unknown[] }));
 vi.mock("@/lib/posting-searches", () => ({
-  runSearch: async (query: unknown) => (searches.ran.push(query), { ok: true, id: "s1" }),
-  loadSearch: async () => ({ id: "s1", postings: [], next: null }),
+  runSearch: async (query: unknown) => (searches.ran.push(query), { ok: true, id: "s1", problems: [] }),
+  loadSearch: async () => ({ id: "s1", sources: ["JSEARCH"], addedBy: "", postings: [], more: false, problems: [] }),
   showMoreFor: async () => ({ ok: true, postings: [], next: null }),
 }));
 

@@ -13,7 +13,8 @@ import { fitBand } from "@/lib/fit";
 import { GoogleError } from "@/lib/google/errors";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
 import { JobSearchError } from "@/lib/job-search/errors";
-import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
+import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, RADII_KM, type JobSource, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
+import { describeSourceProblem } from "@/lib/job-search/sources";
 import { getJob, startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
 import { saveScore } from "@/lib/posting-scores";
@@ -79,6 +80,9 @@ function guardTools(server: McpServer): McpServer {
  * Dossier as an MCP server, for one request; `origin` is the address links in
  * answers point to, `clientName` the name the client signed in with.
  */
+/** The sources search_jobs can be asked for, as the From filter names them. */
+const SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "arbeitsagentur"] as const satisfies readonly Lowercase<JobSource>[];
+
 export function createDossierServer(origin: string, clientName = ""): McpServer {
   const linkTo = (path: string) => `${origin}${path}`;
   const server = guardTools(
@@ -108,7 +112,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     {
       title: "Search for jobs",
       description:
-        "Searches the job source set up in Dossier's settings and keeps the search in Find jobs → Past searches. Each search uses one search from the user's plan with that source. " +
+        "Searches the job source set up in Dossier's settings, or the sources given, together, and keeps the search in Find jobs → Past searches. Each search uses one search from the user's plan with each source. " +
         "Returns a search_id and numbered postings; pass both to get_posting, save_job_scores or save_application, or the search_id to more_jobs.",
       inputSchema: z.object({
         keywords: z.string().trim().min(1).max(200).describe("Job title, skill or company, e.g. 'product designer'"),
@@ -117,6 +121,11 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         remote_only: z.boolean().optional().describe("Only remote postings."),
         radius_km: z.literal(RADII_KM).optional(),
         posted_within: z.enum(POSTED).optional().describe("any, day, 3days, week or month. Defaults to month."),
+        sources: z
+          .array(z.enum(SOURCE_NAMES))
+          .min(1)
+          .optional()
+          .describe("Which sources to search, together, with the same job listed once: jsearch, serpapi, adzuna, arbeitsagentur. Defaults to the one chosen in Settings. A source that can't answer is reported, and a ready one stands in for it."),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
@@ -133,15 +142,17 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         remoteOnly,
         postedWithin: input.posted_within ?? "month",
       };
-      const ran = await runSearch(query);
+      const ran = await runSearch(query, input.sources?.map((name) => name.toUpperCase() as JobSource));
       if (!ran.ok) return failure(ran.message);
       const search = await loadSearch(ran.id);
       if (!search) return failure("The search ran, but couldn't be read back. Try again.");
       return text({
         search_id: search.id,
         searched: `${query.keywords} in ${query.place || countryName(country)}${query.remoteOnly ? " (remote only)" : ""}`,
+        sources: search.sources.map((source) => source.toLowerCase()),
+        problems: search.problems.length > 0 ? search.problems.map(describeSourceProblem) : undefined,
         found: search.postings.length,
-        more_available: search.next !== null,
+        more_available: search.more,
         postings: search.postings.map((posting, index) => postingLine(posting, index + 1)),
         link: linkTo(`/jobs?search=${search.id}`),
       });
@@ -164,7 +175,8 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       return text({
         search_id,
         added: more.postings.length,
-        more_available: more.next !== null,
+        more_available: more.more,
+        problems: more.problems.length > 0 ? more.problems.map(describeSourceProblem) : undefined,
         postings: more.postings.map((posting, index) => postingLine(posting, before.found + index + 1)),
       });
     },

@@ -4,6 +4,7 @@ import { isAiUsable } from "@/lib/ai/config";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
+import { sourceStates } from "@/lib/job-search/find";
 import { defaultSearch, latestRole, queryFromParams, sourceFilterFromParams, viewFromParams } from "@/lib/job-search/search";
 import { countSearches, listSearches, loadSearch } from "@/lib/posting-searches";
 import { countPostings, listPostings } from "@/lib/postings";
@@ -46,6 +47,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   return (
     <JobsScreen
       source={config.source}
+      sources={sourceStates(config)}
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
       // Named here: the browser's ICU can name a few countries differently from the server's.

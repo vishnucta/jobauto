@@ -24,7 +24,7 @@ vi.mock("@/lib/ai/config", () => ({ isAiUsable: async () => fake.aiUsable }));
 vi.mock("@/lib/posting-fetch", () => ({ fetchPosting: vi.fn(async () => fake.fetched) }));
 vi.mock("@/lib/job-search/find", () => ({
   fullText: vi.fn(async () => "The whole posting from its source"),
-  askSource: vi.fn(async () => ({ ok: true, source: "JSEARCH", postings: [found("p3", "Page two posting")], next: null })),
+  askSources: vi.fn(async () => ({ ok: true, sources: ["JSEARCH"], postings: [found("p3", "Page two posting")], cursors: {}, problems: [] })),
 }));
 vi.mock("@/lib/jobs/runner", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/jobs/runner")>()),
@@ -95,7 +95,15 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<{
 }
 
 const storeSearch = (postings: unknown[]) =>
-  prisma().postingSearch.create({ data: { source: "JSEARCH", query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, postings: postings as object[], found: postings.length, next: "page:2" } });
+  prisma().postingSearch.create({
+    data: {
+      sources: ["JSEARCH"],
+      query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" },
+      postings: postings as object[],
+      found: postings.length,
+      cursors: { JSEARCH: "page:2" },
+    },
+  });
 
 describe("the Claude connector's tools (#221)", () => {
   it("lists the applications, newest first, by status, and reads one without notes, sender or signature", async () => {
