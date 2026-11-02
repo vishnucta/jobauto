@@ -33,6 +33,11 @@ try {
   git archive --format=zip -o $archive $Ref
   if ($LASTEXITCODE -ne 0) { throw "git archive failed." }
   Expand-Archive -LiteralPath $archive -DestinationPath $appDir -Force
+  # Not needed to run the app: the README's screenshots, the website, planning docs.
+  foreach ($extra in @(".github", "site", "docs", "design")) {
+    $path = Join-Path $appDir $extra
+    if (Test-Path $path) { Remove-Item $path -Recurse -Force }
+  }
 
   # Batch files get CRLF whatever git delivered.
   $install = [IO.File]::ReadAllText((Join-Path $appDir "installer\Install.cmd")) -replace "`r`n", "`n" -replace "`n", "`r`n"
@@ -45,7 +50,15 @@ try {
   if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
   $zip = Join-Path $outDir "$name.zip"
   if (Test-Path $zip) { Remove-Item $zip -Force }
-  Compress-Archive -Path $root -DestinationPath $zip -CompressionLevel Optimal
+  # bsdtar (in Windows since 10 1803) writes a standard zip; Compress-Archive
+  # in Windows PowerShell 5.1 writes backslashes into the entry names.
+  $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+  if ($tar) {
+    & $tar.Source -a -c -f $zip -C $stage $name
+    if ($LASTEXITCODE -ne 0) { throw "tar failed to write the zip." }
+  } else {
+    Compress-Archive -Path $root -DestinationPath $zip -CompressionLevel Optimal
+  }
   $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
   Write-Host "Built $zip ($size MB) from $Ref." -ForegroundColor Green
 } finally {
