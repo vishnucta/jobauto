@@ -74,7 +74,7 @@ It's for one person on a small server: one password, your data in your own Postg
 
 ## Installing
 
-The installation guide is [INSTALL.md](INSTALL.md): cloning with Git on Windows (and on macOS or Linux), the planned Windows zip installer, first steps in the app, using it from Claude, updating, and what to do when something goes wrong. Docker and self-hosting follow below, as in upstream Dossier.
+The installation guide is [INSTALL.md](INSTALL.md): the Windows zip installer for a computer with nothing on it (download, double-click, done), cloning with Git on Windows (and on macOS or Linux), first steps in the app, using it from Claude, updating, and what to do when something goes wrong. Docker and self-hosting follow below, as in upstream Dossier.
 
 ## Run it on your computer
 

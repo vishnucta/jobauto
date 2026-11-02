@@ -63,3 +63,6 @@ next-env.d.ts
 # The apply assistant's screenshots and browser profile, should DOSSIER_DATA_DIR ever point into the checkout
 /apply/
 /apply-browser/
+
+# The Windows zip, built by installer\make-bundle.ps1
+/dist/

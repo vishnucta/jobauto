@@ -5,7 +5,7 @@ jobauto runs on your own computer: one password, your data in a PostgreSQL datab
 | Way | For whom | Status |
 |---|---|---|
 | [1. Clone with Git](#1-clone-with-git) | You can use a terminal. Windows, macOS or Linux. | Available |
-| [2. Download a zip](#2-download-a-zip-windows) | Windows, no terminal: download, double-click, done. | Planned, not yet available |
+| [2. Download a zip](#2-download-a-zip-windows) | Windows, no terminal: download, double-click, done. Works on an empty computer. | Built; the first zip is published on the Releases page after its clean-machine test |
 | [3. Docker](#3-docker) | You have Docker Desktop, or a server. | As in upstream Dossier |
 
 The Apply tab opens the employer's form in a browser window on the machine the app runs on, so install it on the computer you apply from.
@@ -132,7 +132,54 @@ PDFs need a browser: install Google Chrome, or run `yarn playwright install chro
 
 ## 2. Download a zip (Windows)
 
-**Planned, not yet available.** This will be a small zip on the [Releases page](https://github.com/vishnucta/jobauto/releases) with the app and an `Install.cmd`. Double-clicking it installs Node.js, PostgreSQL and the app's packages on your computer, asks for the password you want to sign in with, sets everything up, and leaves a **Jobauto** shortcut on the Desktop. Nothing to type beyond the password. Until it exists, use [section 1](#1-clone-with-git).
+For a Windows 10 or 11 computer with nothing on it: no Git, no Node.js, no PostgreSQL. The installer puts them there. You need an internet connection, about 3 GB of free disk, and to be allowed to say **Yes** when Windows asks whether a program may make changes to the device.
+
+### Install
+
+1. Download `jobauto-windows-<version>.zip` from the [Releases page](https://github.com/vishnucta/jobauto/releases).
+2. Right-click the zip and choose **Extract All**. Open the extracted folder, not the zip itself.
+3. Double-click **Install.cmd**. If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**. When Windows asks whether to allow changes, click **Yes**: a second window installs Node.js and PostgreSQL and closes by itself.
+4. Type the password you want to sign in with, twice. You won't see it while you type. Nothing else is asked.
+5. Wait, 10 to 15 minutes on a normal laptop and connection. The window counts seven steps; the long one is "Yarn and the app's packages".
+6. At the end it asks **Start Jobauto now?** Press Enter. The browser opens at **http://localhost:3000** once the app answers. Sign in with your password.
+7. Continue with [First steps in the app](#first-steps-in-the-app).
+
+What the installer does, in its seven steps: checks the computer; installs Node.js and PostgreSQL 18 (with winget, or straight from nodejs.org and EDB when winget is missing); copies the app to `%LOCALAPPDATA%\Jobauto\app`; installs Yarn through Corepack and the app's packages; writes the settings file `app\.env` with a hash of your password, a random secret and the database address (a generated database password, never shown); creates the database; puts **Jobauto** on the Desktop and in the Start menu. Everything stays on this computer. The log is `install.log` in that folder.
+
+### Daily use
+
+Double-click **Jobauto** on the Desktop or in the Start menu. A black window stays open while you use the app; the browser opens by itself when the app is ready. Close the window to stop the app.
+
+### Updating
+
+Close the Jobauto window. Then open `%LOCALAPPDATA%\Jobauto` (paste that into the address bar of a File Explorer window) and double-click **Update.cmd**. It fetches the latest release, installs it over the old version, and keeps your settings file and your database. Downloading a newer zip and running its `Install.cmd` again does the same.
+
+### Removing
+
+Close the Jobauto window, open `%LOCALAPPDATA%\Jobauto` and double-click **Uninstall.cmd**. It removes the app and the shortcuts, and asks before deleting the database. To keep a copy of your data first, start the app and use **Settings → Your data → Export everything**. Node.js and PostgreSQL stay installed, since other software may use them; **Settings → Apps** removes them.
+
+### If PostgreSQL is already on the computer
+
+The installer uses it instead of installing another one. It asks for the password of PostgreSQL's `postgres` user, the one chosen when PostgreSQL was installed, and checks it before going on.
+
+### For maintainers: building and publishing the zip
+
+The zip is `git archive` of a commit (tracked files only, so never a `.env`, `node_modules` or personal data) plus `Install.cmd`, `README-Windows.txt` and a `VERSION` file. Build it from a clone with Git and PowerShell:
+
+```powershell
+cd jobauto
+powershell -ExecutionPolicy Bypass -File installer\make-bundle.ps1 -Version 2026.11.0
+```
+
+That writes `dist\jobauto-windows-2026.11.0.zip`, a few MB. Publish it as a release whose tag is the version with a `jobauto-` prefix, which `Update.cmd` compares with the installed `VERSION`:
+
+```powershell
+git tag -a jobauto-2026.11.0 -m "Windows zip 2026.11.0"
+git push origin main --tags
+gh release create jobauto-2026.11.0 dist\jobauto-windows-2026.11.0.zip --title "jobauto 2026.11.0" --notes "What changed."
+```
+
+Before publishing, test the zip on a clean Windows: **Windows Sandbox** (turn it on under *Turn Windows features on or off*, then drag the zip into it) or a fresh virtual machine. Run `Install.cmd`, start the app and sign in, run `Install.cmd` again to see it update, then `Uninstall.cmd`. For scripted tests the installer takes `-NonInteractive -Password … -DatabaseUrl … -SkipTools -NoShortcuts -NoStart`, and `uninstall.ps1` takes `-Yes` and `-DropDatabase`.
 
 ## 3. Docker
 
@@ -183,3 +230,11 @@ Start it again as in step 5. Your data stays in your own database.
 - **An error page right after updating**: stop the app with **Ctrl+C** and start it again.
 - **PDFs don't download**: the app prints them with Chrome or Edge. Edge comes with Windows; if it was removed, install Chrome.
 - **"yarn is not recognized"**: run `npm install -g corepack` and `corepack enable` again, then close and reopen PowerShell.
+
+With the zip installer:
+
+- **The installer window closes at once**: `Install.cmd` was run from inside the zip. Extract the zip first, then run it from the extracted folder.
+- **"Windows protected your PC"**: click **More info**, then **Run anyway**. The scripts are plain text in the `app\installer` folder, if you want to read what they do.
+- **"Something is listening on port 3000"** from Install or Update: the app is running. Close the Jobauto window first.
+- **"Node.js was installed but isn't found yet"**: restart the computer and run `Install.cmd` again; it continues where it stopped.
+- **The installation stopped** with another message: read it, fix the cause, and run `Install.cmd` again. Every step checks what's already done. `install.log` in `%LOCALAPPDATA%\Jobauto` has the details.
