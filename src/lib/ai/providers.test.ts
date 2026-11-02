@@ -122,6 +122,7 @@ describe("OpenAICompatibleProvider", () => {
   it("maps HTTP failures to plain words, never the provider's message", async () => {
     const cases: [number, string][] = [
       [401, "auth"],
+      [402, "credit"],
       [404, "model"],
       [429, "rate-limited"],
       [500, "provider"],
@@ -140,6 +141,18 @@ describe("OpenAICompatibleProvider", () => {
     stubFetch(() => json({ error: { message: "This model's maximum context length is 8192 tokens." } }, { status: 400 }));
     const provider = new OpenAICompatibleProvider("OPENAI", "https://api.example.com/v1", "sk", "gpt-x", 60_000);
     expect(await failure(provider.complete(ask))).toMatchObject({ kind: "too-long" });
+  });
+
+  it("says when the account is out of credit, or the model isn't there, whatever the status", async () => {
+    const provider = () => new OpenAICompatibleProvider("DEEPSEEK", "https://api.deepseek.com", "sk", "deepseek-flash", 60_000);
+    // DeepSeek answers a 402; OpenAI a 429 about the quota, which isn't a rate limit.
+    stubFetch(() => json({ error: { message: "Insufficient Balance" } }, { status: 402 }));
+    expect(await failure(provider().complete(ask))).toMatchObject({ kind: "credit" });
+    stubFetch(() => json({ error: { message: "You exceeded your current quota, please check your plan and billing details." } }, { status: 429 }));
+    expect(await failure(provider().complete(ask))).toMatchObject({ kind: "credit" });
+    // DeepSeek answers a model it doesn't have with a 400, not a 404.
+    stubFetch(() => json({ error: { message: "Model Not Exist" } }, { status: 400 }));
+    expect(await failure(provider().complete(ask))).toMatchObject({ kind: "model", message: expect.stringContaining("deepseek-flash") });
   });
 
   it("lists models", async () => {

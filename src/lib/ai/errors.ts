@@ -5,6 +5,7 @@
 export type AiErrorKind =
   | "unreachable"
   | "auth"
+  | "credit"
   | "model"
   | "rate-limited"
   | "busy"
@@ -19,6 +20,7 @@ export type AiErrorKind =
 const MESSAGES: Record<Exclude<AiErrorKind, "model" | "config">, string> = {
   unreachable: "Couldn't reach the server. Check the address and that it's running.",
   auth: "The server didn't accept the API key. Check it in Settings → AI provider.",
+  credit: "The AI provider says the account is out of credit. Top it up on its website, then try again.",
   "rate-limited": "The AI provider is limiting requests right now. Wait a minute and try again.",
   busy: "The AI provider is overloaded right now. Try again in a moment.",
   timeout: "The model took too long to answer. Try again, or pick a faster model.",
@@ -64,6 +66,12 @@ const CONNECTION_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECO
 /** Whether a message from a provider says the input didn't fit the model's context. */
 const TOO_LONG = /context|too long|too many tokens|maximum.*tokens|token limit|exceeds/i;
 
+/** Whether a message says the account can't pay: DeepSeek's "Insufficient Balance", OpenAI's quota, Anthropic's credit balance. */
+const OUT_OF_CREDIT = /insufficient[ _]?(?:balance|quota|credits?)|credit balance|exceeded your current quota/i;
+
+/** Whether a message says the model isn't there: DeepSeek's 400 "Model Not Exist", or Ollama's plain error with any status. */
+const UNKNOWN_MODEL = /model .*not (?:found|exist)|pull the model/i;
+
 /** The Node.js network error behind a failed fetch, if any. */
 function networkCode(error: unknown): string | undefined {
   let current: unknown = error;
@@ -101,6 +109,8 @@ export function toAiError(
   if (name === "AbortError" || name === "APIUserAbortError") return AiError.of("cancelled", detail);
   const code = networkCode(error);
   if (code || name === "APIConnectionError") return AiError.of("unreachable", code ?? detail);
+  // DeepSeek says so with a 402; OpenAI with a 429, Anthropic with a 400.
+  if (status === 402 || OUT_OF_CREDIT.test(message)) return AiError.of("credit", detail);
 
   switch (status) {
     case 401:
@@ -117,9 +127,10 @@ export function toAiError(
       return AiError.of("busy", detail);
     case 400:
     case 422:
-      return TOO_LONG.test(message) ? AiError.of("too-long", detail) : AiError.of("provider", detail);
+      if (TOO_LONG.test(message)) return AiError.of("too-long", detail);
+      if (UNKNOWN_MODEL.test(message)) return AiError.unknownModel(model, detail);
+      return AiError.of("provider", detail);
   }
-  // Ollama answers an unknown model with a plain error, whatever its status.
-  if (/model .*not found|pull the model/i.test(message)) return AiError.unknownModel(model, detail);
+  if (UNKNOWN_MODEL.test(message)) return AiError.unknownModel(model, detail);
   return AiError.of("provider", detail);
 }

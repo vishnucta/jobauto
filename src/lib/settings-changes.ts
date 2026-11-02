@@ -14,6 +14,7 @@ import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
 import type { JobSearchSettingsView } from "@/lib/job-search/sources";
 import { startJob } from "@/lib/jobs/runner";
 import { countTailoredDocuments, zipPdfsJob } from "@/lib/jobs/zip-pdfs";
+import { logServerError } from "@/lib/log";
 import { isJobRetention } from "@/lib/settings";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 
@@ -76,7 +77,11 @@ export async function testAiProvider(): Promise<{ connected: true; model: string
     const { model, latencyMs } = await provider.test();
     return { connected: true, model, seconds: Math.round(latencyMs / 100) / 10 };
   } catch (error) {
-    if (error instanceof AiError) return { connected: false, message: error.message };
+    if (error instanceof AiError) {
+      // For the server log: the status and error type, never the provider's message (E6-1).
+      logServerError("AI test", new Error(error.detail ?? error.message));
+      return { connected: false, message: error.message };
+    }
     throw error;
   }
 }

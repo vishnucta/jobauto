@@ -105,7 +105,7 @@ export const PROVIDER_OPTIONS: readonly {
     local: false,
     defaultUrl: "https://api.deepseek.com",
     urlPlaceholder: "https://api.deepseek.com",
-    defaultModel: "deepseek-v4-flash",
+    defaultModel: "deepseek-flash",
     apiKey: { label: "API key", hint: "From platform.deepseek.com → API keys, after topping up a few euros. What Dossier writes from goes to DeepSeek's servers in China." },
   },
 ];

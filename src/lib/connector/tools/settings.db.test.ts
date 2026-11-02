@@ -321,7 +321,7 @@ describe("get_settings and update_settings", () => {
     });
     expect(await settings()).toMatchObject({ provider: "GROQ", apiKeyEnc: null });
     expect((await tool("update_settings", { ai_provider: "DEEPSEEK" })).json).toMatchObject({
-      ai: { ai_provider: "DEEPSEEK", ai_address: "https://api.deepseek.com", ai_model: "deepseek-v4-flash", api_key: "none", ready: false },
+      ai: { ai_provider: "DEEPSEEK", ai_address: "https://api.deepseek.com", ai_model: "deepseek-flash", api_key: "none", ready: false },
     });
 
     // At the card's address: another server is the user's to set.
