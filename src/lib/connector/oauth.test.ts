@@ -39,6 +39,8 @@ describe("the Claude connector's sign-in (#221)", () => {
     expect(allowedRedirect("https://claude.com/api/mcp/auth_callback")).toBe(true);
     expect(allowedRedirect("http://localhost:33418/callback")).toBe(true);
     expect(allowedRedirect("http://127.0.0.1:9/callback")).toBe(true);
+    expect(allowedRedirect("http://127.0.0.1:6180/oauth/callback")).toBe(true);
+    expect(allowedRedirect("http://localhost:6180/oauth/other")).toBe(false);
     expect(allowedRedirect("https://evil.example/api/mcp/auth_callback")).toBe(false);
     expect(allowedRedirect("https://claude.ai/api/mcp/auth_callback/../evil")).toBe(false);
     expect(allowedRedirect("http://localhost:33418/other")).toBe(false);

@@ -36,6 +36,9 @@ export async function connectorSince(): Promise<string | null> {
   return (await loadSettings()).connectorEnabledAt;
 }
 
+/** Loopback callback paths: Claude Code's "/callback", and mcp-remote's "/oauth/callback" (Claude Desktop's local servers). */
+const LOOPBACK_PATHS = new Set(["/callback", "/oauth/callback"]);
+
 /**
  * Whether Claude may be sent back to `uri`: Claude's own callback, or a
  * loopback address on any port (Claude's command-line app signs in through one).
@@ -44,7 +47,7 @@ export function allowedRedirect(uri: string): boolean {
   if (HOSTED_CALLBACKS.has(uri)) return true;
   try {
     const url = new URL(uri);
-    return url.protocol === "http:" && isLoopback(url) && url.pathname === "/callback";
+    return url.protocol === "http:" && isLoopback(url) && LOOPBACK_PATHS.has(url.pathname);
   } catch {
     return false;
   }
