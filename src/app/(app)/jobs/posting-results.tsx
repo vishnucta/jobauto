@@ -34,7 +34,12 @@ export type PostingResultsProps = {
       onSearchAgain: () => void;
       searching: boolean;
     }
-  | { mode: "saved" | "dismissed"; postings: ShownPosting[] }
+  | {
+      mode: "saved" | "dismissed";
+      postings: ShownPosting[];
+      /** Replaces the message shown when there are none, e.g. when the list is narrowed to one source. */
+      empty?: string;
+    }
 );
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -161,13 +166,15 @@ export function PostingResults(props: PostingResultsProps) {
 
   const searched = props.mode === "search" ? props.search.query : null;
   const empty =
-    mode === "saved"
-      ? "Nothing saved yet. Save a posting from your search results to keep it here."
-      : mode === "dismissed"
-        ? "Nothing dismissed. Postings you dismiss stay out of your searches and wait here."
-        : postings.length > 0 || !searched
-          ? "You've dismissed every posting here."
-          : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
+    props.mode !== "search" && props.empty
+      ? props.empty
+      : mode === "saved"
+        ? "Nothing saved yet. Save a posting from your search results to keep it here."
+        : mode === "dismissed"
+          ? "Nothing dismissed. Postings you dismiss stay out of your searches and wait here."
+          : postings.length > 0 || !searched
+            ? "You've dismissed every posting here."
+            : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
 
   return (
     <div className="flex flex-wrap items-start gap-6 px-10 pb-16">

@@ -15,6 +15,7 @@ import {
   searchRunHref,
   viewHref,
   type FoundPosting,
+  type PostingOrigin,
   type ShownPosting,
 } from "@/lib/job-search/search";
 import { searchSourceName, SOURCE_INFO } from "@/lib/job-search/sources";
@@ -33,6 +34,8 @@ import { failure, postingLine, started, text, type ToolContext } from "../kit";
 // number or posting_id, and keep the posting with it as the button does.
 
 const LISTS = ["saved", "dismissed", "searches"] as const;
+/** The From filter's sources, as the URL spells them (?from=client). */
+const FROM = ["jsearch", "adzuna", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
 const CHANGES = ["save", "unsave", "dismiss", "restore"] as const;
 
 /** What each change does, as the button on a posting does it. */
@@ -135,15 +138,18 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         "With a search_id: the postings that search found, numbered, without asking the job source again.",
       inputSchema: z.object({
         view: z.enum(LISTS).optional().describe("Only this list: saved, dismissed or searches. Without it, all three."),
+        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, adzuna, arbeitsagentur, or client for what AI clients added"),
         search_id: z.string().min(1).max(100).optional().describe("A past search, to list the postings it found instead"),
         from: z.number().int().min(1).optional().describe("Where each list (or the search) starts. Defaults to 1."),
         limit: z.number().int().min(1).max(100).optional().describe("At most this many per list. Defaults to 20."),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ view, search_id, from, limit }) => {
+    async ({ view, search_id, from, limit, source }) => {
       const take = limit ?? 20;
       const start = (from ?? 1) - 1;
+      const origin = source ? (source.toUpperCase() as PostingOrigin) : null;
+      const fromSource = (candidate: PostingOrigin) => origin === null || candidate === origin;
       const timeZone = await lastKnownTimeZone();
       if (search_id) {
         const search = await loadSearch(search_id, { timeZone });
@@ -165,18 +171,20 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       for (const list of view ? [view] : LISTS) {
         if (list === "searches") {
           const searches = (await listSearches({ timeZone })).flatMap(({ day, searches }) =>
-            searches.map((search) => ({
-              search_id: search.id,
-              searched: describeSearch(search.query, countryName(search.query.country)),
-              ran: `${day} at ${search.time}`,
-              found: search.found,
-              source: searchSourceName(search.source, search.addedBy),
-            })),
+            searches
+              .filter((search) => fromSource(search.source))
+              .map((search) => ({
+                search_id: search.id,
+                searched: describeSearch(search.query, countryName(search.query.country)),
+                ran: `${day} at ${search.time}`,
+                found: search.found,
+                source: searchSourceName(search.source, search.addedBy),
+              })),
           );
-          answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(viewHref("history")) };
+          answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(viewHref("history", origin)) };
         } else {
-          const postings = await listPostings(list);
-          answer[list] = { total: postings.length, postings: postings.slice(start, start + take).map(keptLine), link: linkTo(viewHref(list)) };
+          const postings = (await listPostings(list)).filter((posting) => fromSource(posting.source));
+          answer[list] = { total: postings.length, postings: postings.slice(start, start + take).map(keptLine), link: linkTo(viewHref(list, origin)) };
         }
       }
       return text(answer);

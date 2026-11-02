@@ -239,7 +239,18 @@ export function viewFromParams(params: Record<string, string | string[] | undefi
   return view === "history" || view === "saved" || view === "dismissed" ? view : "search";
 }
 
-export const viewHref = (view: "history" | "saved" | "dismissed") => `/jobs?view=${view}`;
+/** Saved, Dismissed and Past searches narrowed to one source (?from=client, ?from=jsearch…); null shows every source. */
+export type SourceFilter = PostingOrigin | null;
+
+const FROM_VALUES = new Map(POSTING_SOURCES.map((source) => [source.toLowerCase(), source] as const));
+
+/** The source the URL narrows a view to, or null for all of them. */
+export function sourceFilterFromParams(params: Record<string, string | string[] | undefined>): SourceFilter {
+  return FROM_VALUES.get(one(params.from).trim().toLowerCase()) ?? null;
+}
+
+/** A view's URL, narrowed to one source when `from` is given: /jobs?view=saved&from=client. */
+export const viewHref = (view: "history" | "saved" | "dismissed", from: SourceFilter = null) => `/jobs?view=${view}${from ? `&from=${from.toLowerCase()}` : ""}`;
 
 /** A kept search on Find jobs (E14-10). */
 export const searchRunHref = (id: string) => `/jobs?search=${encodeURIComponent(id)}`;

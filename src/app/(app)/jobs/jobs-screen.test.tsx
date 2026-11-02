@@ -484,3 +484,45 @@ describe("the Saved and Dismissed views (E14-7)", () => {
     expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument();
   });
 });
+
+describe("the From filter (E14-7): what AI clients found, apart from the job source's", () => {
+  const saved = { ...state, saved: true };
+  const mixed = [posting("a", { state: saved }), posting("b", { source: "CLIENT", via: "Claude Code", state: saved })];
+
+  it("offers the sources Saved holds, and narrows the URL to one", async () => {
+    renderScreen({ view: "saved", kept: mixed });
+    const from = screen.getByRole("combobox", { name: "From" });
+    expect(within(from).getAllByRole("option").map((option) => option.textContent)).toEqual(["All sources", "JSearch", "AI clients (Claude, Gemini…)"]);
+    await userEvent.selectOptions(from, "CLIENT");
+    expect(router.push).toHaveBeenCalledWith("/jobs?view=saved&from=client", { scroll: false });
+  });
+
+  it("isn't shown while a list holds one source only", () => {
+    renderScreen({ view: "saved", kept: [posting("a", { state: saved })] });
+    expect(screen.queryByRole("combobox", { name: "From" })).not.toBeInTheDocument();
+  });
+
+  it("shows only that source's postings, and says so when there are none", () => {
+    const { unmount } = renderScreen({ view: "saved", kept: mixed, from: "CLIENT" });
+    const items = within(screen.getByRole("list", { name: "Postings" })).getAllByRole("listitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent("Designer b");
+    expect(screen.getByRole("combobox", { name: "From" })).toHaveValue("CLIENT");
+    unmount();
+    renderScreen({ view: "dismissed", kept: [posting("a", { state: { ...state, dismissed: true } })], from: "CLIENT" });
+    expect(screen.getByText("Nothing dismissed from AI clients.")).toBeInTheDocument();
+  });
+
+  it("narrows Past searches the same way", () => {
+    const history = [
+      { day: "Today", searches: [{ id: "s1", source: "JSEARCH" as const, addedBy: "", query, found: 16, time: "14:32" }] },
+      { day: "Sun 27 Sep", searches: [{ id: "s4", source: "CLIENT" as const, addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
+    ];
+    const { unmount } = renderScreen({ view: "history", history, from: "CLIENT" });
+    expect(screen.queryByRole("region", { name: "Today" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Sun 27 Sep" })).getByRole("link")).toHaveTextContent("AI client · Gemini CLI");
+    unmount();
+    renderScreen({ view: "history", history, from: "ADZUNA" });
+    expect(screen.getByText("No searches from Adzuna.")).toBeInTheDocument();
+  });
+});

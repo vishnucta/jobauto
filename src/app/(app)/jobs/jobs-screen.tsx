@@ -8,18 +8,22 @@ import { ArbeitsagenturNote } from "@/components/arbeitsagentur-note";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { Country } from "@/lib/job-search/countries";
 import {
+  POSTING_SOURCES,
   searchHref,
   searchRunHref,
   viewHref,
   type JobSource,
   type JobsView,
   type PastSearchDay,
+  type PostingOrigin,
   type SearchProblem as Problem,
   type SearchQuery,
   type ShownPosting,
+  type SourceFilter,
   type StoredSearch,
 } from "@/lib/job-search/search";
 import { SOURCE_INFO } from "@/lib/job-search/sources";
@@ -50,6 +54,8 @@ export type JobsScreenProps = {
   kept?: ShownPosting[];
   /** Past searches by day, in that view. */
   history?: PastSearchDay[];
+  /** Saved, Dismissed and Past searches narrowed to one source (?from=client); null shows every source. */
+  from?: SourceFilter;
   /** How many searches, saved and dismissed postings there are, for the tabs. */
   counts: { searches: number; saved: number; dismissed: number };
   /** Now, from the server, so "3 days ago" reads the same on both sides. */
@@ -70,6 +76,7 @@ export function JobsScreen({
   missingSearch = false,
   kept = [],
   history = [],
+  from = null,
   counts,
   today,
 }: JobsScreenProps) {
@@ -87,11 +94,16 @@ export function JobsScreen({
     </>
   );
 
+  // What AI clients found stays apart from what the job source found: each list can be narrowed to one source.
+  const fromSource = (origin: PostingOrigin) => from === null || origin === from;
+
   if (view === "history") {
+    const days = history.map((day) => ({ ...day, searches: day.searches.filter((search) => fromSource(search.source)) })).filter((day) => day.searches.length > 0);
     return (
       <>
         {header}
-        <PastSearches days={history} countries={countries} />
+        <SourceFilter view={view} from={from} present={history.flatMap((day) => day.searches.map((search) => search.source))} />
+        <PastSearches days={days} countries={countries} empty={from ? `No searches from ${filterName(from)}.` : undefined} />
       </>
     );
   }
@@ -100,7 +112,15 @@ export function JobsScreen({
     return (
       <>
         {header}
-        <PostingResults key={view} mode={view} postings={kept} today={today} scoreInClaude={scoreInClaude} />
+        <SourceFilter view={view} from={from} present={kept.map((posting) => posting.source)} />
+        <PostingResults
+          key={`${view}:${from ?? ""}`}
+          mode={view}
+          postings={kept.filter((posting) => fromSource(posting.source))}
+          today={today}
+          scoreInClaude={scoreInClaude}
+          empty={from ? `Nothing ${view} from ${filterName(from)}.` : undefined}
+        />
       </>
     );
   }
@@ -221,6 +241,37 @@ function SearchForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** A source as the From filter names it: "AI clients" for what Claude, Gemini… added, else the job source's name. */
+const filterName = (source: PostingOrigin) => (source === "CLIENT" ? "AI clients" : SOURCE_INFO[source].name);
+
+/**
+ * Narrows Saved, Dismissed or Past searches to one source (?from=client,
+ * ?from=jsearch…), so what AI clients found can be told from what the job
+ * source found. Only shown once the list holds more than one source.
+ */
+function SourceFilter({ view, from, present }: { view: "history" | "saved" | "dismissed"; from: SourceFilter; present: readonly PostingOrigin[] }) {
+  const router = useRouter();
+  const sources = POSTING_SOURCES.filter((source) => present.includes(source) || source === from);
+  if (sources.length < 2 && !from) return null;
+  return (
+    <div className="px-10 pb-5">
+      <Select
+        label="From"
+        value={from ?? ""}
+        onChange={(event) => router.push(viewHref(view, (event.target.value || null) as SourceFilter), { scroll: false })}
+        className="w-full max-w-[300px]"
+      >
+        <option value="">All sources</option>
+        {sources.map((source) => (
+          <option key={source} value={source}>
+            {source === "CLIENT" ? "AI clients (Claude, Gemini…)" : SOURCE_INFO[source].name}
+          </option>
+        ))}
+      </Select>
+    </div>
   );
 }
 

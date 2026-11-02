@@ -248,6 +248,14 @@ describe("Find jobs through the Claude connector", () => {
     });
     expect(await prisma().posting.findMany({ where: { source: "CLIENT" }, select: { title: true }, orderBy: { title: "asc" } })).toEqual([{ title: "Financial Analyst" }, { title: "Junior Analyst" }]);
 
+    // Narrowed to one source, as the From filter on Find jobs does.
+    expect((await tool("list_postings", { view: "saved", source: "client" })).json).toMatchObject({
+      saved: { total: 1, postings: [{ title: "Financial Analyst" }], link: "https://dossier.example/jobs?view=saved&from=client" },
+    });
+    expect((await tool("list_postings", { view: "searches", source: "jsearch" })).json).toMatchObject({
+      searches: { total: 1, searches: [{ search_id: jsearch.id }], link: "https://dossier.example/jobs?view=history&from=jsearch" },
+    });
+
     // Nothing is added twice: what a job source found (by link, or the same opening on another site), what's saved or dismissed, stay out, each with where it is.
     const again = await tool("add_found_jobs", {
       searched: { keywords: "analyst" },

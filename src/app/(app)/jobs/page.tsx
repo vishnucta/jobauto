@@ -4,7 +4,7 @@ import { isAiUsable } from "@/lib/ai/config";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
-import { defaultSearch, latestRole, queryFromParams, viewFromParams } from "@/lib/job-search/search";
+import { defaultSearch, latestRole, queryFromParams, sourceFilterFromParams, viewFromParams } from "@/lib/job-search/search";
 import { countSearches, listSearches, loadSearch } from "@/lib/posting-searches";
 import { countPostings, listPostings } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
@@ -18,12 +18,14 @@ export const metadata: Metadata = { title: "Find jobs" };
  * Find jobs (E14-6). Every search is kept with what it found (E14-10):
  * ?search=<id> opens one, and without it the latest one shows, so going back
  * costs no searches. ?view=history lists past searches; ?view=saved and
- * ?view=dismissed the postings kept from them (E14-7). A search written in
- * the URL (?q=…) only fills in the form.
+ * ?view=dismissed the postings kept from them (E14-7); ?from=client narrows
+ * those views to one source, keeping what AI clients found apart. A search
+ * written in the URL (?q=…) only fills in the form.
  */
 export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const params = await searchParams;
   const view = viewFromParams(params);
+  const from = sourceFilterFromParams(params);
   const typed = queryFromParams(params);
   const searchId = typeof params.search === "string" ? params.search : undefined;
   const [config, timeZone, postingCounts, searches, scoreInClaude] = await Promise.all([
@@ -49,6 +51,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       view={view}
+      from={from}
       query={typed ?? search?.query ?? (await latestQuery()) ?? (await profileSearch())}
       search={search}
       missingSearch={Boolean(searchId) && !search}

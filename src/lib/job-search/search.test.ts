@@ -17,6 +17,7 @@ import {
   searchHref,
   searchQuerySchema,
   jobKeys,
+  sourceFilterFromParams,
   viewFromParams,
   viewHref,
 } from "./search";
@@ -39,6 +40,11 @@ describe("search in the URL", () => {
     expect(viewFromParams({ view: "other" })).toBe("search");
     expect(viewFromParams({})).toBe("search");
     expect(viewHref("saved")).toBe("/jobs?view=saved");
+    expect(viewHref("saved", "CLIENT")).toBe("/jobs?view=saved&from=client");
+    expect(sourceFilterFromParams({ from: "client" })).toBe("CLIENT");
+    expect(sourceFilterFromParams({ from: "JSearch" })).toBe("JSEARCH");
+    expect(sourceFilterFromParams({ from: "other" })).toBeNull();
+    expect(sourceFilterFromParams({})).toBeNull();
   });
 
   it("has no search without keywords", () => {

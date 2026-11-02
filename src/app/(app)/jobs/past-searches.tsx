@@ -16,7 +16,16 @@ import { removeJobSearch } from "./actions";
  * Past searches (E14-10): every kept search, newest first, grouped by the day
  * it ran. Opening one shows what it found without asking the source again.
  */
-export function PastSearches({ days, countries }: { days: PastSearchDay[]; countries: readonly Country[] }) {
+export function PastSearches({
+  days,
+  countries,
+  empty = "No searches yet. Each search you run is kept here with what it found, so you can open it again without spending another search.",
+}: {
+  days: PastSearchDay[];
+  countries: readonly Country[];
+  /** The message when there are none; another one when the list is narrowed to one source. */
+  empty?: string;
+}) {
   const router = useRouter();
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const shown = days.map((day) => ({ ...day, searches: day.searches.filter((search) => !removed.has(search.id)) })).filter((day) => day.searches.length > 0);
@@ -40,7 +49,7 @@ export function PastSearches({ days, countries }: { days: PastSearchDay[]; count
   if (shown.length === 0) {
     return (
       <div className="mx-10 mb-16 max-w-[860px] rounded-panel border border-line-card bg-card px-5 py-9 text-center text-sm text-muted">
-        No searches yet. Each search you run is kept here with what it found, so you can open it again without spending another search.
+        {empty}
       </div>
     );
   }
