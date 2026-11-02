@@ -5,7 +5,7 @@ jobauto runs on your own computer: one password, your data in a PostgreSQL datab
 | Way | For whom | Status |
 |---|---|---|
 | [1. Clone with Git](#1-clone-with-git) | You can use a terminal. Windows, macOS or Linux. | Available |
-| [2. Download a zip](#2-download-a-zip-windows) | Windows, no terminal: download, double-click, done. Works on an empty computer. | Built; the first zip is published on the Releases page after its clean-machine test |
+| [2. Download a zip](#2-download-a-zip-windows) | Windows, no terminal: download, double-click, done. Works on an empty computer. | Available |
 | [3. Docker](#3-docker) | You have Docker Desktop, or a server. | As in upstream Dossier |
 
 The Apply tab opens the employer's form in a browser window on the machine the app runs on, so install it on the computer you apply from.
