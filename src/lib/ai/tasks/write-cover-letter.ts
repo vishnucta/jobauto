@@ -5,6 +5,7 @@ import { SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } fro
 import type { ProfileData } from "@/lib/profile";
 import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
 import { TONES } from "@/lib/tones";
+import { plainText } from "@/lib/unit-text";
 
 import { guardSources, guardUnits } from "../fact-guard";
 
@@ -90,14 +91,17 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
     signal: options.signal,
   });
 
-  // English letters get the tone's own sign-off; other languages keep the model's.
+  // English letters get the tone's own sign-off; other languages keep the model's. Everything the model wrote goes through the character normaliser.
   const language = options.language ?? extracted.language ?? "English";
-  const signOff = /^english$/i.test(language) || !answer.signOff.trim() ? TONES[tone].signOff : answer.signOff.trim();
+  const closing = plainText(answer.signOff).trim();
+  const signOff = /^english$/i.test(language) || !closing ? TONES[tone].signOff : closing;
+  const recipient = tidyLines(answer.recipient);
+  const greeting = plainText(answer.greeting).trim();
   const units = unitsSchema.parse([
     // Left out when empty: the English ones fill in (src/lib/letter-frame.ts).
-    ...(answer.recipient.trim() ? [{ id: "recipient", label: FRAME_LABELS.recipient, text: tidyLines(answer.recipient) }] : []),
-    ...(answer.greeting.trim() ? [{ id: "greeting", label: FRAME_LABELS.greeting, text: answer.greeting.trim() }] : []),
-    ...withoutFrame(answer.paragraphs, signOff)
+    ...(recipient ? [{ id: "recipient", label: FRAME_LABELS.recipient, text: recipient }] : []),
+    ...(greeting ? [{ id: "greeting", label: FRAME_LABELS.greeting, text: greeting }] : []),
+    ...withoutFrame(answer.paragraphs.map((paragraph) => ({ ...paragraph, text: plainText(paragraph.text) })), signOff)
       .filter((paragraph) => paragraph.text.trim())
       .map((paragraph, index) => ({ id: `paragraph:${index + 1}`, label: paragraph.label.trim() || `Paragraph ${index + 1}`, text: paragraph.text.trim() })),
     { id: SIGN_OFF_UNIT, label: "Sign-off", text: signOff },
@@ -109,9 +113,9 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
   };
 };
 
-/** An address block's lines, trimmed, without empty ones. */
-const tidyLines = (text: string) =>
-  text
+/** An address block's lines, normalised and trimmed, without empty ones. */
+export const tidyLines = (text: string) =>
+  plainText(text)
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)

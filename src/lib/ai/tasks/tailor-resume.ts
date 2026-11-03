@@ -4,6 +4,7 @@ import { unitsSchema, type Extracted, type Match, type Unit } from "@/lib/applic
 import { publicationLabel } from "@/lib/citation";
 import { documentLabels, ENGLISH_LABELS, languagesLine, type DocumentLabels } from "@/lib/document-labels";
 import { resumePublications, sameName, type ProfileData } from "@/lib/profile";
+import { plainText } from "@/lib/unit-text";
 
 import { guardSources, guardUnits } from "../fact-guard";
 
@@ -109,14 +110,15 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
  * the words of `labels`.
  */
 export function resumeUnits(profile: ProfileData, answer: z.infer<typeof answerSchema>, labels: DocumentLabels = ENGLISH_LABELS): Unit[] {
-  const roles = new Map(answer.roles.map((role) => [role.id, role.bullets]));
-  const projects = new Map(answer.projects.map((project) => [project.id, project.bullets]));
-  const notes = new Map(answer.education.map((entry) => [entry.id, entry.notes]));
+  // What the model wrote goes through the character normaliser; the profile's own text (a skipped role's bullets, the citations) stays as it is.
+  const roles = new Map(answer.roles.map((role) => [role.id, role.bullets.map(plainText)]));
+  const projects = new Map(answer.projects.map((project) => [project.id, project.bullets.map(plainText)]));
+  const notes = new Map(answer.education.map((entry) => [entry.id, plainText(entry.notes)]));
   const skills = [
-    ...new Set(answer.skills.flatMap((name) => profile.skills.find((skill) => sameName(skill.name, name))?.name ?? [])),
+    ...new Set(answer.skills.flatMap((name) => profile.skills.find((skill) => sameName(skill.name, plainText(name)))?.name ?? [])),
   ];
   const units: Unit[] = [
-    { id: "summary", label: "Summary", text: answer.summary.trim() },
+    { id: "summary", label: "Summary", text: plainText(answer.summary).trim() },
     ...profile.experience.map((entry) => {
       const bullets = (roles.get(entry.id) ?? entry.bullets.split("\n")).map((line) => line.trim()).filter(Boolean);
       return { id: `experience:${entry.id}`, label: `${entry.company || entry.role} role`, text: bullets.join("\n") };

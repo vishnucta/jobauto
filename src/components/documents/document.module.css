@@ -29,6 +29,10 @@
   background: #fff;
   color: var(--doc-text);
   font-family: var(--body-font);
+  /* No ligatures: a parser reading the PDF's text layer must find "Refit" and
+     "financial", not an ﬁ glyph. Required ligatures (Arabic, Devanagari) are
+     not affected by this property. */
+  font-variant-ligatures: none;
   font-size: calc(var(--u) * var(--font-size));
   line-height: var(--line-height);
   text-align: start;

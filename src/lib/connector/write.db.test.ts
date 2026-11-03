@@ -91,6 +91,21 @@ describe("an application written in Claude chat (#221)", () => {
     expect(letter.some((unit) => unit.id === "sender")).toBe(true);
   });
 
+  it("takes the characters a parser reads wrong out of what Claude wrote", async () => {
+    const { applicationId } = await saveWrittenApplication(
+      written({
+        resume: { ...written().resume, summary: "De­signer who ships calm, clear products.​", roles: [{ id: role.id, bullets: ["Led the redesign of the payments ﬂow"] }] },
+        letter: { ...written().letter, greeting: "Dear Acme team,​", paragraphs: [{ label: "Why Acme", text: "I'd like to help Acme de‑risk its product." }] },
+      }),
+    );
+    const documents = await prisma().document.findMany({ where: { applicationId }, select: { kind: true, units: true } });
+    const units = (kind: string) => documents.find((document) => document.kind === kind)!.units as { id: string; text: string }[];
+    expect(units("RESUME").find((unit) => unit.id === "summary")?.text).toBe("Designer who ships calm, clear products.");
+    expect(units("RESUME").find((unit) => unit.id === `experience:${role.id}`)?.text).toBe("Led the redesign of the payments flow");
+    expect(units("COVER_LETTER").find((unit) => unit.id === "greeting")?.text).toBe("Dear Acme team,");
+    expect(units("COVER_LETTER").find((unit) => unit.id === "paragraph:1")?.text).toBe("I'd like to help Acme de-risk its product.");
+  });
+
   it("marks names and numbers the profile and posting don't back when Never invent experience is on", async () => {
     await saveSettings({ strict: true });
     const { unverified } = await saveWrittenApplication(written({ resume: { ...written().resume, summary: "Led 40 engineers at Google." } }));

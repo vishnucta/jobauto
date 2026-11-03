@@ -6,7 +6,7 @@ import { emailParts } from "@/lib/application-email";
 import { isFrameUnit } from "@/lib/letter-frame";
 import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
-import { isPublicationUnit } from "@/lib/unit-text";
+import { isPublicationUnit, plainText } from "@/lib/unit-text";
 
 import { guardSources, unverifiedFacts } from "../fact-guard";
 
@@ -117,7 +117,8 @@ export const refineChat: Task<RefineInput, Refinement> = async (provider, input,
   if (!answer.declined) {
     for (const edit of answer.edits) {
       const unit = documents[edit.document].find((entry) => entry.id === edit.unitId);
-      const text = edit.text.trim();
+      // Normalised before the comparison, so an edit that only differs in invisible characters is no edit.
+      const text = plainText(edit.text).trim();
       // A publication stays as the candidate wrote it (#218).
       if (unit && text && text !== unit.text && !isPublicationUnit(unit.id)) {
         // E6-6: in strict mode, note what the profile and posting don't back.

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { guardSources, guardUnits } from "@/lib/ai/fact-guard";
 import { resumeUnits } from "@/lib/ai/tasks/tailor-resume";
-import { withoutFrame } from "@/lib/ai/tasks/write-cover-letter";
+import { tidyLines, withoutFrame } from "@/lib/ai/tasks/write-cover-letter";
 import { createApplicationFromDocuments } from "@/lib/application-create";
 import { SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
 import { documentLabels } from "@/lib/document-labels";
@@ -12,6 +12,7 @@ import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { TONES } from "@/lib/tones";
+import { plainText } from "@/lib/unit-text";
 
 // An application written in Claude chat and saved through the connector
 // (#221, save_application): Claude reads the profile and the posting, writes
@@ -79,18 +80,14 @@ export type WrittenApplication = {
   note: string;
 };
 
-/** The cover letter's parts, as the AI's are made (src/lib/ai/tasks/write-cover-letter.ts). */
+/** The cover letter's parts, as the AI's are made (src/lib/ai/tasks/write-cover-letter.ts), what Claude wrote normalised the same way. */
 export function letterUnits(letter: z.output<typeof writtenLetterSchema>, signOff: string): Unit[] {
-  const tidy = (text: string) =>
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join("\n");
+  const recipient = tidyLines(letter.recipient);
+  const greeting = plainText(letter.greeting).trim();
   return unitsSchema.parse([
-    ...(letter.recipient.trim() ? [{ id: "recipient", label: FRAME_LABELS.recipient, text: tidy(letter.recipient) }] : []),
-    ...(letter.greeting.trim() ? [{ id: "greeting", label: FRAME_LABELS.greeting, text: letter.greeting.trim() }] : []),
-    ...withoutFrame(letter.paragraphs, signOff)
+    ...(recipient ? [{ id: "recipient", label: FRAME_LABELS.recipient, text: recipient }] : []),
+    ...(greeting ? [{ id: "greeting", label: FRAME_LABELS.greeting, text: greeting }] : []),
+    ...withoutFrame(letter.paragraphs.map((paragraph) => ({ ...paragraph, text: plainText(paragraph.text) })), signOff)
       .filter((paragraph) => paragraph.text.trim())
       .map((paragraph, index) => ({ id: `paragraph:${index + 1}`, label: paragraph.label.trim() || `Paragraph ${index + 1}`, text: paragraph.text.trim() })),
     { id: SIGN_OFF_UNIT, label: "Sign-off", text: signOff },
@@ -117,7 +114,8 @@ export async function saveWrittenApplication(input: WrittenApplication): Promise
 
   const tone = settings.defaultTone;
   const english = /^english$/i.test(details.language.trim() || "English");
-  const signOff = english || !input.letter.sign_off.trim() ? TONES[tone].signOff : input.letter.sign_off.trim();
+  const closing = plainText(input.letter.sign_off).trim();
+  const signOff = english || !closing ? TONES[tone].signOff : closing;
   let resume = resumeUnits(profile, input.resume, documentLabels(details.language));
   let letter = letterUnits(input.letter, signOff);
   if (settings.strict) {

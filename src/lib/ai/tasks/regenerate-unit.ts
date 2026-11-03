@@ -6,7 +6,7 @@ import { emailParts } from "@/lib/application-email";
 import { isFrameUnit } from "@/lib/letter-frame";
 import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
-import { bulletLines, isBulletUnit } from "@/lib/unit-text";
+import { bulletLines, isBulletUnit, plainText } from "@/lib/unit-text";
 
 import { guardSources, guardUnits } from "../fact-guard";
 
@@ -112,7 +112,7 @@ export const regenerateUnit: Task<RegenerateInput, Unit> = async (provider, inpu
     creativity: options.creativity,
     signal: options.signal,
   });
-  const text = bullets ? bulletLines(answer.text) : answer.text.trim();
+  const text = bullets ? bulletLines(answer.text) : plainText(answer.text).trim();
   // An English sign-off stays the tone's.
   const english = /^english$/i.test(options.language ?? extracted.language ?? "English");
   const updated = { ...unit, text: unit.id === SIGN_OFF_UNIT && english ? TONES[tone].signOff : text || unit.text };

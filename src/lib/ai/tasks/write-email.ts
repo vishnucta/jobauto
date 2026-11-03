@@ -5,6 +5,7 @@ import type { Extracted, Match, Unit } from "@/lib/application-data";
 import { emailUnits, isEmailAddress } from "@/lib/application-email";
 import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
+import { plainText } from "@/lib/unit-text";
 
 import { guardSources, guardUnits } from "../fact-guard";
 
@@ -95,17 +96,18 @@ export const writeEmail: Task<EmailInput, Unit[]> = async (provider, { profile, 
     signal: options.signal,
   });
 
-  // English emails get the tone's own sign-off, as letters do; other languages keep the model's.
+  // English emails get the tone's own sign-off, as letters do; other languages keep the model's. Everything the model wrote goes through the character normaliser.
   const language = options.language ?? extracted.language ?? "English";
-  const signOff = /^english$/i.test(language) || !answer.signOff.trim() ? TONES[tone].signOff : answer.signOff.trim();
-  const paragraphs = withoutFrame(answer.paragraphs.map((text) => ({ text })), signOff)
+  const closing = plainText(answer.signOff).trim();
+  const signOff = /^english$/i.test(language) || !closing ? TONES[tone].signOff : closing;
+  const paragraphs = withoutFrame(answer.paragraphs.map((text) => ({ text: plainText(text) })), signOff)
     .map((paragraph) => paragraph.text.trim())
     .filter(Boolean);
-  const body = [answer.greeting.trim(), ...paragraphs, [signOff, profile.basics.name.trim()].filter(Boolean).join("\n")]
+  const body = [plainText(answer.greeting).trim(), ...paragraphs, [signOff, profile.basics.name.trim()].filter(Boolean).join("\n")]
     .filter(Boolean)
     .join("\n\n");
 
-  const [to, ...written] = emailUnits({ to: recipient(answer.contactName, answer.contactEmail, posting), subject: oneLine(answer.subject), body });
+  const [to, ...written] = emailUnits({ to: recipient(answer.contactName, answer.contactEmail, posting), subject: oneLine(plainText(answer.subject)), body });
   return {
     // The recipient comes from the posting; the subject and message are checked like the letter's paragraphs.
     data: [to, ...(options.strict ? guardUnits(written, guardSources(profile, extracted, posting, facts)) : written)],
@@ -118,9 +120,10 @@ export const writeEmail: Task<EmailInput, Unit[]> = async (provider, { profile, 
  * posting has the address, so a guessed one is never used.
  */
 export function recipient(name: string | null, address: string | null, posting: string): string {
-  const email = address?.trim().replace(/^mailto:/i, "") ?? "";
-  if (!isEmailAddress(email) || !posting.toLowerCase().includes(email.toLowerCase())) return "";
-  const who = oneLine(name ?? "").replace(/[<>"]/g, "");
+  // Both sides without invisible characters: job pages hide soft hyphens and zero-width spaces in addresses against scrapers.
+  const email = plainText(address ?? "").trim().replace(/^mailto:/i, "");
+  if (!isEmailAddress(email) || !plainText(posting).toLowerCase().includes(email.toLowerCase())) return "";
+  const who = oneLine(plainText(name ?? "")).replace(/[<>"]/g, "");
   return who && who.toLowerCase() !== email.toLowerCase() ? `${who} <${email}>` : email;
 }
 

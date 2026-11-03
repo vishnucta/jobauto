@@ -255,6 +255,25 @@ describe("tailorResume", () => {
     expect(text).not.toContain("Kept off resumes");
   });
 
+  it("normalises the characters the model writes that a parser reads wrong, but never a publication's citation", async () => {
+    const written = {
+      ...answer,
+      summary: "Product de­signer who makes complex tools calm.​",
+      roles: [{ id: "e1", bullets: ["Led the carrier portal re‑design", "​", "Owned the design system"] }],
+      projects: [{ id: "p1", bullets: ["Built an open-source ﬁgma plugin"] }],
+      education: [{ id: "d1", notes: "Thesis on trust in auto­mation" }],
+    };
+    const citation = "Doe, J. (2016). Trust in auto­mated scheduling.";
+    const withSoftHyphen = { ...profile, publications: [{ ...profile.publications[0], citation }] };
+    const { data } = await tailorResume(model(written), { profile: withSoftHyphen, extracted, match: null, facts: [], posting }, options);
+    const text = (id: string) => data.find((unit) => unit.id === id)?.text;
+    expect(text("summary")).toBe("Product designer who makes complex tools calm.");
+    expect(text("experience:e1")).toBe("Led the carrier portal re-design\nOwned the design system");
+    expect(text("project:p1")).toBe("Built an open-source figma plugin");
+    expect(text("education:d1")).toBe("Thesis on trust in automation");
+    expect(text("publication:u1")).toBe(citation);
+  });
+
   it("names language levels in the resume's language: the chosen one, or the posting's", async () => {
     const levels = async (language: string | null, postingLanguage: string) => {
       const { data } = await tailorResume(model(answer), { profile, extracted: { ...extracted, language: postingLanguage }, match: null, facts: [], posting }, { ...options, language });
@@ -341,6 +360,25 @@ describe("writeCoverLetter", () => {
     const { data } = await writeCoverLetter(model({ ...answer, signOff: "Met vriendelijke groet," }), { profile, extracted, match: null, tone: "WARM", facts: [], posting }, { ...options, language: "Dutch" });
     expect(data.at(-1)).toEqual({ id: "sign-off", label: "Sign-off", text: "Met vriendelijke groet," });
   });
+
+  it("normalises what the model wrote in every part, keeping a non-breaking space", async () => {
+    const written = {
+      recipient: "Ledgerly · Hiring team\n​\nAmsterdam",
+      greeting: "Dear Ledgerly team,​",
+      paragraphs: [
+        { label: "Opening", text: "I was excited to see the role on your care­ers page." },
+        { label: "Nothing", text: "​" },
+      ],
+      signOff: "Met vriende­lijke groet,",
+    };
+    const { data } = await writeCoverLetter(model(written), { profile, extracted, match: null, tone: "WARM", facts: [], posting }, { ...options, language: "Dutch" });
+    expect(data).toEqual([
+      { id: "recipient", label: "Recipient", text: "Ledgerly · Hiring team\nAmsterdam" },
+      { id: "greeting", label: "Greeting", text: "Dear Ledgerly team," },
+      { id: "paragraph:1", label: "Opening", text: "I was excited to see the role on your careers page." },
+      { id: "sign-off", label: "Sign-off", text: "Met vriendelijke groet," },
+    ]);
+  });
 });
 
 describe("writeEmail", () => {
@@ -391,11 +429,25 @@ describe("writeEmail", () => {
     expect(data[2].unverified).toEqual(expect.arrayContaining(["40%"]));
   });
 
+  it("normalises the subject and the message the model wrote", async () => {
+    const written = {
+      ...answer,
+      subject: "Application: Senior Product De­signer, Jane Doe",
+      paragraphs: ["I'm applying for the Senior Product Designer role.​", "​", "My resume and cover letter are at­tached."],
+    };
+    const { data } = await writeEmail(model(written), input, options);
+    expect(data[1].text).toBe("Application: Senior Product Designer, Jane Doe");
+    expect(data[2].text).toBe(`Dear John,\n\nI'm applying for the Senior Product Designer role.\n\nMy resume and cover letter are attached.\n\nKind regards,\n${profile.basics.name}`);
+  });
+
   it("names the recipient as the posting gives them", () => {
     expect(recipient(null, "jobs@example.com", "Apply at JOBS@example.com")).toBe("jobs@example.com");
     expect(recipient("John <Doe>", "mailto:john@example.com", "john@example.com")).toBe("John Doe <john@example.com>");
     expect(recipient("John Doe", null, "john@example.com")).toBe("");
     expect(recipient("John Doe", "not an address", "not an address")).toBe("");
+    // A posting that hides a soft hyphen or a zero-width space in the address still gives it, without them.
+    expect(recipient(null, "jobs@ledg­erly.example", "Apply at jobs@ledg­erly.example")).toBe("jobs@ledgerly.example");
+    expect(recipient(null, "jobs@ledgerly.example", "Apply at jobs@​ledgerly.example")).toBe("jobs@ledgerly.example");
   });
 });
 
@@ -409,6 +461,19 @@ describe("regenerateUnit", () => {
     expect(data).toMatchObject({ id: "experience:e1", text: "Rebuilt the carrier portal\nGrew the design system" });
     expect(prompt(provider)).toContain(`Write a new version of "${unit.label}" (experience:e1)`);
     expect(sent(provider).system).not.toContain(COVER_LETTER_APPROACH);
+  });
+
+  it("reads a non-breaking hyphen as a bullet and takes invisible characters out of the new text", async () => {
+    const resume = demoResumeUnits();
+    const unit = resume.find((entry) => entry.id === "experience:e1")!;
+    const provider = model({ text: "‑ Rebuilt the carrier portal\n​\n• Grew the design sys­tem" });
+    const { data } = await regenerateUnit(provider, { kind: "RESUME", unit, document: resume, profile, extracted, tone: "WARM", facts: [], posting }, options);
+    expect(data.text).toBe("Rebuilt the carrier portal\nGrew the design system");
+
+    const summary = { id: "summary", label: "Summary", text: "Product designer." };
+    const prose = model({ text: "﻿Product de­signer who makes complex tools calm.​" });
+    const { data: regenerated } = await regenerateUnit(prose, { kind: "RESUME", unit: summary, document: [summary], profile, extracted, tone: "WARM", facts: [], posting }, options);
+    expect(regenerated.text).toBe("Product designer who makes complex tools calm.");
   });
 
   it("keeps an English letter's sign-off the tone's", async () => {
@@ -467,6 +532,22 @@ describe("refineChat", () => {
         { document: "COVER_LETTER", unitId: "sign-off", text: "Kind regards,", previousText: "Warm regards," },
       ],
     });
+  });
+
+  it("normalises an edit's text, and skips one that only differs in invisible characters", async () => {
+    const answer = {
+      reply: "Done.",
+      edits: [
+        { document: "COVER_LETTER", unitId: "paragraph:1", text: "Please accept my ap­plication for the role of designer." },
+        { document: "RESUME", unitId: "summary", text: `​${resume[0].text}` },
+      ],
+      tone: null,
+      declined: false,
+    };
+    const { data } = await refineChat(model(answer), input, options);
+    expect(data.edits).toEqual([
+      { document: "COVER_LETTER", unitId: "paragraph:1", text: "Please accept my application for the role of designer.", previousText: letter[0].text },
+    ]);
   });
 
   it("never edits a publication (#218)", async () => {
