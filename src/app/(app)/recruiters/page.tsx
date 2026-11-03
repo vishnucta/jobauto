@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
-import { languageLevelLabel } from "@/lib/profile";
 import { loadProfile } from "@/lib/profile-data";
 import { countPostings } from "@/lib/postings";
 import { countSearches } from "@/lib/posting-searches";
+import { outreachFacts } from "@/lib/recruiters/facts";
 import { listRecruiters } from "@/lib/recruiters/store";
 
 import { RecruitersScreen } from "./recruiters-screen";
@@ -21,12 +21,7 @@ export default async function RecruitersPage() {
     <RecruitersScreen
       recruiters={recruiters}
       counts={{ ...postingCounts, searches, recruiters: recruiters.length }}
-      facts={{
-        name: profile.basics.name.trim(),
-        headline: profile.basics.headline.trim(),
-        city: profile.basics.city.trim(),
-        languages: profile.languages.map((language) => ({ name: language.name, level: languageLevelLabel(language.level) })),
-      }}
+      facts={outreachFacts(profile)}
       today={new Date().toISOString()}
     />
   );

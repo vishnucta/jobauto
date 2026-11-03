@@ -35,6 +35,7 @@ import { registerDocumentTools } from "./tools/documents";
 import { registerInboxTools } from "./tools/inbox";
 import { registerPostingTools } from "./tools/postings";
 import { registerProfileTools } from "./tools/profile";
+import { registerRecruiterTools } from "./tools/recruiters";
 import { registerSettingsTools } from "./tools/settings";
 import { registerTaskTools } from "./tools/tasks";
 import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writtenLetterSchema, writtenMatchSchema, writtenResumeSchema } from "./write";
@@ -93,11 +94,14 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           "Dossier is the user's own job search app: one profile, tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
           "Its tools do what its screens do. " +
           "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs; " +
+          "keep its keywords short, as a source treats every word as a requirement: get_search_words suggests them from the profile; " +
           "jobs you find yourself on the web go into Find jobs with add_found_jobs, kept apart from the job source's as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
           "or have Dossier's AI score them with score_with_dossier; keep or drop postings with update_postings. " +
           "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
           "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application. " +
           "Or let Dossier's AI draft it with draft_application. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
+          "Recruiters are the agencies and recruiters on Find jobs → Recruiters: list_recruiters, add_recruiter, update_recruiter, set_recruiter_status, snooze_recruiter and remove_recruiter keep track of them, " +
+          "and draft_recruiter_message drafts the message to write; Dossier sends nothing, so record that the user wrote or heard back only when they say so. " +
           "check_resume says whether a resume's PDF reads correctly for an applicant tracking system, names the posting's requirements, and has clean text. " +
           "Change the profile only with what the user told you or confirmed. " +
           "Work that takes a while answers with a task_id: follow it with check_task. " +
@@ -114,6 +118,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       title: "Search for jobs",
       description:
         "Searches the job source set up in Dossier's settings, or the sources given, together, and keeps the search in Find jobs → Past searches. Each search uses one search from the user's plan with each source. " +
+        "Keep the keywords to a title or two or three words (get_search_words suggests them): a whole headline finds nothing. " +
         "Returns a search_id and numbered postings; pass both to get_posting, save_job_scores or save_application, or the search_id to more_jobs.",
       inputSchema: z.object({
         keywords: z.string().trim().min(1).max(200).describe("Job title, skill or company, e.g. 'product designer'"),
@@ -443,6 +448,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
   registerApplicationTools(context);
   registerApplyTools(context);
   registerPostingTools(context);
+  registerRecruiterTools(context);
   registerTaskTools(context);
   registerAgentTools(context);
   registerInboxTools(context);

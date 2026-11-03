@@ -1,8 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { startJob } from "@/lib/jobs/runner";
 import { saveScore } from "@/lib/posting-scores";
 import { dismissPosting, savePosting } from "@/lib/postings";
+import { loadProfile } from "@/lib/profile-data";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
@@ -339,5 +341,40 @@ describe("Find jobs through the Claude connector", () => {
     expect(await tool("score_with_dossier", { search_id: search.id, number: 5 })).toMatchObject({ isError: true });
     expect(await tool("score_with_dossier", { search_id: "gone", number: 1 })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
     expect(await tool("score_with_dossier", {})).toMatchObject({ isError: true, text: "Give search_id and number, or posting_id." });
+  });
+
+  it("suggests search words from the profile, as the profile editor does, with Senior only when wanted", async () => {
+    // A plain latest title, so that "Senior" is a guess from the years the roles add up to.
+    await prisma().experience.updateMany({ data: { role: "Product Designer" } });
+    const profile = await loadProfile();
+    const now = new Date();
+    const expected = searchWords(profile, now);
+    expect(expected.seniorYears).not.toBeNull();
+    const answer = await tool("get_search_words");
+    expect(answer.isError).toBe(false);
+    expect(answer.json).toMatchObject({ german: expected.german, best: searchChips(expected), link: "https://dossier.example/profile" });
+    const groups = answer.json.groups as { title: string; words: { text: string; language: string; why: string }[] }[];
+    expect(groups.map((group) => group.title)).toEqual(expected.groups.map((group) => group.title));
+    expect(groups.flatMap((group) => group.words.map((word) => word.text))).toEqual(expected.groups.flatMap((group) => group.words.map((word) => word.text)));
+    expect(groups.every((group) => group.words.every((word) => word.text.split(/\s+/).length <= 3 && word.why))).toBe(true);
+
+    const without = await tool("get_search_words", { senior: false });
+    const words = (without.json.groups as { words: { text: string }[] }[]).flatMap((group) => group.words.map((word) => word.text));
+    expect(words).toEqual(searchWords(profile, now, { senior: false }).groups.flatMap((group) => group.words.map((word) => word.text)));
+    expect(words.some((word) => /^Senior /.test(word))).toBe(false);
+    expect(groups.flatMap((group) => group.words.map((word) => word.text)).some((word) => /^Senior /.test(word))).toBe(true);
+    expect(without.json.senior_years).toEqual(expected.seniorYears ?? undefined);
+  });
+
+  it("says what is missing when the profile has nothing to suggest from", async () => {
+    await prisma().experience.deleteMany();
+    await prisma().skill.deleteMany();
+    await prisma().profileField.deleteMany({ where: { key: { in: ["headline"] } } });
+    expect(await tool("get_search_words")).toMatchObject({ isError: false, json: { groups: [], message: expect.stringContaining("Fill them in on Profile"), link: "https://dossier.example/profile" } });
+  });
+
+  it("marks the search words as read-only", async () => {
+    const { tools } = (await rpc("tools/list", {})) as { tools: { name: string; annotations?: Record<string, boolean> }[] };
+    expect(tools.find((entry) => entry.name === "get_search_words")?.annotations).toEqual({ readOnlyHint: true });
   });
 });

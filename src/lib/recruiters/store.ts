@@ -39,6 +39,12 @@ export async function listRecruiters(): Promise<RecruiterView[]> {
   return (await prisma.recruiter.findMany({ orderBy: { createdAt: "asc" }, include: withEvents })).map(viewOf);
 }
 
+/** One recruiter with its history; null when it is gone. */
+export async function getRecruiter(id: string): Promise<RecruiterView | null> {
+  const row = await prisma.recruiter.findUnique({ where: { id }, include: withEvents });
+  return row ? viewOf(row) : null;
+}
+
 export type RecruiterFields = {
   name: string;
   contactName: string;

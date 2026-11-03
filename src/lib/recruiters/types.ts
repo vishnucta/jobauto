@@ -57,6 +57,10 @@ export function matchesFilter(recruiter: RecruiterView, filter: RecruiterFilter,
   }
 }
 
+/** Due ones first, then those still to write to, then those being waited on, replies and the rest. */
+export const listOrder = (recruiter: RecruiterView, now: Date) =>
+  followUpDue(recruiter, now) ? 0 : ({ NOT_CONTACTED: 1, CONTACTED: 2, REPLIED: 3, NOT_INTERESTED: 4 } as const)[recruiter.status];
+
 const DAY_MS = 86_400_000;
 const whole = (from: string, now: Date) => Math.max(0, Math.floor((now.getTime() - Date.parse(from)) / DAY_MS));
 const ago = (days: number) => (days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`);

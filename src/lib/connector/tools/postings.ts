@@ -19,10 +19,12 @@ import {
   type ShownPosting,
 } from "@/lib/job-search/search";
 import { describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
+import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { startScoring } from "@/lib/jobs/score-posting";
 import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
 import { dismissPosting, foundFromPosting, listPostings, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
+import { loadProfile } from "@/lib/profile-data";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
 import { failure, postingLine, started, text, type ToolContext } from "../kit";
@@ -339,6 +341,34 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       if (!posting) return failure(posting_id ? "That posting is no longer in Dossier." : "There's no such posting in that search. Use a number from search_jobs or list_postings.");
       const taskId = await startScoring(posting);
       return started(taskId, { title: posting.title, company: posting.company, link: search ? linkTo(searchRunHref(search.id)) : undefined });
+    },
+  );
+
+  server.registerTool(
+    "get_search_words",
+    {
+      title: "Suggested search words",
+      description:
+        "The search words Find jobs and the profile editor suggest, worked out from the profile: job titles from the roles, specialties from the headline, and skills, with German words for a profile in Germany, Austria or Switzerland. " +
+        "Use one as search_jobs keywords: a source treats every word as a requirement, so a whole headline finds nothing where \"Financial Analyst\" finds hundreds. " +
+        "\"Senior\" is only a guess from about eight years of experience: leave it out when the user doesn't want it.",
+      inputSchema: z.object({
+        senior: z.boolean().optional().describe("Offer \"Senior\" with the latest title when the experience adds up to enough (default true)"),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ senior }) => {
+      const suggested = searchWords(await loadProfile(), new Date(), { senior: senior ?? true });
+      if (suggested.groups.length === 0) {
+        return text({ groups: [], message: "The profile has no roles, headline or skills to suggest words from yet. Fill them in on Profile, or search with the words the user gives.", link: linkTo("/profile") });
+      }
+      return text({
+        german: suggested.german,
+        senior_years: suggested.seniorYears ?? undefined,
+        best: searchChips(suggested),
+        groups: suggested.groups.map((group) => ({ title: group.title, words: group.words.map((word) => ({ text: word.text, language: word.language, why: word.why })) })),
+        link: linkTo("/profile"),
+      });
     },
   );
 }

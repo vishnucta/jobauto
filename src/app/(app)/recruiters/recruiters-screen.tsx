@@ -15,6 +15,7 @@ import { formatDay } from "@/lib/dates";
 import {
   followUpDue,
   gmailLink,
+  listOrder,
   matchesFilter,
   nextStep,
   outreachDraft,
@@ -55,10 +56,6 @@ const TONE = {
   none: "text-muted",
 } as const;
 
-/** Due ones first, then those still to write to, then those being waited on, replies and the rest. */
-const rank = (recruiter: RecruiterView, now: Date) =>
-  followUpDue(recruiter, now) ? 0 : ({ NOT_CONTACTED: 1, CONTACTED: 2, REPLIED: 3, NOT_INTERESTED: 4 } as const)[recruiter.status];
-
 /**
  * Recruiters: the agencies and recruiters the user keeps track of, where each
  * conversation stands, when a follow-up is due, and the message to write
@@ -74,7 +71,7 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
 
   const refresh = () => startTransition(() => router.refresh());
   const current = selected && selected !== "new" ? (recruiters.find((recruiter) => recruiter.id === selected) ?? null) : null;
-  const visible = recruiters.filter((recruiter) => matchesFilter(recruiter, filter, now)).toSorted((a, b) => rank(a, now) - rank(b, now));
+  const visible = recruiters.filter((recruiter) => matchesFilter(recruiter, filter, now)).toSorted((a, b) => listOrder(a, now) - listOrder(b, now));
   const count = (value: RecruiterFilter) => recruiters.filter((recruiter) => matchesFilter(recruiter, value, now)).length;
   const missingStarters = STARTER_RECRUITERS.some((starter) => !recruiters.some((recruiter) => recruiter.name.trim().toLowerCase() === starter.name.toLowerCase()));
 

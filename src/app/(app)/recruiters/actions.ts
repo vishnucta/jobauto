@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
+import { recruiterFields } from "@/lib/recruiters/fields";
 import { addStarterRecruiters, createRecruiter, removeRecruiter, setRecruiterStatus, snoozeRecruiter, updateRecruiter } from "@/lib/recruiters/store";
 import { RECRUITER_STATUSES } from "@/lib/recruiters/types";
 
@@ -12,16 +13,7 @@ import { RECRUITER_STATUSES } from "@/lib/recruiters/types";
 const GONE = "That recruiter is no longer in the list. Reload the page.";
 
 const id = z.string().min(1).max(64);
-const short = z.string().trim().max(200);
-
-const fields = z.object({
-  name: z.string().trim().min(1, "Give the agency or recruiter a name.").max(200),
-  contactName: short,
-  email: z.union([z.literal(""), z.email("That doesn't look like an email address.")]).transform((value) => value.trim()),
-  website: z.union([z.literal(""), z.url({ protocol: /^https?$/, error: "A website starts with https://" })]),
-  speciality: short,
-  notes: z.string().trim().max(5_000),
-});
+const fields = recruiterFields;
 
 /** "Add a recruiter". */
 export const addRecruiter = action(fields, (input) => createRecruiter(input));
