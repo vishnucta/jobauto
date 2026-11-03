@@ -48,7 +48,7 @@ describe("the Search words panel", () => {
     render(<SearchWordsPanel profile={profile()} />);
     const panel = screen.getByRole("complementary", { name: "Search words" });
     expect(panel).toHaveTextContent("For Find jobs, Hamburg, Germany.");
-    expect(words("Job titles")).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting Analyst", "Reconciliation Analyst", "Finanzanalyst"]);
+    expect(words("Job titles")).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting Analyst", "Reconciliation Analyst", "Finanzanalyst", "Senior Finanzanalyst", "Analyst Meldewesen"]);
     expect(words("Specialties")).toEqual(["Regulatory Reporting", "Reconciliation", "Meldewesen", "Kontenabstimmung"]);
     expect(words("From your skills")).toEqual(["Audit Support", "Data Analysis", "Datenanalyse"]);
   });
@@ -68,11 +68,11 @@ describe("the Search words panel", () => {
     render(<SearchWordsPanel profile={profile()} />);
     await user.click(screen.getByRole("button", { name: "Deutsch" }));
     expect(screen.getByRole("button", { name: "Deutsch" })).toHaveAttribute("aria-pressed", "true");
-    expect(words("Job titles")).toEqual(["Finanzanalyst"]);
+    expect(words("Job titles")).toEqual(["Finanzanalyst", "Senior Finanzanalyst", "Analyst Meldewesen"]);
     expect(words("Specialties")).toEqual(["Meldewesen", "Kontenabstimmung"]);
     await user.click(screen.getByRole("button", { name: "Copy all" }));
-    expect(await navigator.clipboard.readText()).toBe("Finanzanalyst\nMeldewesen\nKontenabstimmung\nDatenanalyse");
-    expect(toast).toHaveBeenLastCalledWith("Copied 4 words, one per line.");
+    expect(await navigator.clipboard.readText()).toBe("Finanzanalyst\nSenior Finanzanalyst\nAnalyst Meldewesen\nMeldewesen\nKontenabstimmung\nDatenanalyse");
+    expect(toast).toHaveBeenLastCalledWith("Copied 6 words, one per line.");
 
     await user.click(screen.getByRole("button", { name: "English" }));
     expect(words("Job titles")).not.toContain("Finanzanalyst");

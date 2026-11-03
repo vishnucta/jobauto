@@ -86,10 +86,20 @@ function withAcronym(name: string): string[] {
   return wordCount(name) > 1 && /^[A-Z]{3,}$/.test(first) ? [name, first] : [name];
 }
 
+const LEVEL_WORD = /^(senior|junior) (.+)$/;
+
+/** A word's German from the glossary, or, after "Senior" or "Junior", which German postings keep, that of the rest: "Senior Finanzanalyst". */
+function glossaryGerman(text: string): string | undefined {
+  const key = normalText(text);
+  const level = LEVEL_WORD.exec(key);
+  const rest = level ? GERMAN_WORDS[level[2] ?? ""] : undefined;
+  return GERMAN_WORDS[key] ?? (level && rest ? `${level[1] === "senior" ? "Senior" : "Junior"} ${rest}` : undefined);
+}
+
 /** The German for each English word that has one in the glossary, apart from those that read the same. */
 function germanFor(words: SearchWord[]): SearchWord[] {
   return words.flatMap((word) => {
-    const german = GERMAN_WORDS[normalText(word.text)];
+    const german = glossaryGerman(word.text);
     return german && normalText(german) !== normalText(word.text) ? [{ text: german, language: "de" as const, why: `German for ${word.text}` }] : [];
   });
 }

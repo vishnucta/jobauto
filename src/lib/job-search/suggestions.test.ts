@@ -67,11 +67,13 @@ describe("search words from the profile", () => {
       "Tax Data Analyst",
       "Credit Analyst",
       "Finanzanalyst",
+      "Senior Finanzanalyst",
+      "Analyst Meldewesen",
       "Kreditanalyst",
     ]);
     expect(texts(result, "Specialties")).toEqual(["Regulatory Reporting", "EMIR Refit", "EMIR", "MiFIR", "COREP", "Reconciliation", "Meldewesen", "Kontenabstimmung"]);
     // Used in two roles each, then those used in one, in the order of her list; EMIR Refit, MiFIR and COREP are named already.
-    expect(texts(result, "From your skills")).toEqual(["Audit Support", "Taxation", "Data Analysis", "Regulatory Transaction Reporting", "ASIC Reporting", "IFR", "Datenanalyse"]);
+    expect(texts(result, "From your skills")).toEqual(["Audit Support", "Taxation", "Data Analysis", "Regulatory Transaction Reporting", "ASIC Reporting", "IFR", "Steuerwesen", "Datenanalyse", "Transaktionsmeldung"]);
   });
 
   it("says where each word comes from", () => {
@@ -84,6 +86,7 @@ describe("search words from the profile", () => {
     expect(why("MiFIR")).toBe("Your headline");
     expect(why("Taxation")).toBe("Used in 2 roles");
     expect(why("Finanzanalyst")).toBe("German for Financial Analyst");
+    expect(why("Senior Finanzanalyst")).toBe("German for Senior Financial Analyst");
   });
 
   it("never suggests more than three words, nor a whole headline, nor an entry-level role", () => {
@@ -130,6 +133,12 @@ describe("search words from the profile", () => {
     const result = searchWords({ basics: basics({ headline: "Designer — Brand Strategy" }), skills: [], experience: [entry("Brand Designer", [2012, 1], null, [])] }, TODAY);
     expect(texts(result, "Job titles", "de")).toEqual([]);
     expect(texts(result, "Specialties")).toEqual(["Brand Strategy"]);
+  });
+
+  it("keeps Senior and Junior in the German title, and gives none when the rest has no German", () => {
+    const roles = [entry("Junior Accountant", [2012, 1], [2016, 1], []), entry("Senior Brand Designer", [2016, 2], null, [])];
+    const result = searchWords({ basics: basics({ headline: "" }), skills: [], experience: roles }, TODAY);
+    expect(texts(result, "Job titles", "de")).toEqual(["Junior Buchhalter"]);
   });
 
   it("follows the profile: a new skill or role changes the words", () => {
