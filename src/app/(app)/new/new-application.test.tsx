@@ -298,6 +298,53 @@ describe("tailoring (E7-5)", () => {
   });
 });
 
+describe("the application's language", () => {
+  const read = {
+    extracted: { title: "Designer · Ledgerly", company: "Ledgerly", role: "Designer", location: null, mode: null, salary: null, deadline: null, requirements: [], asksForReferences: false, language: "German" },
+    extractedWith: "extract-posting@1",
+    match: { items: [] },
+    matchedWith: "match-requirements@1",
+  };
+  const languages = ["English", "German", "Persian"];
+
+  async function toReview(extra: Partial<React.ComponentProps<typeof NewApplication>> = {}) {
+    vi.mocked(startWritingDocuments).mockResolvedValue({ ok: true, data: "job-2" });
+    render(<NewApplication {...props} languages={languages} {...extra} />);
+    await userEvent.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
+    await userEvent.click(screen.getByRole("button", { name: "Read the posting →" }));
+    emit({ status: "DONE", result: read });
+    return screen.getByLabelText("Write the documents in");
+  }
+
+  it("offers the posting's own language, which it names, and every language the documents can be written in", async () => {
+    const select = await toReview();
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual(["The posting's language (German)", "English", "German", "Persian"]);
+    expect(screen.getByText("The resume and the cover letter are both written in it, for this application only.")).toBeInTheDocument();
+  });
+
+  it("starts from what Settings says: the posting's language, or a language", async () => {
+    expect(await toReview({ defaultLanguage: null })).toHaveDisplayValue("The posting's language (German)");
+  });
+
+  it("starts from the language Settings names", async () => {
+    expect(await toReview({ defaultLanguage: "English" })).toHaveValue("English");
+  });
+
+  it("sends the language chosen for this application with the request to write", async () => {
+    const select = await toReview({ defaultLanguage: null });
+    await userEvent.selectOptions(select, "English");
+    await userEvent.click(screen.getByRole("button", { name: "Create application →" }));
+    expect(startWritingDocuments).toHaveBeenCalledWith(expect.objectContaining({ language: "English" }));
+  });
+
+  it("sends null when the posting's language is chosen over Settings' language", async () => {
+    const select = await toReview({ defaultLanguage: "English" });
+    await userEvent.selectOptions(select, "The posting's language (German)");
+    await userEvent.click(screen.getByRole("button", { name: "Create application →" }));
+    expect(startWritingDocuments).toHaveBeenCalledWith(expect.objectContaining({ language: null }));
+  });
+});
+
 describe("creating the application (E7-6)", () => {
   const read = {
     extracted: { title: "Designer · Ledgerly", company: "Ledgerly", role: "Designer", location: null, mode: null, salary: null, deadline: null, requirements: [], asksForReferences: false, language: "English" },
@@ -325,6 +372,7 @@ describe("creating the application (E7-6)", () => {
       match: { items: [] },
       tone: "WARM",
       note: "Lean on research.",
+      language: null,
     });
     expect(screen.getByRole("heading", { name: "Putting your application together…" })).toBeInTheDocument();
     expect(screen.getByText("Tailored documents").closest("li")).toHaveAttribute("aria-current", "step");

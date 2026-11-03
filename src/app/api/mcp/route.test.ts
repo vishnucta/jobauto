@@ -140,6 +140,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "remove_startup",
       "retry_task",
       "rewrite_document",
+      "rewrite_in_language",
       "save_application",
       "save_apply_answers",
       "save_email_reply",

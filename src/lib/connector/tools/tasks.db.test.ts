@@ -179,6 +179,21 @@ describe("the task tools", () => {
     });
     expect(await check(refine.id)).toMatchObject({ task: "Answering in Refine with AI", result: { parts_changed: 1 }, link: app(), next: "Read the changes with get_document." });
 
+    const translated = await task("translate-documents", {
+      input: { applicationId, language: "German" },
+      result: { language: "German", rewritten: 9, left: ["SECRET GREETING"] },
+    });
+    const translatedTold = await tool("check_task", { task_id: translated.id });
+    expect(translatedTold.json).toMatchObject({
+      task: "Rewriting the documents in German",
+      application_id: applicationId,
+      result: { parts_rewritten: 9, parts_left_as_they_were: 1 },
+      link: app(),
+      next: expect.stringContaining("get_document"),
+    });
+    // Counts and links only: not the names of the parts, which can be a document's own words.
+    expect(translatedTold.text).not.toContain("SECRET");
+
     const email = await task("write-email", { input: { applicationId }, result: { units: [unit("to", "hr@acme.example"), unit("body", "SECRET EMAIL")], previous: null } });
     const emailTold = await tool("check_task", { task_id: email.id });
     expect(emailTold.json).toMatchObject({ application_id: applicationId, link: app("?tab=email"), next: "Read it with get_document, document email." });

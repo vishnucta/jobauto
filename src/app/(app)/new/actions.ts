@@ -6,6 +6,7 @@ import { JobStatus, Tone } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
 import { createApplicationFromDocuments } from "@/lib/application-create";
 import { matchSchema } from "@/lib/application-data";
+import { knownLanguageName } from "@/lib/document-look";
 import { handOffPastedPosting } from "@/lib/connector/handoff";
 import { readPostingJob } from "@/lib/jobs/read-posting";
 import { startJob } from "@/lib/jobs/runner";
@@ -63,9 +64,12 @@ export const startWritingDocuments = action(
     match: matchSchema,
     tone: z.enum(Tone),
     note: z.string().trim().max(2000),
+    /** "Write the documents in": a language from the list, or null for the posting's. */
+    language: z.string().trim().max(100).nullable(),
   }),
-  async ({ readJobId, details, match, tone, note }) => {
+  async ({ readJobId, details, match, tone, note, language }) => {
     const reading = await finishedReading(readJobId);
+    const written = language === null ? null : await knownLanguageName(language);
     const orNull = (value: string) => value || null;
     const extracted = {
       ...reading.result.extracted,
@@ -77,7 +81,7 @@ export const startWritingDocuments = action(
       salary: orNull(details.salary),
       deadline: orNull(details.deadline),
     };
-    return startJob(writeDocumentsJob, { readJobId, posting: reading.input.posting, extracted, match, tone, note });
+    return startJob(writeDocumentsJob, { readJobId, posting: reading.input.posting, extracted, match, tone, note, language: written });
   },
 );
 
@@ -144,6 +148,7 @@ export const createApplication = action(
       postingUrl: postingLink(postingUrl),
       tone: input.tone,
       note: input.note,
+      language: input.language,
       claim: { kind: "manual", writeJobId, readJobId: input.readJobId, postingId: postingId ?? null, startupId: startupId ?? null },
     });
   },

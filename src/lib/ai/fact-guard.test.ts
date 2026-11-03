@@ -4,7 +4,7 @@ import { demoProfile } from "@/lib/demo-profile";
 
 import sample from "../../../prisma/seed/prototype-sample.json";
 
-import { factSources, guardSources, guardUnits, sourcesFor, unverifiedFacts } from "./fact-guard";
+import { factSources, guardSources, guardUnits, inLanguage, sourcesFor, unverifiedFacts } from "./fact-guard";
 
 const profile = demoProfile();
 const extracted = {
@@ -71,6 +71,42 @@ describe("the fact guard (E6-6)", () => {
     expect(unverifiedFacts(claim, sourcesFor(profile, extracted, sample.ledgerly.posting, 11))).toEqual(["Klarna", "Config"]);
     expect(unverifiedFacts(claim, sourcesFor(told, extracted, sample.ledgerly.posting, 11))).toEqual(["Config"]);
     expect(unverifiedFacts(claim, guardSources(told, extracted, sample.ledgerly.posting, ["I gave a talk at Config last year."]))).toEqual([]);
+  });
+});
+
+describe("the fact guard in German", () => {
+  const german = "Leitete die Neugestaltung des Portals, das von den Disponenten der größten Kunden genutzt wird, und entwickelte ein quelloffenes Plugin für die Community.";
+
+  it("would flag German nouns as names, which is why it is told the language", () => {
+    expect(check(german).length).toBeGreaterThan(3);
+  });
+
+  it("doesn't take a capital in the middle of a German sentence for a name", () => {
+    expect(unverifiedFacts(german, inLanguage(sources, "German"))).toEqual([]);
+    expect(unverifiedFacts(german, inLanguage(sources, " german "))).toEqual([]);
+  });
+
+  it("still flags numbers, years, percentages, credentials and acronyms the sources don't back", () => {
+    const flagged = unverifiedFacts("Steigerte den Umsatz um 87 % im Jahr 2019 mit der PRINCE2-Methode und einem MBA.", inLanguage(sources, "German"));
+    expect(flagged).toEqual(expect.arrayContaining(["87 %", "2019", "MBA"]));
+    expect(flagged.some((value) => value.startsWith("PRINCE2"))).toBe(true);
+  });
+
+  it("leaves English, other languages and a missing language as they were", () => {
+    for (const language of ["English", "French", "Dutch", null, undefined, ""]) expect(inLanguage(sources, language)).toBe(sources);
+    expect(unverifiedFacts("Worked with Siemens and Stripe on the carrier portal.", inLanguage(sources, "English"))).toEqual(expect.arrayContaining(["Siemens", "Stripe"]));
+  });
+
+  it("doesn't read the end of a word as a number: größten is not ten", () => {
+    expect(unverifiedFacts("die größten Kunden und die kleinsten Teams", inLanguage(sources, "German"))).toEqual([]);
+    expect(check("die größten Kunden").includes("ten")).toBe(false);
+    // A real number word is still one.
+    expect(check("We shipped to ten countries.")).toEqual(["ten"]);
+  });
+
+  it("guards a German resume's units without marking its nouns", () => {
+    const units = guardUnits([{ id: "summary", label: "Summary", text: german }], inLanguage(sources, "German"));
+    expect(units[0].unverified).toBeUndefined();
   });
 });
 

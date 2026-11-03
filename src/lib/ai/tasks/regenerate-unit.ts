@@ -8,7 +8,7 @@ import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
 import { bulletLines, isBulletUnit, plainText } from "@/lib/unit-text";
 
-import { guardSources, guardUnits } from "../fact-guard";
+import { guardSources, guardUnits, inLanguage } from "../fact-guard";
 
 import {
   applicationFacts,
@@ -121,7 +121,7 @@ export const regenerateUnit: Task<RegenerateInput, Unit> = async (provider, inpu
     data:
       options.strict && !isFrameUnit(unit.id)
         ? // The email's greeting names its recipient, from the posting or typed in by the user.
-          guardUnits([updated], guardSources(profile, extracted, kind === DocumentKind.EMAIL ? [posting, emailParts(document).to].join("\n") : posting, facts))[0]
+          guardUnits([updated], inLanguage(guardSources(profile, extracted, kind === DocumentKind.EMAIL ? [posting, emailParts(document).to].join("\n") : posting, facts), options.language ?? extracted.language))[0]
         : { ...updated, unverified: undefined },
     promptVersion: REGENERATE_UNIT_VERSION,
   };

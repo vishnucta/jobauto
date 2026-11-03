@@ -24,6 +24,7 @@ import {
   restoreNote,
   restoreUnit,
   restoreVersion,
+  rewriteInLanguage,
   saveUnit,
   sendMessage,
   setApplicationTheme,
@@ -77,6 +78,7 @@ vi.mock("./actions", () => ({
   cleanUpDocument: vi.fn(async () => ({ ok: true, data: null, toast: "Rewrote the resume and the cover letter with plain characters." })),
   saveUnit: vi.fn(async ({ text }: { text: string }) => ({ ok: true, data: { text } })),
   startRegenerating: vi.fn(async () => ({ ok: true, data: "job-1" })),
+  rewriteInLanguage: vi.fn(async () => ({ ok: true, data: "job-9" })),
   restoreUnit: vi.fn(async () => ({ ok: true, data: null })),
   sendMessage: vi.fn(async () => ({ ok: true, data: { jobId: "reply-1" } })),
   undoMessage: vi.fn(async () => ({ ok: true, data: { edited: [{ document: "RESUME", unitId: "summary" }] } })),
@@ -179,6 +181,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/applications/app-1");
   vi.mocked(setFollowThemeLayout).mockClear();
   vi.mocked(setApplicationTheme).mockClear();
+  vi.mocked(rewriteInLanguage).mockReset().mockResolvedValue({ ok: true, data: "job-9" });
   vi.mocked(saveUnit).mockClear();
   vi.mocked(startRegenerating).mockClear();
   vi.mocked(restoreUnit).mockClear();
@@ -457,6 +460,121 @@ describe("editing a unit (E8-3)", () => {
 describe("regenerating a unit (E8-4)", () => {
   const rewritten = { text: "A new summary.", unverified: undefined };
   const toastAction = () => vi.mocked(toast).mock.lastCall?.[1]?.action;
+
+  describe("Rewrite in… another language", () => {
+    const languages = ["English", "German", "Dutch"];
+    const done = { id: "job-9", type: "translate-documents", status: "DONE" as const, result: { language: "German", rewritten: 9, left: [] as string[] } };
+
+    async function confirm(language = "German") {
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Language: English" }));
+      await user.click(within(screen.getByRole("menu")).getByRole("menuitemradio", { name: language }));
+      await user.click(within(screen.getByRole("alertdialog", { name: `Write everything in ${language}?` })).getByRole("button", { name: `Rewrite in ${language}` }));
+    }
+
+    it("offers the languages from a Language menu, and asks before writing everything again", async () => {
+      const user = userEvent.setup();
+      render(<ApplicationView {...props} languages={languages} />);
+      await user.click(screen.getByRole("button", { name: "Language: English" }));
+      const menu = screen.getByRole("menu");
+      expect(within(menu).getAllByRole("menuitemradio").map((item) => item.textContent?.replace("✓", ""))).toEqual(languages);
+      expect(within(menu).getByRole("menuitemradio", { name: "English" })).toBeChecked();
+      await user.click(within(menu).getByRole("menuitemradio", { name: "German" }));
+      expect(rewriteInLanguage).not.toHaveBeenCalled();
+      const dialog = screen.getByRole("alertdialog", { name: "Write everything in German?" });
+      expect(dialog).toHaveTextContent("the resume, the cover letter and the email again in German");
+      expect(dialog).toHaveTextContent("The earlier text stays in each document's Versions");
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(rewriteInLanguage).not.toHaveBeenCalled();
+    });
+
+    it("lets the language the application is set to be picked too, for text that isn't in it", async () => {
+      const user = userEvent.setup();
+      render(<ApplicationView {...props} languages={languages} />);
+      await user.click(screen.getByRole("button", { name: "Language: English" }));
+      await user.click(within(screen.getByRole("menu")).getByRole("menuitemradio", { name: "English" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Write everything in English?" });
+      expect(dialog).toHaveTextContent("A part that is in it already stays as it is, so this only writes the parts that aren't");
+      await user.click(within(dialog).getByRole("button", { name: "Rewrite in English" }));
+      expect(rewriteInLanguage).toHaveBeenCalledWith({ id: "app-1", language: "English" });
+    });
+
+    it("is on both tabs with the documents, and not offered without languages", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<ApplicationView {...props} languages={languages} />);
+      await user.click(screen.getByRole("tab", { name: "Cover letter" }));
+      expect(screen.getByRole("button", { name: "Language: English" })).toBeInTheDocument();
+      unmount();
+      render(<ApplicationView {...props} />);
+      expect(screen.queryByRole("button", { name: /^Language:/ })).not.toBeInTheDocument();
+    });
+
+    it("writes everything again once confirmed, and says so while it does", async () => {
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      expect(rewriteInLanguage).toHaveBeenCalledWith({ id: "app-1", language: "German" });
+      expect(screen.getByRole("status")).toHaveTextContent("Rewriting in German…");
+      expect(screen.queryByRole("button", { name: /^Language:/ })).not.toBeInTheDocument();
+    });
+
+    it("reloads the page with the new text, and points to the versions", async () => {
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      report(done);
+      expect(toast).toHaveBeenLastCalledWith("Written in German. The earlier text is in each document's Versions.");
+      expect(router.refresh).toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Language: English" })).toBeInTheDocument();
+    });
+
+    it("names the parts it left as they were", async () => {
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      report({ ...done, result: { language: "German", rewritten: 7, left: ["greeting", "opening paragraph"] } });
+      expect(toast).toHaveBeenLastCalledWith("Written in German. Left as they were: greeting, opening paragraph. The earlier text is in each document's Versions.");
+    });
+
+    it("says when nothing could be written, and leaves the page as it is", async () => {
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      router.refresh.mockClear();
+      report({ ...done, result: { language: "German", rewritten: 0, left: ["summary"] } });
+      expect(toast).toHaveBeenLastCalledWith("Nothing could be written in German. The documents are as they were. Try again.");
+      expect(router.refresh).not.toHaveBeenCalled();
+    });
+
+    it("offers Retry when it fails, and follows the retried job", async () => {
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      report({ id: "job-9", status: "FAILED", error: "The AI server didn't answer in time." });
+      expect(toast).toHaveBeenLastCalledWith("The AI server didn't answer in time.", { action: expect.objectContaining({ label: "Retry" }) });
+      expect(screen.getByRole("button", { name: "Language: English" })).toBeInTheDocument();
+      await act(async () => toastAction()?.onClick());
+      expect(retry).toHaveBeenCalledWith({ id: "job-9" });
+      expect(screen.getByRole("status")).toHaveTextContent("Rewriting in German…");
+    });
+
+    it("says why it didn't start, and lets the user try again", async () => {
+      vi.mocked(rewriteInLanguage).mockResolvedValueOnce({ ok: false, error: "Dossier is still rewriting this application. Try again when it's done." });
+      render(<ApplicationView {...props} languages={languages} />);
+      await confirm();
+      expect(toast).toHaveBeenLastCalledWith("Dossier is still rewriting this application. Try again when it's done.");
+      expect(screen.getByRole("button", { name: "Language: English" })).toBeInTheDocument();
+    });
+
+    it("points to Settings without an AI provider, and starts nothing", async () => {
+      render(<ApplicationView {...props} aiReady={false} languages={languages} />);
+      await confirm();
+      expect(rewriteInLanguage).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenLastCalledWith("That needs an AI provider. Choose one in Settings → AI provider.", { action: expect.objectContaining({ label: "Open Settings" }) });
+    });
+
+    it("keeps following a rewrite that was running when the page loaded", () => {
+      render(<ApplicationView {...props} languages={languages} rewritingLanguage={{ jobId: "job-9", language: "German" }} />);
+      expect(screen.getByRole("status")).toHaveTextContent("Rewriting in German…");
+      report(done);
+      expect(toast).toHaveBeenLastCalledWith("Written in German. The earlier text is in each document's Versions.");
+    });
+  });
 
   it("dims the unit while it's rewritten and leaves the rest usable", async () => {
     const user = userEvent.setup();
@@ -923,6 +1041,25 @@ describe("version history (E8-10)", () => {
     expect(items[0]).toHaveTextContent("Changed from the chat: “Make it shorter”");
     expect(items[0]).toHaveTextContent("· the newest");
     expect(items[1]).toHaveTextContent("Written by the AI");
+  });
+
+  it("names a version made by Rewrite in… by what it did, not as a chat change", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listVersions).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        { id: "v4", cause: "REFINED" as const, detail: "Rewritten in German", createdAt: "2026-09-29T11:10:00.000Z" },
+        { id: "v3", cause: "REFINED" as const, detail: "Before rewriting in German", createdAt: "2026-09-29T11:09:00.000Z" },
+        written,
+      ],
+    });
+    render(<ApplicationView {...props} />);
+    await user.click(screen.getAllByRole("button", { name: "History" })[0]);
+    const items = within(await screen.findByRole("list", { name: "Versions" })).getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Rewritten in German");
+    expect(items[0]).not.toHaveTextContent("Changed from the chat");
+    expect(items[1]).toHaveTextContent("Before rewriting in German");
+    expect(items[1]).not.toHaveTextContent("Changed from the chat");
   });
 
   it("shows an earlier version in place, restores it, or goes back", async () => {

@@ -45,6 +45,13 @@ describe("text direction", () => {
 });
 
 describe("detectLanguageName", () => {
+  it("leaves text in another script alone, whatever English words it has", () => {
+    const chinese = "负责重新设计运营门户，每天有数千名调度员使用，并建立了整个公司使用的设计系统。 与产品、工程和研究团队合作，端到端交付 A/B testing time to market of the and for with";
+    expect(detectLanguageName(chinese)).toBeUndefined();
+    const arabic = "قادت إعادة تصميم البوابة التي يستخدمها آلاف المرسلين يوميا وبنت نظام التصميم الذي تستخدمه الشركة كلها مع فرق المنتج والهندسة والبحث time to market and the of for with";
+    expect(detectLanguageName(arabic)).toBeUndefined();
+  });
+
   const german =
     "Produktdesignerin mit neun Jahren Erfahrung darin, komplexe Software ruhig und verständlich zu gestalten. Ich habe die Neugestaltung eines Portals geleitet, das täglich von vielen Disponenten genutzt wird, und ein Designsystem für die Teams aufgebaut.";
   const english =

@@ -3,6 +3,7 @@
 import { useId } from "react";
 
 import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { Tone } from "@/generated/prisma/enums";
@@ -10,17 +11,29 @@ import { TONES } from "@/lib/tones";
 
 const TONE_OPTIONS = Object.values(Tone).map((tone) => ({ value: tone, label: TONES[tone].label }));
 
-/** "Tailoring" (E7-5, NEW-6): the cover letter's tone, and a note for the AI. */
+const POSTING_LANGUAGE = "__posting";
+
+/** "Tailoring" (E7-5, NEW-6): the language of the documents, the cover letter's tone, and a note for the AI. */
 export function TailoringCard({
   tone,
   note,
+  language,
+  languages,
+  postingLanguage,
   onTone,
   onNote,
+  onLanguage,
 }: {
   tone: Tone;
   note: string;
+  /** The language for this application; null is the posting's. */
+  language: string | null;
+  languages: string[];
+  /** The language the posting was read as, when it said. */
+  postingLanguage: string | null;
   onTone: (tone: Tone) => void;
   onNote: (note: string) => void;
+  onLanguage: (language: string | null) => void;
 }) {
   const labelId = useId();
   const descriptionId = useId();
@@ -44,6 +57,19 @@ export function TailoringCard({
           </span>
         </div>
       </div>
+      <Select
+        label="Write the documents in"
+        hint="The resume and the cover letter are both written in it, for this application only."
+        value={language ?? POSTING_LANGUAGE}
+        onChange={(event) => onLanguage(event.target.value === POSTING_LANGUAGE ? null : event.target.value)}
+      >
+        <option value={POSTING_LANGUAGE}>{`The posting's language${postingLanguage ? ` (${postingLanguage})` : ""}`}</option>
+        {languages.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </Select>
       <Textarea
         label="Anything I should know?"
         hint="Kept with the application as a fact for the AI. Change it later on its Job posting tab."

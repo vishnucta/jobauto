@@ -7,6 +7,7 @@ export type { TaskOptions, TaskResult } from "./prompt-parts";
 export { REFINE_CHAT_VERSION, refineChat, type ChatTurn, type Refinement } from "./refine-chat";
 export { REGENERATE_UNIT_VERSION, regenerateUnit } from "./regenerate-unit";
 export { TAILOR_RESUME_VERSION, tailorResume } from "./tailor-resume";
+export { TRANSLATE_DOCUMENT_VERSION, translateDocument } from "./translate-document";
 export { WRITE_COVER_LETTER_VERSION, writeCoverLetter } from "./write-cover-letter";
 export { WRITE_EMAIL_VERSION, writeEmail } from "./write-email";
 export { CLASSIFY_REPLY_VERSION, classifyReply, type Classified } from "./classify-reply";

@@ -14,6 +14,7 @@ import { importProfileJob } from "@/lib/jobs/import-profile";
 import { readPostingJob } from "@/lib/jobs/read-posting";
 import { refineJob } from "@/lib/jobs/refine";
 import { regenerateUnitJob } from "@/lib/jobs/regenerate-unit";
+import { translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { cancelJob, isFinished, JOB_MESSAGES, retryJob } from "@/lib/jobs/runner";
 import { scorePostingJob } from "@/lib/jobs/score-posting";
 import { writeDocumentsJob } from "@/lib/jobs/write-documents";
@@ -94,6 +95,17 @@ const KINDS: Record<string, Tell> = {
       result: rewrite ? { outcome: rewrite.outcome === "rewritten" ? "Rewritten" : "Left as it was: it was edited meanwhile" } : undefined,
       link: input ? linkTo(`/applications/${input.applicationId}?tab=${TAB[input.document]}`) : undefined,
       next: rewrite ? "Read it with get_document." : undefined,
+    };
+  },
+  [translateDocumentsJob.type]: (task, linkTo) => {
+    const input = inputOf(translateDocumentsJob, task);
+    const done = resultOf(translateDocumentsJob, task);
+    return {
+      task: input ? `Rewriting the documents in ${input.language}` : "Rewriting the documents in another language",
+      about: { application_id: input?.applicationId },
+      result: done ? { parts_rewritten: done.rewritten, parts_left_as_they_were: done.left.length } : undefined,
+      link: input ? linkTo(`/applications/${input.applicationId}`) : undefined,
+      next: done ? "Read them with get_document. The earlier text is in each document's versions." : undefined,
     };
   },
   [refineJob.type]: (task, linkTo) => {

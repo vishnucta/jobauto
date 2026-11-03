@@ -136,6 +136,8 @@ const MIN_TOKENS = 20;
 export function detectLanguageName(text: string): string | undefined {
   const tokens = text.toLowerCase().match(/\p{L}+/gu) ?? [];
   if (tokens.length < MIN_TOKENS) return undefined;
+  // A word of Chinese or Arabic is one token and in none of the lists, so a few English words in a text in one of them would win: only text that is mostly Latin letters is judged.
+  if (count(text, /\p{Script=Latin}/gu) <= count(text, LETTERS) / 2) return undefined;
   const scored = STOPWORD_SETS.map((entry) => ({ ...entry, hits: tokens.filter((token) => entry.words.has(token)).length })).sort((a, b) => b.hits - a.hits);
   const [winner, runnerUp] = scored;
   if (winner.hits < tokens.length * 0.03) return undefined;

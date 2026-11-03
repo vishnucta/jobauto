@@ -15,6 +15,7 @@ import {
   restoreNote,
   restoreUnit,
   restoreVersion,
+  rewriteInLanguage,
   saveUnit,
   sendMessage,
   setApplicationTheme,
@@ -320,6 +321,42 @@ describe("startRegenerating (E8-4)", () => {
   it("leaves the email's recipient to editing", async () => {
     await prisma().document.create({ data: { applicationId: "app-1", kind: "EMAIL", units: [{ id: "to", label: "Recipient", text: "john@example.com" }] } });
     expect(await startRegenerating({ id: "app-1", document: "EMAIL", unitId: "to" })).toEqual({ ok: false, error: "This part isn't written by the AI. Edit it instead." });
+  });
+});
+
+describe("rewriteInLanguage", () => {
+  it("starts the rewrite in the background, with the language as the list spells it", async () => {
+    const result = await rewriteInLanguage({ id: "app-1", language: "german" });
+    expect(result.ok).toBe(true);
+    expect(await prisma().job.findUniqueOrThrow({ where: { id: result.ok ? result.data : "" } })).toMatchObject({
+      type: "translate-documents",
+      key: "language:app-1",
+      applicationId: "app-1",
+      input: { applicationId: "app-1", language: "German" },
+    });
+  });
+
+  it("says so while a rewrite is still going, and starts only one", async () => {
+    expect(await rewriteInLanguage({ id: "app-1", language: "German" })).toMatchObject({ ok: true });
+    expect(await rewriteInLanguage({ id: "app-1", language: "Dutch" })).toEqual({ ok: false, error: "Dossier is still rewriting this application. Try again when it's done." });
+    expect(await prisma().job.count({ where: { type: "translate-documents" } })).toBe(1);
+  });
+
+  it("starts for the language the application is set to too, for text that isn't in it, and refuses a language Dossier doesn't know and an application that is gone", async () => {
+    await prisma().application.update({ where: { id: "app-1" }, data: { language: "German" } });
+    const same = await rewriteInLanguage({ id: "app-1", language: "german" });
+    expect(same.ok).toBe(true);
+    expect(await prisma().job.findUniqueOrThrow({ where: { id: same.ok ? same.data : "" } })).toMatchObject({ input: { applicationId: "app-1", language: "German" } });
+    await prisma().job.deleteMany();
+    expect(await rewriteInLanguage({ id: "app-1", language: "Klingon" })).toMatchObject({ ok: false, error: expect.stringContaining('Dossier doesn\'t know the language "Klingon"') });
+    expect(await rewriteInLanguage({ id: "gone", language: "Dutch" })).toEqual({ ok: false, error: "That application no longer exists." });
+    expect(await prisma().job.count()).toBe(0);
+  });
+
+  it("needs an AI provider", async () => {
+    ai.ready = false;
+    expect(await rewriteInLanguage({ id: "app-1", language: "German" })).toEqual({ ok: false, error: "That needs an AI provider. Choose one in Settings → AI provider." });
+    expect(await prisma().job.count()).toBe(0);
   });
 });
 

@@ -7,7 +7,7 @@ import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
 import { TONES } from "@/lib/tones";
 import { plainText } from "@/lib/unit-text";
 
-import { guardSources, guardUnits } from "../fact-guard";
+import { guardSources, guardUnits, inLanguage } from "../fact-guard";
 
 import {
   applicationFacts,
@@ -108,7 +108,7 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
   ]);
   return {
     // The recipient and greeting aren't claims about the candidate: only the paragraphs are checked.
-    data: options.strict ? guardUnits(units, guardSources(profile, extracted, posting, facts)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
+    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, facts), language)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
     promptVersion: WRITE_COVER_LETTER_VERSION,
   };
 };

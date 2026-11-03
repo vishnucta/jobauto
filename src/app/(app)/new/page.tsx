@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { isAiConfigured, isAiUsable } from "@/lib/ai/config";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { DEMO_POSTING } from "@/lib/demo-profile";
+import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { postingText } from "@/lib/job-search/search";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
@@ -30,6 +31,8 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
       aiReady={aiReady}
       writeInClaude={writeInClaude}
       defaultTone={settings.defaultTone}
+      defaultLanguage={settings.docLanguage}
+      languages={[...DOCUMENT_LANGUAGES.map((language) => language.name), ...settings.customLanguages]}
       fresh={fresh !== undefined}
       fromPosting={
         fromFindJobs

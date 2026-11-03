@@ -50,7 +50,7 @@ const extracted = {
 const match = { items: [{ requirement: "Experience with payments", result: "gap" as const, skill: null, experienceIds: [], note: "Nothing in your profile" }] };
 const details = { title: "Designer at Ledgerly", company: "Ledgerly B.V.", role: "Senior Product Designer", location: "Amsterdam", mode: "Hybrid", salary: "", deadline: "2026-10-20" };
 
-async function finishedJobs() {
+async function finishedJobs(writeInput: Record<string, unknown> = {}) {
   await prisma().job.create({
     data: {
       id: "read-job",
@@ -65,7 +65,7 @@ async function finishedJobs() {
       id: "write-job",
       type: "write-documents",
       status: "DONE",
-      input: { readJobId: "read-job", posting: "Ledgerly is hiring a Senior Product Designer.", extracted, match, tone: "FORMAL", note: "Relocating in January." },
+      input: { readJobId: "read-job", posting: "Ledgerly is hiring a Senior Product Designer.", extracted, match, tone: "FORMAL", note: "Relocating in January.", ...writeInput },
       result: {
         resume: demoResumeUnits(),
         resumeWith: "tailor-resume@1",
@@ -86,18 +86,34 @@ afterAll(() => prisma().$disconnect());
 describe("startWritingDocuments", () => {
   it("writes from the posting as read, with the details as edited (E7-6)", async () => {
     await finishedJobs();
-    expect(await startWritingDocuments({ readJobId: "read-job", details, match, tone: "WARM", note: "Hi" })).toEqual({ ok: true, data: "write-job" });
+    expect(await startWritingDocuments({ readJobId: "read-job", details, match, tone: "WARM", note: "Hi", language: null })).toEqual({ ok: true, data: "write-job" });
     expect(vi.mocked(startJob).mock.calls[0][1]).toMatchObject({
       readJobId: "read-job",
       posting: "Ledgerly is hiring a Senior Product Designer.",
       extracted: { company: "Ledgerly B.V.", title: "Designer at Ledgerly", salary: null, deadline: "2026-10-20", requirements: extracted.requirements },
       tone: "WARM",
       note: "Hi",
+      language: null,
     });
   });
 
+  it("writes in the language chosen for this application, as the list spells it", async () => {
+    await finishedJobs();
+    expect(await startWritingDocuments({ readJobId: "read-job", details, match, tone: "WARM", note: "", language: "  german " })).toMatchObject({ ok: true });
+    expect(vi.mocked(startJob).mock.calls[0][1]).toMatchObject({ language: "German" });
+  });
+
+  it("refuses a language Dossier doesn't know, and starts nothing", async () => {
+    await finishedJobs();
+    expect(await startWritingDocuments({ readJobId: "read-job", details, match, tone: "WARM", note: "", language: "Klingon" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Dossier doesn\'t know the language "Klingon"'),
+    });
+    expect(startJob).not.toHaveBeenCalled();
+  });
+
   it("needs a finished reading", async () => {
-    expect(await startWritingDocuments({ readJobId: "gone", details, match, tone: "WARM", note: "" })).toMatchObject({
+    expect(await startWritingDocuments({ readJobId: "gone", details, match, tone: "WARM", note: "", language: null })).toMatchObject({
       ok: false,
       error: "That reading of the posting is no longer available. Read the posting again.",
     });
@@ -183,6 +199,24 @@ describe("createApplication", () => {
     expect(text("recipient")).toMatch(/^Ledgerly B\.V\. · Personalabteilung/);
     expect(text("greeting")).toBe("Sehr geehrte Damen und Herren,");
     expect(await prisma().documentVersion.findFirstOrThrow({ where: { documentId: letter.id } })).toMatchObject({ units });
+  });
+
+  it("keeps the language chosen for the application over Settings, and the posting's language when none was chosen", async () => {
+    await prisma().setting.create({ data: { key: "docLanguage", value: "English" } });
+    await finishedJobs({ language: "German" });
+    const chosen = await createApplication({ writeJobId: "write-job", details, postingUrl: "" });
+    const application = await prisma().application.findUniqueOrThrow({ where: { id: chosen.ok ? chosen.data : "" }, include: { documents: true } });
+    expect(application.language).toBe("German");
+    const letter = application.documents.find((document) => document.kind === "COVER_LETTER")!.units as { id: string; text: string }[];
+    expect(letter.find((unit) => unit.id === "greeting")?.text).toBe("Sehr geehrte Damen und Herren,");
+
+    await resetDatabase(prisma());
+    await seedBuiltIns(prisma());
+    await prisma().setting.create({ data: { key: "docLanguage", value: "German" } });
+    // null is "the posting's language", which this posting says is English: Settings is not asked.
+    await finishedJobs({ language: null });
+    const followed = await createApplication({ writeJobId: "write-job", details, postingUrl: "" });
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: followed.ok ? followed.data : "" } })).toMatchObject({ language: "English" });
   });
 
   it("returns the same application when asked twice", async () => {

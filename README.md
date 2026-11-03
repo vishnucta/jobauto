@@ -132,7 +132,7 @@ The [wiki](https://github.com/AienTech/dossier/wiki) has what comes after instal
 
 - **Desktop only:** made for a laptop or desktop browser, not for phones.
 - **Single user:** one password and one profile; there are no accounts.
-- **English interface:** the app itself is in English. Documents can be written in other languages; in the 21 built-in ones, their headings, dates and language levels are in that language too, and in one added with **Other language…** those stay in English.
+- **English interface:** the app itself is in English. Documents can be written in other languages; in the 21 built-in ones, their headings, dates and language levels are in that language too, and in one added with **Other language…** those stay in English. The language is chosen for each application: **Write the documents in** on New application starts from Settings ("The posting's language" by default, so a German posting gets German documents and an English one English), and a **Language** menu on the Resume and Cover letter tabs rewrites the resume, cover letter and email of an existing application in another language, keeping the earlier text in its versions.
 - **One instance:** run a single copy of the app per database. The nightly backups, the AI job queue and the PDF browser live inside the app's process.
 
 ## Performance and sizing

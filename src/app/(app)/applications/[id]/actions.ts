@@ -9,7 +9,7 @@ import { addApplicationNote, deleteApplicationNote, noteBody, restoreApplication
 import { leaveOut, putBack, saveUnitText } from "@/lib/document-edits";
 import { listDocumentVersions, loadDocumentVersion, restoreDocumentVersion } from "@/lib/document-history";
 import { setDocumentLook } from "@/lib/document-look";
-import { restoreUnitText, sendChatMessage, startUnitRewrite, undoChatMessage } from "@/lib/document-rewrites";
+import { restoreUnitText, sendChatMessage, startLanguageRewrite, startUnitRewrite, undoChatMessage } from "@/lib/document-rewrites";
 import { putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { DOCUMENT_LABELS } from "@/lib/file-name";
 import { followInCalendar, saveInterviewDate } from "@/lib/interview-date";
@@ -60,6 +60,13 @@ export const setDocumentLanguage = action(z.object({ id: z.string().min(1), lang
   refresh(id);
   return null;
 });
+
+/**
+ * "Rewrite in…": the resume, cover letter and email written again in another
+ * language in the background; returns the job's id. Setting only the language
+ * (setDocumentLanguage) changes the headings and dates and leaves the text.
+ */
+export const rewriteInLanguage = action(z.object({ id: z.string().min(1), language: z.string().max(100) }), ({ id, language }) => startLanguageRewrite({ applicationId: id, language }));
 
 // ─── The ATS check (Resume tab) ──────────────────────────────────────────────
 // The check itself is src/lib/resume-check.ts, which the Claude connector's

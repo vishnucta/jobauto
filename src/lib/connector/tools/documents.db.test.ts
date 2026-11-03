@@ -323,6 +323,32 @@ describe("the connector's document tools", () => {
     expect(await tool("get_document", { application_id: id, document: "resume", version_id: "gone" })).toMatchObject({ isError: true });
   });
 
+  it("has Dossier's AI write the documents in another language, and says when it can't", async () => {
+    fake.ai = false;
+    expect(await tool("rewrite_in_language", { application_id: id, language: "German" })).toMatchObject({
+      isError: true,
+      text: "That needs an AI provider. Choose one in Settings → AI provider.",
+    });
+    fake.ai = true;
+    expect(await tool("rewrite_in_language", { application_id: id, language: "Klingon" })).toMatchObject({ isError: true, text: expect.stringContaining("Dossier doesn't know the language") });
+    expect(await tool("rewrite_in_language", { application_id: "gone", language: "German" })).toMatchObject({ isError: true, text: "That application no longer exists." });
+
+    const started = await tool("rewrite_in_language", { application_id: id, language: "German" });
+    expect(started.json).toMatchObject({ task_id: expect.any(String), status: "started", changing: "the resume, cover letter and email, to German", next: expect.stringContaining("check_task") });
+    expect(await prisma().job.findUniqueOrThrow({ where: { id: started.json.task_id as string } })).toMatchObject({
+      type: "translate-documents",
+      key: `language:${id}`,
+      applicationId: id,
+      input: { applicationId: id, language: "German" },
+    });
+    // One at a time: asking again says so, rather than starting a second.
+    expect(await tool("rewrite_in_language", { application_id: id, language: "Dutch" })).toMatchObject({
+      isError: true,
+      text: "Dossier is still rewriting this application. Try again when it's done.",
+    });
+    expect(await prisma().job.count({ where: { type: "translate-documents" } })).toBe(1);
+  });
+
   it("has Dossier's AI rewrite a part, and undoes the rewrite", async () => {
     fake.ai = false;
     expect((await tool("rewrite_document", { application_id: id, document: "resume", part_id: "summary" })).text).toBe(

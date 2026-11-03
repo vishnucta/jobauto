@@ -7,7 +7,7 @@ import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
 import { plainText } from "@/lib/unit-text";
 
-import { guardSources, guardUnits } from "../fact-guard";
+import { guardSources, guardUnits, inLanguage } from "../fact-guard";
 
 import {
   applicationFacts,
@@ -110,7 +110,7 @@ export const writeEmail: Task<EmailInput, Unit[]> = async (provider, { profile, 
   const [to, ...written] = emailUnits({ to: recipient(answer.contactName, answer.contactEmail, posting), subject: oneLine(plainText(answer.subject)), body });
   return {
     // The recipient comes from the posting; the subject and message are checked like the letter's paragraphs.
-    data: [to, ...(options.strict ? guardUnits(written, guardSources(profile, extracted, posting, facts)) : written)],
+    data: [to, ...(options.strict ? guardUnits(written, inLanguage(guardSources(profile, extracted, posting, facts), language)) : written)],
     promptVersion: WRITE_EMAIL_VERSION,
   };
 };

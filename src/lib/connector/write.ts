@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
-import { guardSources, guardUnits } from "@/lib/ai/fact-guard";
+import { guardSources, guardUnits, inLanguage } from "@/lib/ai/fact-guard";
 import { resumeUnits } from "@/lib/ai/tasks/tailor-resume";
 import { tidyLines, withoutFrame } from "@/lib/ai/tasks/write-cover-letter";
 import { createApplicationFromDocuments } from "@/lib/application-create";
@@ -120,7 +120,7 @@ export async function saveWrittenApplication(input: WrittenApplication): Promise
   let letter = letterUnits(input.letter, signOff);
   if (settings.strict) {
     const facts = input.note.trim() ? [input.note.trim()] : [];
-    const sources = guardSources(profile, extracted, input.posting, facts);
+    const sources = inLanguage(guardSources(profile, extracted, input.posting, facts), details.language);
     resume = guardUnits(resume, sources);
     // The recipient and greeting aren't claims about the candidate: only the paragraphs are checked.
     letter = guardUnits(letter, sources).map((unit) => (isFrameUnit(unit.id) ? letter.find((entry) => entry.id === unit.id)! : unit));

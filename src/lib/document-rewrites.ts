@@ -6,10 +6,12 @@ import { isAiConfigured } from "@/lib/ai/config";
 import { editsSchema, unitsSchema } from "@/lib/application-data";
 import { WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
 import { PART_GONE } from "@/lib/document-edits";
+import { knownLanguageName } from "@/lib/document-look";
 import { updateDocuments } from "@/lib/document-units";
 import { refineJob, refineJobKey } from "@/lib/jobs/refine";
 import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
+import { languageJobKey, translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { isFrameUnit, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
 import { isPublicationUnit, unitName } from "@/lib/unit-text";
@@ -22,6 +24,23 @@ import { isPublicationUnit, unitName } from "@/lib/unit-text";
 // ActionError, written for the user.
 
 const GONE = "That application no longer exists.";
+
+/**
+ * "Rewrite in…": writes the resume, the cover letter and the email in another
+ * language in the background, and returns the job's id. The language is one
+ * of the "Write documents in" list; the earlier text stays in each document's
+ * versions. A refusal says why: no such language, no AI provider, or a
+ * rewrite still going. The language the application is set to is allowed:
+ * its headings can say German over text that isn't, and a part already in the
+ * language comes back as it is.
+ */
+export async function startLanguageRewrite({ applicationId, language }: { applicationId: string; language: string }): Promise<string> {
+  if (!(await prisma.application.count({ where: { id: applicationId } }))) throw new ActionError(GONE);
+  const name = await knownLanguageName(language);
+  if (!(await isAiConfigured())) throw new ActionError("That needs an AI provider. Choose one in Settings → AI provider.");
+  if ((await findUnfinishedJobs(languageJobKey(applicationId))).length > 0) throw new ActionError("Dossier is still rewriting this application. Try again when it's done.");
+  return startJob(translateDocumentsJob, { applicationId, language: name }, { key: languageJobKey(applicationId), applicationId });
+}
 
 /**
  * "Regenerate" (E8-4): rewrites one unit in the background and returns the

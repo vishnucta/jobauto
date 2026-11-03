@@ -33,7 +33,8 @@ export function versionLabel({ cause, detail }: Pick<Version, "cause" | "detail"
     case "REGENERATED":
       return detail ? `Rewrote “${detail}”` : "Rewrote a part";
     case "REFINED":
-      return detail ? `Changed from the chat: “${detail}”` : "Changed from the chat";
+      // "Rewrite in…" saves its versions under this cause too, with a detail that says so.
+      return /^(Rewritten in|Before rewriting in) /.test(detail) ? detail : detail ? `Changed from the chat: “${detail}”` : "Changed from the chat";
     case "UNDONE":
       return "Undid an AI change";
     case "BEFORE_RESTORE":

@@ -12,6 +12,7 @@ import { ResumeCheckCard } from "@/components/documents/resume-check-card";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
 import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DocumentKind,
@@ -31,6 +32,7 @@ import { retry } from "@/lib/jobs/actions";
 import type { RefineResult } from "@/lib/jobs/refine";
 import type { RegenerateUnitResult } from "@/lib/jobs/regenerate-unit";
 import type { JobView } from "@/lib/jobs/runner";
+import type { TranslateDocumentsResult } from "@/lib/jobs/translate-documents";
 import type { WriteEmailResult } from "@/lib/jobs/write-email";
 import type { FactItem, ProfileData } from "@/lib/profile";
 import type { RefineSuggestions } from "@/lib/refine-suggestions";
@@ -46,6 +48,7 @@ import {
   putBackTrimmed,
   restoreUnit,
   restoreVersion,
+  rewriteInLanguage,
   saveUnit,
   sendMessage,
   setApplicationTheme,
@@ -65,6 +68,7 @@ import { EmailTab, type Attachments } from "./email-tab";
 import type { GmailSender } from "./send-with-gmail";
 
 import { JobWatcher } from "./job-watcher";
+import { LanguageMenu } from "./language-menu";
 import { NotesTab } from "./notes-tab";
 import { PostingTab, type PostingData } from "./posting-tab";
 import { RefinePanel, type ChatEntry } from "./refine-panel";
@@ -165,6 +169,10 @@ export type ApplicationViewProps = {
   aiReady: boolean;
   /** Units being rewritten in the background (E8-4), e.g. since before a reload. */
   rewriting: { jobId: string; document: DocumentKind; unitId: string }[];
+  /** The languages documents can be written in, for "Rewrite in…". */
+  languages?: string[];
+  /** A rewrite in another language still going, e.g. since before a reload. */
+  rewritingLanguage?: { jobId: string; language: string } | null;
   /** The Refine with AI conversation (E8-5), oldest first. */
   messages: ChatEntry[];
   /** A reply still being written, e.g. since before a reload. */
@@ -206,6 +214,8 @@ export function ApplicationView({
   initialTab,
   aiReady,
   rewriting: rewritingAtLoad,
+  languages = [],
+  rewritingLanguage = null,
   messages,
   refining,
   suggestions,
@@ -245,6 +255,9 @@ export function ApplicationView({
     Object.fromEntries(rewritingAtLoad.map(({ jobId, document, unitId }) => [keyOf(document, unitId), { jobId, revision: 0 }])),
   );
   const [emailJob, setEmailJob] = useState<Rewrite | null>(writingEmail ? { jobId: writingEmail, revision: 0 } : null);
+  // "Rewrite in…": the language being written, and its job once it has started. The one asked for waits here until it's confirmed.
+  const [languageJob, setLanguageJob] = useState<(Rewrite & { language: string }) | null>(rewritingLanguage ? { ...rewritingLanguage, revision: 0 } : null);
+  const [languageAsked, askLanguage] = useState<string | null>(null);
   // The ATS check's report on the Resume tab, with the state of the resume it was made from.
   const [check, setCheck] = useState<{ report: ResumeCheck; of: string } | null>(null);
   const [checking, startChecking] = useTransition();
@@ -278,6 +291,9 @@ export function ApplicationView({
   const themeMenu = (current: ThemeData) => (
     <ThemeMenu themes={themes} baseThemeId={baseThemeId} current={current} onChange={changeTheme} />
   );
+  // Only where there are languages to pick from, as in a view that wasn't given them.
+  const languageMenu =
+    languages.length > 0 ? <LanguageMenu languages={languages} current={application.language} busy={languageJob?.language ?? null} onChoose={askLanguage} /> : null;
 
   const changePhoto = (show: boolean) =>
     startTransition(async () => {
@@ -302,6 +318,46 @@ export function ApplicationView({
 
   const needsAi = () => {
     toast(NO_AI, { action: { label: "Open Settings", onClick: () => router.push("/settings?section=ai") } });
+  };
+
+  /** "Rewrite in…", once confirmed: the resume, cover letter and email written again in the language. */
+  const rewriteLanguage = async (language: string) => {
+    if (!aiReady) return needsAi();
+    setLanguageJob({ jobId: "", revision: 0, language });
+    const result = await rewriteInLanguage({ id: application.id, language });
+    if (result.ok) setLanguageJob({ jobId: result.data, revision: 0, language });
+    else {
+      setLanguageJob(null);
+      toast(result.error);
+    }
+  };
+
+  const languageChanged = (job: JobView<TranslateDocumentsResult>) => {
+    if (!languageJob) return;
+    if (job.status === "FAILED") {
+      // Nothing was saved, so the documents are as they were.
+      const { jobId, revision, language } = languageJob;
+      setLanguageJob(null);
+      toast(job.error ?? "That didn't work. Try again.", {
+        action: {
+          label: "Retry",
+          onClick: () =>
+            void retry({ id: jobId }).then((retried) => {
+              if (retried.ok) setLanguageJob({ jobId, revision: revision + 1, language });
+              else toast(retried.error);
+            }),
+        },
+      });
+      return;
+    }
+    if (job.status !== "DONE" || !job.result) return;
+    const { language, rewritten, left } = job.result;
+    setLanguageJob(null);
+    if (rewritten === 0) toast(`Nothing could be written in ${language}. The documents are as they were. Try again.`);
+    else {
+      toast(`Written in ${language}.${left.length > 0 ? ` Left as they were: ${left.join(", ")}.` : ""} The earlier text is in each document's Versions.`);
+      startTransition(() => router.refresh());
+    }
   };
 
   const stopRewriting = (key: string) =>
@@ -697,6 +753,19 @@ export function ApplicationView({
           />
         ) : null,
       )}
+      {languageJob?.jobId && <JobWatcher<TranslateDocumentsResult> key={languageJob.jobId} id={languageJob.jobId} revision={languageJob.revision} onChange={languageChanged} />}
+      <ConfirmDialog
+        open={languageAsked !== null}
+        onOpenChange={(open) => !open && askLanguage(null)}
+        title={`Write everything in ${languageAsked ?? ""}?`}
+        description={`Dossier's AI writes the resume, the cover letter and the email again in ${languageAsked ?? ""}: the same content, translated. A part that is in it already stays as it is${languageAsked === application.language ? ", so this only writes the parts that aren't" : ""}. It takes a minute or two. The earlier text stays in each document's Versions, and a part you edit meanwhile keeps your edit.`}
+        confirmLabel={`Rewrite in ${languageAsked ?? ""}`}
+        onConfirm={() => {
+          const language = languageAsked;
+          askLanguage(null);
+          if (language) void rewriteLanguage(language);
+        }}
+      />
       {reply && <JobWatcher<RefineResult> key={reply.jobId} id={reply.jobId} revision={reply.revision} onChange={replyChanged} />}
       {emailJob?.jobId && (
         <JobWatcher<WriteEmailResult> key={emailJob.jobId} id={emailJob.jobId} revision={emailJob.revision} onChange={emailChanged} />
@@ -758,6 +827,7 @@ export function ApplicationView({
               label={
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="flex items-center gap-1">Tailored resume · {themeMenu(resumeTheme)}</span>
+                  {languageMenu}
                   {hasSidebar(resumeTheme.layout) && (
                     <PreviewSwitch label="Sidebar layout" checked={followLayout} onCheckedChange={changeLayout} />
                   )}
@@ -807,6 +877,7 @@ export function ApplicationView({
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span>Cover letter · {aboutWords(paragraphs)}</span>
                   {themeMenu(letterTheme)}
+                  {languageMenu}
                   {historyButton(DocumentKind.COVER_LETTER)}
                 </span>
               }

@@ -17,7 +17,7 @@ import { leaveOut, putBack, saveUnitText } from "@/lib/document-edits";
 import { listDocumentVersions, loadDocumentVersion, restoreDocumentVersion, type VersionLine } from "@/lib/document-history";
 import { documentLabels } from "@/lib/document-labels";
 import { setDocumentLook } from "@/lib/document-look";
-import { restoreUnitText, sendChatMessage, startUnitRewrite, undoChatMessage } from "@/lib/document-rewrites";
+import { restoreUnitText, sendChatMessage, startLanguageRewrite, startUnitRewrite, undoChatMessage } from "@/lib/document-rewrites";
 import { refineJob, refineJobKey } from "@/lib/jobs/refine";
 import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
@@ -185,7 +185,8 @@ function versionMade({ cause, detail }: Pick<VersionLine, "cause" | "detail">): 
     case VersionCause.REGENERATED:
       return detail ? `Rewrote “${detail}”` : "Rewrote a part";
     case VersionCause.REFINED:
-      return detail ? `Changed from the chat: “${detail}”` : "Changed from the chat";
+      // "Rewrite in…" saves its versions under this cause too, with a detail that says so.
+      return /^(Rewritten in|Before rewriting in) /.test(detail) ? detail : detail ? `Changed from the chat: “${detail}”` : "Changed from the chat";
     case VersionCause.UNDONE:
       return "Undid an AI change";
     case VersionCause.BEFORE_RESTORE:
@@ -517,12 +518,36 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
   );
 
   server.registerTool(
+    "rewrite_in_language",
+    {
+      title: "Have Dossier's AI write the documents in another language",
+      description:
+        "Has Dossier's own AI model write an application's resume, cover letter and email again in another language, as Rewrite in… does, and sets the documents' language to it, so the headings and dates follow. " +
+        "Only when an AI provider is set up in Dossier; otherwise write the parts yourself with edit_document and set the language with set_document_look, which changes only the headings and dates. " +
+        "The earlier text stays in each document's versions. Follow the task_id with check_task, then read the result with get_document.",
+      inputSchema: z.object({
+        application_id: applicationId,
+        language: z.string().trim().min(1).max(60).describe("One of Dossier's languages (German, English…) or a custom one from Settings"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ application_id, language }) =>
+      refusalsAsFailures(async () =>
+        started(await startLanguageRewrite({ applicationId: application_id, language }), {
+          changing: `the resume, cover letter and email, to ${language}`,
+          link: documentLink(application_id, DocumentKind.RESUME),
+          then: "When it's done, read the result with get_document. The earlier text is in each document's versions.",
+        }),
+      ),
+  );
+
+  server.registerTool(
     "set_document_look",
     {
       title: "Change how the documents look",
       description:
         "Changes how an application's resume and cover letter look: their theme (one for both, by name or id), on the resume, the profile photo and the theme's sidebar layout, " +
-        "and the language the documents are written in, which their headings and dates follow. Answers with the look as it is now.",
+        "and the language the documents are written in, which their headings and dates follow (the text stays as it is: rewrite_in_language writes it again). Answers with the look as it is now.",
       inputSchema: z.object({
         application_id: applicationId,
         theme: z.string().trim().min(1).max(100).optional().describe("A theme's name or id, e.g. 'Classic'"),

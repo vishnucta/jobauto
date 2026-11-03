@@ -41,7 +41,8 @@ function numberValue(digits: string, suffix: string | undefined): number {
 
 function numbersIn(text: string): { raw: string; value: number }[] {
   const found = [...text.matchAll(NUMBER)].map((match) => ({ raw: match[0].trim(), value: numberValue(match[1], match[2]) }));
-  for (const match of text.matchAll(/\b([a-z]+)\b/gi)) {
+  // Whole words: with a plain \b, the "ten" in "größten" would read as the number 10.
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}])([a-z]+)(?![\p{L}\p{N}])/giu)) {
     const value = NUMBER_WORDS[match[1].toLowerCase()];
     if (value !== undefined) found.push({ raw: match[1], value });
   }
@@ -49,7 +50,13 @@ function numbersIn(text: string): { raw: string; value: number }[] {
 }
 
 /** Everything a claim may be backed by, lowercased for word lookups. */
-export type FactSources = { text: string; words: Set<string>; numbers: Set<number> };
+export type FactSources = {
+  text: string;
+  words: Set<string>;
+  numbers: Set<number>;
+  /** The text is in a language that capitalises every noun (German), where a capital in mid-sentence says nothing about a name. */
+  nounCapitals?: boolean;
+};
 
 export function factSources(parts: string[]): FactSources {
   const text = parts.join("\n").toLowerCase();
@@ -58,6 +65,19 @@ export function factSources(parts: string[]): FactSources {
     words: new Set(text.match(/[\p{L}\p{N}][\p{L}\p{N}&'’.+#-]*/gu)?.map((word) => word.replace(/[.'’]+$/, "")) ?? []),
     numbers: new Set(numbersIn(text).map((number) => number.value)),
   };
+}
+
+/** Languages that capitalise every noun: "Kunden" in the middle of a sentence is a word there, not a name. */
+const CAPITALISED_NOUNS = new Set(["german"]);
+
+/**
+ * `sources` for a text in `language`. In German every noun has a capital, so
+ * the names check would flag most of the text: there it looks at acronyms,
+ * numbers and credentials only, and an invented employer or tool in German
+ * text isn't noticed. A missing or other language changes nothing.
+ */
+export function inLanguage(sources: FactSources, language: string | null | undefined): FactSources {
+  return CAPITALISED_NOUNS.has(language?.trim().toLowerCase() ?? "") ? { ...sources, nounCapitals: true } : sources;
 }
 
 /** The profile and posting as fact sources, plus the years of experience the profile adds up to. */
@@ -107,6 +127,7 @@ export function unverifiedFacts(text: string, sources: FactSources): string[] {
     // Two capitals or more (PhD, MBA, UX) mark an acronym or credential, even at a sentence's start.
     const acronym = (word.match(/\p{Lu}/gu)?.length ?? 0) >= 2;
     if (starts.has(match.index) && !acronym) continue;
+    if (sources.nounCapitals && !acronym) continue;
     if (NOT_NAMES.has(lower) || MONTHS_AND_DAYS.has(lower)) continue;
     if (sources.words.has(lower) || sources.text.includes(lower)) continue;
     flag(word);

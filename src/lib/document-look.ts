@@ -51,7 +51,7 @@ export async function setDocumentLook(applicationId: string, { themeId, showPhot
  * the headings and dates come from the language, so it must be one Dossier
  * knows, built in or added in Settings → Documents (SET-7).
  */
-async function knownLanguageName(language: string): Promise<string> {
+export async function knownLanguageName(language: string): Promise<string> {
   const wanted = language.trim();
   if (!wanted) throw new ActionError("Say which language the documents are written in.");
   const { customLanguages } = await loadSettings();

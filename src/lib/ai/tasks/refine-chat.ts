@@ -8,7 +8,7 @@ import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
 import { isPublicationUnit, plainText } from "@/lib/unit-text";
 
-import { guardSources, unverifiedFacts } from "../fact-guard";
+import { guardSources, inLanguage, unverifiedFacts } from "../fact-guard";
 
 import {
   applicationFacts,
@@ -110,7 +110,7 @@ export const refineChat: Task<RefineInput, Refinement> = async (provider, input,
 
   const newTone = answer.tone && answer.tone !== tone ? answer.tone : null;
   // The email's recipient counts too: its greeting names them, from the posting or typed in by the user.
-  const sources = options.strict ? guardSources(profile, extracted, [posting, emailParts(email).to].join("\n"), facts) : null;
+  const sources = options.strict ? inLanguage(guardSources(profile, extracted, [posting, emailParts(email).to].join("\n"), facts), options.language ?? extracted.language) : null;
   const documents = { [DocumentKind.RESUME]: resume, [DocumentKind.COVER_LETTER]: letter, [DocumentKind.EMAIL]: email };
   // Only units that exist, each once; the text they replace is kept for Undo (APP-8).
   const edits = new Map<string, UnitEdit>();

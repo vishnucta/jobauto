@@ -3,10 +3,12 @@ import { z } from "zod";
 import { unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
 import { publicationLabel } from "@/lib/citation";
 import { documentLabels, ENGLISH_LABELS, languagesLine, type DocumentLabels } from "@/lib/document-labels";
+import { detectLanguageName, knownLanguage } from "@/lib/document-language";
 import { resumePublications, sameName, type ProfileData } from "@/lib/profile";
 import { plainText } from "@/lib/unit-text";
 
-import { guardSources, guardUnits } from "../fact-guard";
+import { guardSources, guardUnits, inLanguage } from "../fact-guard";
+import type { JsonCompletionRequest } from "../provider";
 
 import {
   applicationFacts,
@@ -22,7 +24,9 @@ import {
   type Task,
 } from "./prompt-parts";
 
-export const TAILOR_RESUME_VERSION = "tailor-resume@6";
+export const TAILOR_RESUME_VERSION = "tailor-resume@7";
+
+type Answer = z.infer<typeof answerSchema>;
 
 const answerSchema = z.object({
   summary: z.string(),
@@ -38,7 +42,7 @@ const INSTRUCTIONS = `You tailor a candidate's resume to one job, as JSON.
 - summary: 2–3 sentences in the first person without "I" at the start of every sentence, about the candidate as this job would see them.
 - roles: every role from the profile, by id, with 2–5 bullets each. Lead with what this job cares about, keep each bullet to one line, and start with a verb.
 - projects: every project from the profile, by id, with 1–3 bullets each, written like the roles' bullets: what was built and what it shows that this job cares about.
-- skills: the candidate's own skills, most relevant to this job first. Copy their names exactly; you may leave out ones that don't help.
+- skills: the candidate's own skills, most relevant to this job first. Copy their names exactly as the profile spells them, even when everything else is in another language; you may leave out ones that don't help.
 - education: every entry by id, with its notes shortened or left empty.
 - The profile's publications go on the resume word for word, so don't answer with them; the summary may mention them.`;
 
@@ -53,6 +57,25 @@ function pageFit(maxPages: number | null | undefined): string | null {
   return null;
 }
 
+/**
+ * Said last, after the long profile, where a model weighs it most. The profile
+ * is written once for every job and may be in another language than this
+ * resume: what comes from it is written again in the resume's language, not
+ * copied over.
+ */
+function languageReminder(language: string | null | undefined): string | null {
+  return language
+    ? `Write the summary, every bullet and every education note in ${language}. The profile above may be in another language: write what you take from it in ${language} instead of copying it. Skill names stay as the profile spells them.`
+    : null;
+}
+
+/** What the model writes as prose, for checking its language: not the skills (names), the languages line (built from the profile) or the citations. */
+const proseOf = (units: Unit[]) =>
+  units
+    .filter((unit) => unit.id === "summary" || ["experience:", "project:", "education:"].some((prefix) => unit.id.startsWith(prefix)))
+    .map((unit) => unit.text)
+    .join("\n");
+
 export type TailorInput = {
   profile: ProfileData;
   extracted: Extracted;
@@ -65,14 +88,17 @@ export type TailorInput = {
 
 /** APP-4: the tailored resume as units (summary, each role, each project, skills, each degree, each publication, languages). */
 export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profile, extracted, match, facts, posting }, options) => {
-  const answer = await provider.complete({
+  // The language it's written in: the one chosen, else the posting's. The model is told it outright: it sees what was read from the posting, not the posting, so "the posting's language" would leave it guessing, and the English profile wins.
+  const language = options.language ?? extracted.language;
+  const labels = documentLabels(language);
+  const request: JsonCompletionRequest<Answer> = {
     system: system(
       INSTRUCTIONS,
       pageFit(options.maxPages),
       truthfulness(options.strict),
       candidateFacts(profile, facts),
       CREATIVITY[options.creativity],
-      languageRule(options.language),
+      languageRule(language),
       UNTRUSTED_POSTING,
       NO_EM_DASHES,
     ),
@@ -83,6 +109,7 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
           `The candidate's profile:\n${profileForPrompt(profile)}`,
           `The job:\n${jobForPrompt(extracted, match)}`,
           applicationFacts(facts),
+          languageReminder(language),
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -92,12 +119,36 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
     schemaName: "tailored_resume",
     creativity: options.creativity,
     signal: options.signal,
-  });
+  };
+  // The answer's type is named, so this is the structured-output call, not the plain-text one.
+  const answer = await provider.complete<Answer>(request);
   // The languages line in the resume's language: the chosen one, or the posting's.
-  const units = resumeUnits(profile, answer, documentLabels(options.language ?? extracted.language));
+  let units = resumeUnits(profile, answer, labels);
+
+  // A profile in another language pulls hard. When what the model wrote is clearly in a different one (a text that is too short or mixed says nothing), it is asked once more, with that said; if that fails, the first answer stands.
+  const target = knownLanguage(language)?.name;
+  const written = target ? detectLanguageName(proseOf(units)) : undefined;
+  if (target && written && written !== target) {
+    try {
+      const again = await provider.complete<Answer>({
+        ...request,
+        messages: [
+          ...request.messages,
+          { role: "assistant", content: JSON.stringify(answer) },
+          {
+            role: "user",
+            content: `That answer is written in ${written}, but this resume has to be written in ${target}. Answer again with the same JSON: the summary, every bullet and every education note in ${target}, with the same ids and the same facts. Keep names, employers and tools as they are, and skill names exactly as the profile spells them.`,
+          },
+        ],
+      });
+      units = resumeUnits(profile, again, labels);
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+    }
+  }
   // E6-6: in strict mode, note what the profile and posting don't back.
   return {
-    data: options.strict ? guardUnits(units, guardSources(profile, extracted, posting, facts)) : units,
+    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, facts), language)) : units,
     promptVersion: TAILOR_RESUME_VERSION,
   };
 };

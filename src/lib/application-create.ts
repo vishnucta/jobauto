@@ -62,16 +62,18 @@ export type CreateApplicationInput = {
   postingUrl: string;
   tone: Tone;
   note: string;
+  /** The language chosen for this application: a name, or null for the posting's. Missing follows Settings → Write documents in. */
+  language?: string | null;
   claim: ApplicationClaim;
 };
 
 const CLAIMED = "application:";
 
 /** Creates the application once; creating again with the same claim returns the one that exists. */
-export async function createApplicationFromDocuments({ reading, documents, match, details, postingUrl, tone, note, claim }: CreateApplicationInput): Promise<string> {
+export async function createApplicationFromDocuments({ reading, documents, match, details, postingUrl, tone, note, language: chosen, claim }: CreateApplicationInput): Promise<string> {
   const [settings, profile] = await Promise.all([loadSettings(), loadProfile()]);
   const { extracted, extractedWith, matchedWith } = reading;
-  const language = settings.docLanguage ?? extracted.language ?? "English";
+  const language = (chosen === undefined ? settings.docLanguage : chosen) ?? extracted.language ?? "English";
   // E8-11: every part of the letter is a unit. The AI wrote the recipient
   // and greeting; the sender and signature come from the profile, and the
   // date is written now, in the letter's language.

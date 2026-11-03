@@ -6,6 +6,7 @@ import { experienceMonths } from "@/lib/profile";
 
 import sample from "../../../../prisma/seed/prototype-sample.json";
 import type { ChatCall } from "../provider";
+import { documentLabels, languagesLine } from "@/lib/document-labels";
 import { MockProvider } from "../providers/mock";
 
 import { isoDate } from "./extract-posting";
@@ -19,6 +20,7 @@ import {
   refineChat,
   regenerateUnit,
   tailorResume,
+  translateDocument,
   writeCoverLetter,
   writeEmail,
   type TaskOptions,
@@ -199,7 +201,9 @@ describe("tailorResume", () => {
     expect(text).toContain('"skillsUsed"');
     expect(text).toContain('"name": "Tidewater design tokens"');
     expect(text).toMatch(/Never invent or embellish an employer/);
-    expect(text).toMatch(/same language as the job posting/);
+    // The posting says English, so the model is told English outright, not left to find "the posting's language".
+    expect(text).toMatch(/Write everything in English\./);
+    expect(text).not.toMatch(/same language as the job posting/);
     expect(text).toContain("What the candidate tells you for this application:\n- Mention my interest in fintech.");
     expect(text).toContain(`"factsAboutMe": [\n    "${profile.facts[0].text}"`);
     expect(text).toMatch(/The candidate's facts \(factsAboutMe in the profile/);
@@ -217,7 +221,7 @@ describe("tailorResume", () => {
 
   it("returns units, keeping only real roles and the profile's own skills (APP-4)", async () => {
     const { data, promptVersion } = await tailorResume(model(answer), { profile, extracted, match: null, facts: [], posting }, options);
-    expect(promptVersion).toBe("tailor-resume@6");
+    expect(promptVersion).toBe("tailor-resume@7");
     expect(data.map((unit) => unit.id)).toEqual([
       "summary",
       "experience:e1",
@@ -292,6 +296,150 @@ describe("tailorResume", () => {
     expect(await system(1)).toMatch(/has to fit on one page/);
     expect(await system(2)).toMatch(/has to fit on two pages/);
     expect(await system(null)).not.toMatch(/has to fit/);
+  });
+
+  describe("in the language of the resume", () => {
+    // Long enough for the language to be told from the words: a summary and a few bullets are.
+    const english = {
+      summary: "A product designer with ten years of experience in building tools that make complex work calm, and with a record of leading the teams that ship the products for the customers of the business.",
+      roles: ["e1", "e2", "e3"].map((id) => ({ id, bullets: ["Led the redesign of the portal that is used by the dispatchers of the largest customers", "Built the design system that is shared by the teams of the product"] })),
+      projects: [{ id: "p1", bullets: ["Built an open-source plugin for the design tokens that are used by the community"] }],
+      skills: ["Design systems", "Figma"],
+      education: [{ id: "d1", notes: "Thesis on the trust that people have in the automation of the work" }, { id: "d2", notes: "" }],
+    };
+    const german = {
+      summary: "Ein Produktdesigner mit zehn Jahren Erfahrung in der Entwicklung von Werkzeugen, die komplexe Arbeit ruhig machen, und mit der Leitung von Teams, die Produkte für die Kunden des Unternehmens liefern.",
+      roles: ["e1", "e2", "e3"].map((id) => ({ id, bullets: ["Leitete die Neugestaltung des Portals, das von den Disponenten der größten Kunden genutzt wird", "Baute das Designsystem auf, das von den Teams des Produkts gemeinsam genutzt wird"] })),
+      projects: [{ id: "p1", bullets: ["Entwickelte ein quelloffenes Plugin für die Designtokens, die von der Community genutzt werden"] }],
+      skills: ["Design systems", "Figma"],
+      education: [{ id: "d1", notes: "Abschlussarbeit über das Vertrauen der Menschen in die Automatisierung der Arbeit" }, { id: "d2", notes: "" }],
+    };
+    const posting = { ...extracted, language: "German" };
+    const input = { profile, extracted: posting, match: null, facts: [], posting: sample.ledgerly.posting };
+
+    /** A model that gives each answer in turn, the last one again and again. */
+    const inOrder = (...answers: unknown[]) => {
+      let next = 0;
+      return new MockProvider({ reply: () => answers[Math.min(next++, answers.length - 1)] });
+    };
+
+    it("names the posting's language outright when none was chosen, and again after the profile", async () => {
+      const provider = inOrder(german);
+      await tailorResume(provider, input, options);
+      expect(sent(provider).system).toMatch(/Write everything in German\./);
+      expect(sent(provider).system).not.toMatch(/same language as the job posting/);
+      // Last, after the long profile, where a model weighs it most.
+      const message = sent(provider).messages[0].content as string;
+      expect(message.endsWith("Write the summary, every bullet and every education note in German. The profile above may be in another language: write what you take from it in German instead of copying it. Skill names stay as the profile spells them.")).toBe(true);
+      expect(message.indexOf("The candidate's profile")).toBeLessThan(message.indexOf("Write the summary, every bullet"));
+    });
+
+    it("prefers the language chosen for the application to the posting's", async () => {
+      const provider = inOrder(german);
+      await tailorResume(provider, input, { ...options, language: "French" });
+      expect(sent(provider).system).toMatch(/Write everything in French\./);
+      expect(sent(provider).messages[0].content).toContain("every education note in French.");
+    });
+
+    it("leaves the language to the posting when it isn't known, as before", async () => {
+      const provider = inOrder(english);
+      await tailorResume(provider, { ...input, extracted: { ...posting, language: null } }, options);
+      expect(sent(provider).system).toMatch(/same language as the job posting/);
+      expect(sent(provider).messages[0].content).not.toContain("every education note in");
+    });
+
+    it("keeps the skills' names as the profile spells them, whatever the language", async () => {
+      const provider = inOrder(german);
+      const { data } = await tailorResume(provider, input, options);
+      expect(sent(provider).system).toMatch(/Copy their names exactly as the profile spells them, even when everything else is in another language/);
+      expect(data.find((unit) => unit.id === "skills")?.text).toBe("Design systems · Figma");
+    });
+
+    it("asks once more, saying why, when what it wrote is clearly in another language", async () => {
+      const provider = inOrder(english, german);
+      const { data, promptVersion } = await tailorResume(provider, input, options);
+      expect(provider.calls).toHaveLength(2);
+      const [first, second] = provider.calls;
+      expect(second.system).toBe(first.system);
+      expect(second.messages).toHaveLength(3);
+      expect(second.messages[0]).toEqual(first.messages[0]);
+      expect(second.messages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("A product designer with ten years") });
+      expect(second.messages[2]).toMatchObject({ role: "user", content: expect.stringContaining("written in English, but this resume has to be written in German") });
+      expect(data.find((unit) => unit.id === "summary")?.text).toBe(german.summary);
+      expect(data.find((unit) => unit.id === "experience:e1")?.text).toBe(german.roles[0].bullets.join("\n"));
+      expect(promptVersion).toBe("tailor-resume@7");
+    });
+
+    it("leaves a resume that is part in the language and part the profile's own text as it is: nothing is clear", async () => {
+      // Roles the model skipped keep the profile's English bullets, and half and half says nothing about the language.
+      const skipped = { ...german, roles: german.roles.slice(0, 1) };
+      const provider = inOrder(skipped, german);
+      const { data } = await tailorResume(provider, input, options);
+      expect(provider.calls).toHaveLength(1);
+      expect(data.find((unit) => unit.id === "experience:e2")?.text).toBe(profile.experience[1].bullets);
+    });
+
+    it("asks only once: a second answer in the wrong language stands, and is not judged again", async () => {
+      const provider = inOrder(english);
+      const { data } = await tailorResume(provider, input, options);
+      expect(provider.calls).toHaveLength(2);
+      expect(data.find((unit) => unit.id === "summary")?.text).toBe(english.summary);
+    });
+
+    it("makes one call when the answer is in the language, or the resume is meant to be English, or nothing is clear", async () => {
+      const right = inOrder(german);
+      await tailorResume(right, input, options);
+      expect(right.calls).toHaveLength(1);
+
+      const defaultCase = inOrder(english);
+      await tailorResume(defaultCase, { ...input, extracted: { ...posting, language: "English" } }, options);
+      expect(defaultCase.calls).toHaveLength(1);
+
+      // Too short to tell: a few words, not a summary and bullets.
+      const tiny = { summary: "Designer.", roles: german.roles.map(({ id }) => ({ id, bullets: ["Led."] })), projects: [{ id: "p1", bullets: ["Built."] }], skills: [], education: [{ id: "d1", notes: "" }, { id: "d2", notes: "" }] };
+      const short = inOrder(tiny);
+      await tailorResume(short, input, options);
+      expect(short.calls).toHaveLength(1);
+
+      // A language Dossier has only been told the name of has no words to check against.
+      const custom = inOrder(english);
+      await tailorResume(custom, input, { ...options, language: "Klingon" });
+      expect(custom.calls).toHaveLength(1);
+    });
+
+    it("keeps the first answer when the second one fails, and stops when it was cancelled", async () => {
+      let calls = 0;
+      const failing = new MockProvider({
+        reply: () => {
+          if (++calls > 1) throw new Error("The model stopped answering");
+          return english;
+        },
+      });
+      const { data } = await tailorResume(failing, input, options);
+      expect(data.find((unit) => unit.id === "summary")?.text).toBe(english.summary);
+      expect(failing.calls.length).toBeGreaterThanOrEqual(2);
+
+      const controller = new AbortController();
+      let seen = 0;
+      const cancelled = new MockProvider({
+        reply: () => {
+          if (++seen > 1) {
+            controller.abort();
+            throw new Error("Cancelled");
+          }
+          return english;
+        },
+      });
+      await expect(tailorResume(cancelled, input, { ...options, signal: controller.signal })).rejects.toThrow();
+      // The second call was made, with the signal that was cancelled.
+      expect(cancelled.calls).toHaveLength(2);
+      expect(cancelled.calls[1].signal.aborted).toBe(true);
+    });
+
+    it("writes the languages line in the same language", async () => {
+      const { data } = await tailorResume(inOrder(german), input, options);
+      expect(data.find((unit) => unit.id === "languages")?.text).toBe(languagesLine(profile.languages, documentLabels("German")));
+    });
   });
 
   it("words creativity for every provider, and relaxes the rules when strict mode is off", async () => {
@@ -448,6 +596,61 @@ describe("writeEmail", () => {
     // A posting that hides a soft hyphen or a zero-width space in the address still gives it, without them.
     expect(recipient(null, "jobs@ledg­erly.example", "Apply at jobs@ledg­erly.example")).toBe("jobs@ledgerly.example");
     expect(recipient(null, "jobs@ledgerly.example", "Apply at jobs@​ledgerly.example")).toBe("jobs@ledgerly.example");
+  });
+});
+
+describe("translateDocument", () => {
+  const parts = [
+    { id: "summary", label: "Summary", text: "Product designer who makes complex tools calm." },
+    { id: "experience:e1", label: "Northwind role", text: "Led the carrier portal\nBuilt the design system" },
+    { id: "skills", label: "Skills", text: "Figma, Design systems" },
+  ];
+
+  it("asks for the parts in the language, as they are, and returns each one cleaned up (translate)", async () => {
+    const provider = model({
+      parts: [
+        { unitId: "summary", text: "\uFEFFProduktdesigner, der komplexe Werkzeuge ruhig macht.​" },
+        { unitId: "experience:e1", text: "- Das Carrier-Portal geleitet\n• Das Designsystem aufgebaut" },
+        { unitId: "skills", text: "Figma, Designsysteme" },
+      ],
+    });
+    const { data, promptVersion } = await translateDocument(provider, { kind: "RESUME", language: "German", units: parts }, options);
+    expect(promptVersion).toBe("translate-document@1");
+    expect(data.missing).toEqual([]);
+    expect(data.translated).toEqual([
+      { id: "summary", text: "Produktdesigner, der komplexe Werkzeuge ruhig macht." },
+      { id: "experience:e1", text: "Das Carrier-Portal geleitet\nDas Designsystem aufgebaut" },
+      { id: "skills", text: "Figma, Designsysteme" },
+    ]);
+    expect(sent(provider).system).toContain("again in German");
+    expect(sent(provider).system).toMatch(/Keep exactly as they are: numbers, amounts, the names of people, companies/);
+    expect(sent(provider).messages[0].content).toContain("Write these parts of the resume in German");
+    expect(sent(provider).messages[0].content).toContain("Led the carrier portal");
+    // A translation follows the original: no creative phrasing, whatever Settings says.
+    expect(sent(provider).temperature).toBe(0.2);
+  });
+
+  it("names what the model left out, and ignores parts it wasn't given and repeats", async () => {
+    const provider = model({
+      parts: [
+        { unitId: "summary", text: "Erste Fassung." },
+        { unitId: "summary", text: "Zweite Fassung." },
+        { unitId: "sender", text: "Ein Teil, der nicht gefragt war." },
+        { unitId: "skills", text: "   " },
+      ],
+    });
+    const { data } = await translateDocument(provider, { kind: "RESUME", language: "German", units: parts }, options);
+    expect(data.translated).toEqual([{ id: "summary", text: "Erste Fassung." }]);
+    expect(data.missing).toEqual(["experience:e1", "skills"]);
+  });
+
+  it("calls the letter and the email by their names", async () => {
+    const letter = model({ parts: [] });
+    await translateDocument(letter, { kind: "COVER_LETTER", language: "Dutch", units: [parts[0]] }, options);
+    expect(sent(letter).messages[0].content).toContain("parts of the cover letter in Dutch");
+    const email = model({ parts: [] });
+    await translateDocument(email, { kind: "EMAIL", language: "Dutch", units: [parts[0]] }, options);
+    expect(sent(email).system).toContain("candidate's application email again in Dutch");
   });
 });
 

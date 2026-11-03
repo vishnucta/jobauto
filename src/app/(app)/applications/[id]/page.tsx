@@ -8,9 +8,11 @@ import { loadApplication, loadDocuments, readJson } from "@/lib/application-docu
 import { loadApplyTab } from "@/lib/apply/view-data";
 import { formatShortDate } from "@/lib/dates";
 import { resolveFileName } from "@/lib/file-name";
+import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { refineJobKey } from "@/lib/jobs/refine";
 import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
+import { languageJobKey, translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { emailJobKey } from "@/lib/jobs/write-email";
 import { googleConnection } from "@/lib/google/account";
 import { pullInterviewEvents } from "@/lib/google/availability";
@@ -42,13 +44,14 @@ export async function generateMetadata({ params }: PageProps<"/applications/[id]
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
   const [{ id }, { tab }] = await Promise.all([params, searchParams]);
   await pullCalendar(id);
-  const [{ application, profile, settings, extracted, resume, letter, email, includeReferences, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, timeZone, google, emails, themes] =
+  const [{ application, profile, settings, extracted, resume, letter, email, includeReferences, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, languageJobs, timeZone, google, emails, themes] =
     await Promise.all([
       loadDocuments(id),
       isAiConfigured(),
       findUnfinishedJobs(unitJobKey(id)),
       findUnfinishedJobs(refineJobKey(id)),
       findUnfinishedJobs(emailJobKey(id)),
+      findUnfinishedJobs(languageJobKey(id)),
       userTimeZone(),
       googleConnection(),
       loadConversation(id),
@@ -76,6 +79,10 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
     const input = regenerateUnitJob.input.safeParse(job.input);
     return input.success ? [{ jobId: job.id, document: input.data.document, unitId: input.data.unitId }] : [];
   });
+  // A rewrite in another language still going, so a reload keeps showing it.
+  const languageJob = languageJobs.at(-1);
+  const languageInput = languageJob && translateDocumentsJob.input.safeParse(languageJob.input);
+  const rewritingLanguage = languageJob && languageInput?.success ? { jobId: languageJob.id, language: languageInput.data.language } : null;
   // The PDFs to attach to the email, named as they'll download (SET-8).
   const fileName = (doc: "RESUME" | "COVER_LETTER") =>
     resolveFileName(settings.fileNamePattern, { name: profile.basics.name, company: application.company, role: application.role, doc, date: new Date() });
@@ -114,6 +121,8 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       letter={letter}
       themes={themes}
       baseThemeId={settings.baseThemeId}
+      languages={[...DOCUMENT_LANGUAGES.map((entry) => entry.name), ...settings.customLanguages]}
+      rewritingLanguage={rewritingLanguage}
       email={email}
       writingEmail={emailJobs.at(-1)?.id ?? null}
       attachments={{ resume: resume ? fileName("RESUME") : null, letter: letter ? fileName("COVER_LETTER") : null }}

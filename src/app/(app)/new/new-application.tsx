@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Tone } from "@/generated/prisma/enums";
 import { useJob } from "@/hooks/use-job";
 import { withSkillAdded, type Extracted } from "@/lib/application-data";
+import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { cancel, retry } from "@/lib/jobs/actions";
 import { READ_POSTING_STEPS, WRITE_DOCUMENTS_STEPS } from "@/lib/jobs/application-steps";
 import type { ReadPostingResult } from "@/lib/jobs/read-posting";
@@ -56,6 +57,8 @@ export type Draft = {
   details: Details;
   tone: Tone;
   note: string;
+  /** This application's language; null is the posting's. Missing in drafts from before: Settings decides. */
+  language?: string | null;
   writeJobId: string | null;
   /** The Find jobs posting it was started from (E14-8); missing in drafts from before. */
   postingId?: string | null;
@@ -91,6 +94,7 @@ const EMPTY_DETAILS: Details = { title: "", company: "", role: "", location: "",
 
 // One draft per tab, in sessionStorage (E7-7); none while rendering on the server.
 const draftStore = typeof window === "undefined" ? null : createDraftStore<Draft>();
+const BUILT_IN_LANGUAGES = DOCUMENT_LANGUAGES.map((language) => language.name);
 const noStore = () => () => {};
 
 const LEAVE_WARNING = "Leave now? I'll stop working on this application, and nothing will be created.";
@@ -140,6 +144,10 @@ export type NewApplicationProps = {
   samplePosting: string | null;
   /** Settings → default cover letter tone (SET-6). */
   defaultTone: Tone;
+  /** Settings → Write documents in (SET-7); null follows the posting's language. */
+  defaultLanguage?: string | null;
+  /** The languages documents can be written in: the built-in ones and those added in Settings. */
+  languages?: string[];
   /** "+ New application": start over, whatever the tab kept. */
   fresh?: boolean;
   /** "Start application" on Find jobs: start over from this posting. */
@@ -147,7 +155,7 @@ export type NewApplicationProps = {
 };
 
 /** The new application flow (E7): paste → read → review → create. */
-export function NewApplication({ aiReady, writeInClaude = false, samplePosting, defaultTone, fresh = false, fromPosting = null }: NewApplicationProps) {
+export function NewApplication({ aiReady, writeInClaude = false, samplePosting, defaultTone, defaultLanguage = null, languages = BUILT_IN_LANGUAGES, fresh = false, fromPosting = null }: NewApplicationProps) {
   const [initial] = useState<Draft>(() => ({
     step: "paste",
     posting: "",
@@ -164,6 +172,8 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
   // The server renders a fresh draft; the tab's own draft takes over once the page is live.
   const stored = useSyncExternalStore(draftStore?.subscribe ?? noStore, () => draftStore?.get() ?? null, () => null);
   const draft = stored ?? initial;
+  // Chosen for this application, else what Settings says.
+  const language = draft.language === undefined ? defaultLanguage : draft.language;
   // Set when a change here moves to another step; the tab's draft taking over on load doesn't count.
   const stepChanged = useRef(false);
   const setDraft = (next: (current: Draft) => Draft) => {
@@ -311,7 +321,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     if (!draft.read || !draft.readJobId || starting) return;
     setStarting(true);
     const result = toastResult(
-      await startWritingDocuments({ readJobId: draft.readJobId, details: draft.details, match: draft.read.match, tone: draft.tone, note: draft.note }),
+      await startWritingDocuments({ readJobId: draft.readJobId, details: draft.details, match: draft.read.match, tone: draft.tone, note: draft.note, language }),
     );
     setStarting(false);
     if (!result.ok) return;
@@ -443,7 +453,16 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
             <>
               <DetailsCard details={draft.details} onChange={(details) => update({ details })} />
               <MatchCard match={draft.read.match} requirements={draft.read.extracted.requirements} onAddSkill={(index, skill) => void addToProfile(index, skill)} />
-              <TailoringCard tone={draft.tone} note={draft.note} onTone={(tone) => update({ tone })} onNote={(note) => update({ note })} />
+              <TailoringCard
+                tone={draft.tone}
+                note={draft.note}
+                language={language}
+                languages={languages}
+                postingLanguage={draft.read.extracted.language}
+                onTone={(tone) => update({ tone })}
+                onNote={(note) => update({ note })}
+                onLanguage={(chosen) => update({ language: chosen })}
+              />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="text" onClick={() => update({ step: "paste" })}>
                   ← Back to the posting
