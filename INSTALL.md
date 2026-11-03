@@ -197,7 +197,7 @@ Docker Desktop on macOS or Windows, or Docker Engine on Linux: follow **Run it o
 
 ## Use it from Claude (optional)
 
-The app is also an MCP server, so Claude can work in it for you: search jobs, change your profile, write and send applications, fill in forms on the Apply tab, and more.
+The app is also an MCP server, so Claude, Gemini CLI or another MCP client can work in it for you: search one or several job sources, add jobs it found on the web, change your profile, write, ATS-check and send applications, fill in forms on the Apply tab, and more.
 
 1. In the app, open **Settings → Claude connector** and turn it on.
 2. In Claude Code on this laptop, run this once, then type `/mcp` in Claude Code and sign in when the browser opens:
@@ -206,7 +206,29 @@ The app is also an MCP server, so Claude can work in it for you: search jobs, ch
 claude mcp add --transport http dossier http://localhost:3000/api/mcp
 ```
 
-Claude Desktop and claude.ai reach the app from Anthropic's servers, so they need an internet address with HTTPS, for example through Tailscale Funnel. On a Team or Enterprise plan, only an Owner can add the connector there.
+3. Claude Desktop on the same laptop reaches it through `mcp-remote`, which needs Node.js. In **Settings → Developer → Edit Config**, add this to `claude_desktop_config.json`, restart Claude Desktop and sign in when the browser opens:
+
+```json
+{
+  "mcpServers": {
+    "dossier": { "command": "npx", "args": ["-y", "mcp-remote", "http://localhost:3000/api/mcp", "--allow-http"] }
+  }
+}
+```
+
+4. Gemini CLI: add the server to `%USERPROFILE%\.gemini\settings.json`, start `gemini`, trust the folder you run it in (Gemini CLI turns MCP servers off in untrusted folders) and sign in with `/mcp auth dossier`:
+
+```json
+{
+  "mcpServers": {
+    "dossier": { "httpUrl": "http://localhost:3000/api/mcp" }
+  }
+}
+```
+
+claude.ai and the Claude mobile apps reach the app from Anthropic's servers, so they need an internet address with HTTPS, for example through Tailscale Funnel. On a Team or Enterprise plan, only an Owner can add the connector there.
+
+After updating the app, reconnect each client (`/mcp` → reconnect in Claude Code and Gemini CLI, a restart of Claude Desktop): they keep the tool list they got when they connected, so new tools and options only show after that.
 
 Claude Code asks you before it uses a tool, unless you've allowed that tool for good, so keep sending and deleting tools on ask. Claude never sees your API keys or your password through the connector.
 
