@@ -4,6 +4,8 @@
 export const RELEASES_REPOSITORY = "AienTech/dossier";
 /** The repository's page, for credits and support (the sidebar). */
 export const REPOSITORY_URL = `https://github.com/${RELEASES_REPOSITORY}`;
+/** This fork's source (jobauto), for the sidebar and Settings → About. Releases are still checked on the repository above. */
+export const FORK_REPOSITORY_URL = "https://github.com/vishnucta/jobauto";
 /** How to update, in the wiki. */
 export const UPGRADE_GUIDE_URL = `${REPOSITORY_URL}/wiki/Upgrading`;
 

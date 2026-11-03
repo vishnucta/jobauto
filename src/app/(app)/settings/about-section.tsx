@@ -7,7 +7,7 @@ import { toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Toggle } from "@/components/ui/toggle";
-import { UPGRADE_GUIDE_URL, type Release } from "@/lib/releases";
+import { FORK_REPOSITORY_URL, REPOSITORY_URL, UPGRADE_GUIDE_URL, type Release } from "@/lib/releases";
 
 import { chooseUsagePing } from "../actions";
 import { USAGE_PING_PRIVACY_URL } from "../usage-ping-dialog";
@@ -105,6 +105,17 @@ export function AboutSection({ facts, usagePing, updates }: { facts: AboutFacts;
           ))}
         </dl>
       </Card>
+      <p className="text-meta text-muted">
+        This is jobauto, a personal fork of Dossier for job hunting in Germany, under the same AGPL-3.0 license. Its source is at{" "}
+        <a href={FORK_REPOSITORY_URL} target="_blank" rel="noopener noreferrer" className={LINK}>
+          {FORK_REPOSITORY_URL.replace("https://", "")} <span className="sr-only">(opens in a new tab)</span>
+        </a>
+        ; the project it comes from is{" "}
+        <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" className={LINK}>
+          {REPOSITORY_URL.replace("https://", "")} <span className="sr-only">(opens in a new tab)</span>
+        </a>
+        .
+      </p>
       <Card padding="none" className="px-7 py-4">
         <Toggle
           label="Send the daily usage ping"

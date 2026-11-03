@@ -32,6 +32,13 @@ describe("About (E10-9)", () => {
     expect(checkUpdates).not.toHaveBeenCalled();
   });
 
+  it("says this is the jobauto fork, and links its source and the project it comes from", () => {
+    render(<AboutSection facts={facts} usagePing={ping} updates={updates} />);
+    expect(screen.getByText(/This is jobauto, a personal fork of Dossier/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "github.com/vishnucta/jobauto (opens in a new tab)" })).toHaveAttribute("href", "https://github.com/vishnucta/jobauto");
+    expect(screen.getByRole("link", { name: "github.com/AienTech/dossier (opens in a new tab)" })).toHaveAttribute("href", "https://github.com/AienTech/dossier");
+  });
+
   it("says what the usage ping sends, with the install ID, and switches it off (#172)", async () => {
     const user = userEvent.setup();
     render(<AboutSection facts={facts} usagePing={ping} updates={updates} />);

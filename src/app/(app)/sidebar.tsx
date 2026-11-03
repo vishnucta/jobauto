@@ -7,7 +7,7 @@ import type { Release } from "@/lib/releases";
 import type { ColorScheme } from "@/lib/ui-preferences";
 
 import { NavLinks } from "./nav-links";
-import { RepositoryLink } from "./repository-link";
+import { ForkLink, RepositoryLink } from "./repository-link";
 import { SidebarFrame } from "./sidebar-frame";
 import { ThemeToggle } from "./theme-toggle";
 import { UpdateNotice } from "./update-notice";
@@ -77,6 +77,7 @@ export function Sidebar({
 
       <div className="flex flex-col gap-0.5 border-t border-line p-2 group-data-collapsed/sidebar:px-1">
         <ThemeToggle serverScheme={colorScheme} />
+        <ForkLink />
         <RepositoryLink />
       </div>
 
