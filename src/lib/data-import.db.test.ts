@@ -147,6 +147,42 @@ describe("importExport (E10-6)", () => {
     expect(await prisma().posting.findFirstOrThrow({ where: { externalId: "job-1" } })).toMatchObject({ applicationId: null });
   });
 
+  it("restores the recruiters with their history, and reads a file from before there were any", async () => {
+    await prisma().recruiter.create({
+      data: {
+        id: "rec-1",
+        name: "Selby Jennings",
+        email: "jobs@example.com",
+        status: "CONTACTED",
+        contactedAt: now,
+        followUpAt: new Date(now.getTime() + 7 * 86_400_000),
+        events: { create: [{ id: "ev-1", text: "Added", at: now }, { id: "ev-2", text: "Marked as contacted", at: now }] },
+      },
+    });
+    await prisma().recruiterBlock.create({ data: { key: "adecco", createdAt: now } });
+    const file = await asFile();
+    expect(file.recruiterBlocks).toEqual([{ key: "adecco", createdAt: now }]);
+    expect(file.recruiters).toMatchObject([{ id: "rec-1", name: "Selby Jennings", events: [{ text: "Added" }, { text: "Marked as contacted" }] }]);
+    await prisma().recruiter.deleteMany();
+    await prisma().recruiterBlock.deleteMany();
+    await importExport(prisma(), file);
+    expect(await prisma().recruiterBlock.findMany()).toMatchObject([{ key: "adecco" }]);
+    expect(await prisma().recruiter.findUniqueOrThrow({ where: { id: "rec-1" }, include: { events: { orderBy: { id: "asc" } } } })).toMatchObject({
+      name: "Selby Jennings",
+      email: "jobs@example.com",
+      status: "CONTACTED",
+      contactedAt: now,
+      events: [{ id: "ev-1", text: "Added" }, { id: "ev-2", text: "Marked as contacted" }],
+    });
+
+    // Last night's kind of file has no recruiters: they read as none, and an import clears the ones there.
+    const older = parseExport(JSON.stringify({ ...file, schemaVersion: 5, recruiters: undefined, recruiterBlocks: undefined }));
+    expect(older).toMatchObject({ ok: true, data: { schemaVersion: 5, recruiters: [] } });
+    await importExport(prisma(), older.ok ? older.data : file);
+    expect(await prisma().recruiter.count()).toBe(0);
+    expect(await prisma().recruiterBlock.count()).toBe(0);
+  });
+
   it("restores past searches with what they found (E14-10)", async () => {
     await prisma().postingSearch.create({
       data: { sources: ["JSEARCH", "SERPAPI"], query: { keywords: "designer" }, postings: [{ externalId: "job-1" }], found: 1, cursors: { JSEARCH: "cursor:2" }, createdAt: now },

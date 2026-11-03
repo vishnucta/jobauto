@@ -991,3 +991,58 @@ model Job {
   @@index([status])
   @@index([applicationId])
 }
+
+// ─── Recruiters ──────────────────────────────────────────────────────────────
+
+enum RecruiterStatus {
+  NOT_CONTACTED
+  /// Written to, no answer yet; a follow-up is due on followUpAt.
+  CONTACTED
+  REPLIED
+  NOT_INTERESTED
+}
+
+/// A recruiter or agency the user keeps track of: who, how to reach them, where
+/// the conversation stands. Dossier sends nothing: a message is drafted, and
+/// the user sends it from their own mail.
+model Recruiter {
+  id          String           @id @default(cuid())
+  /// The agency, or the recruiter when there is no agency.
+  name        String
+  contactName String           @default("")
+  /// Only an address the user typed or the agency publishes, never guessed.
+  email       String           @default("")
+  website     String           @default("")
+  /// What they place, e.g. "Finance & accounting, Hamburg".
+  speciality  String           @default("")
+  notes       String           @default("")
+  /// Where it came from: "you" or "starter list".
+  source      String           @default("you")
+  status      RecruiterStatus  @default(NOT_CONTACTED)
+  contactedAt DateTime?
+  /// When to write again; set when marked as contacted.
+  followUpAt  DateTime?
+  events      RecruiterEvent[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status])
+}
+
+/// What happened with a recruiter, newest last: "Added", "Marked as contacted"…
+model RecruiterEvent {
+  id          String    @id @default(cuid())
+  recruiterId String
+  recruiter   Recruiter @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+  text        String
+  at          DateTime  @default(now())
+
+  @@index([recruiterId, at])
+}
+
+/// Agencies the user removed from Recruiters, by name as folded text, so a later
+/// search or job doesn't put them back. Adding one by hand lifts it.
+model RecruiterBlock {
+  key       String   @id
+  createdAt DateTime @default(now())
+}

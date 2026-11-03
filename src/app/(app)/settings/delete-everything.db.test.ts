@@ -75,6 +75,9 @@ describe("deleteEverything (E10-8)", () => {
     // And Startups, with the fingerprints of ones removed for good (#222).
     await prisma().startup.create({ data: { source: "HN", externalId: "1", company: "Acme", roles: [], emails: [], links: [], reasons: [] } });
     await prisma().startupBlock.create({ data: { hash: "a".repeat(64) } });
+    // And the recruiters, with their history.
+    await prisma().recruiter.create({ data: { name: "Hays", events: { create: { text: "Added" } } } });
+    await prisma().recruiterBlock.create({ data: { key: "adecco" } });
     // A posting pasted for Claude chat, and the connector, which goes off (#221).
     await prisma().claudePaste.create({ data: { text: "A posting", expiresAt: new Date(Date.now() + 60_000) } });
     await prisma().setting.create({ data: { key: "connectorEnabledAt", value: "2026-10-23T09:00:00.000Z" } });
@@ -89,6 +92,9 @@ describe("deleteEverything (E10-8)", () => {
       prisma().postingScore.count(),
       prisma().startup.count(),
       prisma().startupBlock.count(),
+      prisma().recruiter.count(),
+      prisma().recruiterEvent.count(),
+      prisma().recruiterBlock.count(),
       prisma().claudePaste.count(),
       prisma().application.count(),
       prisma().document.count(),
@@ -101,7 +107,7 @@ describe("deleteEverything (E10-8)", () => {
       prisma().job.count(),
       prisma().theme.count({ where: { builtIn: false } }),
     ]);
-    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(12);
     expect(await readdir(dataDir.path)).toEqual([]);
   });

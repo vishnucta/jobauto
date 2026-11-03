@@ -4,6 +4,7 @@ import type { Posting } from "@/generated/prisma/client";
 import { linkKey, postingKey, type FoundPosting, type PostingOrigin, type PostingState, type ShownPosting } from "@/lib/job-search/search";
 import { stringsOf } from "@/lib/agent/candidates";
 import { prisma } from "@/lib/prisma";
+import { noteAgencies } from "@/lib/recruiters/store";
 
 // Postings kept from Find jobs (E14-5): saved, dismissed, or started an
 // application from. Nothing else from a search is stored, and a posting
@@ -68,7 +69,12 @@ export async function storePosting(found: FoundPosting, marks: { savedAt?: Date 
 }
 
 /** Save: into the Saved list, and out of Dismissed. */
-export const savePosting = (found: FoundPosting) => storePosting(found, { savedAt: new Date(), dismissedAt: null });
+export async function savePosting(found: FoundPosting): Promise<Posting> {
+  const saved = await storePosting(found, { savedAt: new Date(), dismissedAt: null });
+  // A job she keeps from an agency puts the agency on the Recruiters list.
+  await noteAgencies([found], "job");
+  return saved;
+}
 
 /** Dismiss: out of later searches, and out of Saved. Says whether it was saved, for Undo. */
 export async function dismissPosting(found: FoundPosting): Promise<{ wasSaved: boolean }> {

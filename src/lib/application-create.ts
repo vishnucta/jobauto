@@ -13,6 +13,7 @@ import { logServerError } from "@/lib/log";
 import { describeTrim, fitResumeToPages } from "@/lib/page-limit";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
+import { noteAgencies } from "@/lib/recruiters/store";
 import { maxPages } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
 
@@ -182,6 +183,8 @@ export async function createApplicationFromDocuments({ reading, documents, match
     return { id: application.id, isNew: true };
   });
   if (!created.isNew) return created.id;
+  // A job she applies for through an agency puts the agency on the Recruiters list.
+  await noteAgencies([{ company: details.company, title: details.role }], "job");
 
   // E10-10: once created, a resume that runs over its page limit is
   // trimmed, and the opening message says what was cut. A failure here

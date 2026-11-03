@@ -27,6 +27,7 @@ import {
 } from "@/lib/job-search/search";
 import { postingStates } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
+import { noteAgencies } from "@/lib/recruiters/store";
 
 // Searches kept with what they found (E14-10), until the user removes them,
 // so going back to one costs no searches from the sources' plans.
@@ -72,6 +73,8 @@ export async function runSearch(query: SearchQuery, sources?: readonly JobSource
     data: { sources: answer.sources, query, postings: answer.postings, found: answer.postings.length, cursors: answer.cursors, problems: answer.problems },
     select: { id: true },
   });
+  // An agency among the postings goes on the Recruiters list.
+  await noteAgencies(answer.postings, "search");
   return { ok: true, id: search.id, problems: answer.problems };
 }
 
@@ -157,6 +160,7 @@ export async function addClientSearch({
     data: { sources: ["CLIENT"], addedBy, query, postings: added, found: added.length },
     select: { id: true },
   });
+  await noteAgencies(added, "search");
   return { id: search.id, added, skipped };
 }
 
@@ -190,6 +194,7 @@ export async function showMoreFor(id: string): Promise<{ ok: true; postings: Sho
   if (!answer.ok) return answer;
   const postings = [...kept, ...answer.postings];
   await prisma.postingSearch.update({ where: { id }, data: { postings, found: postings.length, cursors: answer.cursors } });
+  await noteAgencies(answer.postings, "search");
   return { ok: true, postings: await withStates(answer.postings), more: Object.keys(answer.cursors).length > 0, problems: answer.problems };
 }
 

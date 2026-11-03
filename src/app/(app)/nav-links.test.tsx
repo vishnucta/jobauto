@@ -43,6 +43,8 @@ describe("NavLinks", () => {
     expect(currentItem("/resume")).toEqual(["Base resume"]);
     expect(currentItem("/jobs")).toEqual(["Find jobs"]);
     expect(currentItem("/startups")).toEqual(["Startups"]);
+    // Recruiters is a tab of Find jobs.
+    expect(currentItem("/recruiters")).toEqual(["Find jobs"]);
     expect(currentItem("/settings")).toEqual(["Settings"]);
   });
 

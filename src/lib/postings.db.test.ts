@@ -45,6 +45,13 @@ describe("postings", () => {
     expect(foundFromPosting(saved)).toEqual(found);
   });
 
+  it("puts an agency a saved job comes from on the Recruiters list, and an employer's job doesn't", async () => {
+    await savePosting(found);
+    expect(await prisma().recruiter.count()).toBe(0);
+    await savePosting({ ...found, externalId: "job-2", company: "Robert Half", title: "Financial Controller" });
+    expect(await prisma().recruiter.findMany({ select: { name: true, source: true } })).toEqual([{ name: "Robert Half", source: "came with a job" }]);
+  });
+
   it("keeps the saved date and a whole description when the posting comes again", async () => {
     const first = await savePosting(found);
     const again = await storePosting({ ...found, title: "Senior UX Researcher", description: "The start…", complete: false });

@@ -85,7 +85,7 @@ const screenProps: ComponentProps<typeof JobsScreen> = {
   view: "search",
   query,
   search: null,
-  counts: { searches: 0, saved: 0, dismissed: 0 },
+  counts: { searches: 0, saved: 0, dismissed: 0, recruiters: 0 },
   today: "2026-10-03T12:00:00.000Z",
 };
 
@@ -411,7 +411,7 @@ describe("past searches (E14-10)", () => {
   ];
 
   it("lists them by day, each opening without asking the source again", () => {
-    renderScreen({ view: "history", history, counts: { searches: 3, saved: 0, dismissed: 0 } });
+    renderScreen({ view: "history", history, counts: { searches: 3, saved: 0, dismissed: 0, recruiters: 0 } });
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
     const today = screen.getByRole("region", { name: "Today" });
     expect(within(today).getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
@@ -448,19 +448,20 @@ describe("past searches (E14-10)", () => {
 });
 
 describe("the Saved and Dismissed views (E14-7)", () => {
-  it("has tabs for the search, past searches and the kept postings, with how many each holds", () => {
-    renderScreen({ counts: { searches: 4, saved: 3, dismissed: 1 } });
+  it("has tabs for the search, past searches, the kept postings and the recruiters, with how many each holds", () => {
+    renderScreen({ counts: { searches: 4, saved: 3, dismissed: 1, recruiters: 5 } });
     const tabs = within(screen.getByRole("navigation", { name: "Find jobs views" })).getAllByRole("link");
     expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("href"), tab.getAttribute("aria-current")])).toEqual([
       ["Search", "/jobs", "page"],
       ["Past searches4", "/jobs?view=history", null],
       ["Saved3", "/jobs?view=saved", null],
       ["Dismissed1", "/jobs?view=dismissed", null],
+      ["Recruiters5", "/recruiters", null],
     ]);
   });
 
   it("lists the saved postings, without the search form, even with job search off", () => {
-    renderScreen({ source: null, view: "saved", kept: [posting("a", { state: { ...state, saved: true } })], counts: { searches: 0, saved: 1, dismissed: 0 } });
+    renderScreen({ source: null, view: "saved", kept: [posting("a", { state: { ...state, saved: true } })], counts: { searches: 0, saved: 1, dismissed: 0, recruiters: 0 } });
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
     expect(screen.queryByText("Choose where to search")).not.toBeInTheDocument();
     expect(screen.getByText("1 saved posting")).toBeInTheDocument();

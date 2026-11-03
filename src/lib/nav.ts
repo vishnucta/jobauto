@@ -26,7 +26,8 @@ export const NAV: { label?: string; items: NavItem[] }[] = [
   {
     label: "Job search",
     items: [
-      { href: "/jobs", label: "Find jobs", icon: Search },
+      // Recruiters is a tab of Find jobs, so its screen belongs here.
+      { href: "/jobs", label: "Find jobs", icon: Search, isActive: (pathname) => within(pathname, "/jobs") || within(pathname, "/recruiters") },
       { href: "/startups", label: "Startups", icon: Rocket },
       { href: "/agent", label: "Agent", icon: Bot },
       {

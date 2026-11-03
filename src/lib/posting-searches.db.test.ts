@@ -10,7 +10,9 @@ import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 import { jsearchV2LastPage, jsearchV2Page, serpapiLastPage, serpapiPage } from "@/test/job-search-fixtures";
 
-import { countSearches, listSearches, loadSearch, removeSearch, runSearch, showMoreFor } from "./posting-searches";
+import { removeRecruiter } from "@/lib/recruiters/store";
+
+import { addClientSearch, countSearches, listSearches, loadSearch, removeSearch, runSearch, showMoreFor } from "./posting-searches";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -271,5 +273,45 @@ describe("searches on several sources", () => {
 
     await saveSettings({ jsearchKeyEnc: null });
     expect(await runSearch(query, ["SERPAPI"])).toEqual({ ok: false, problem: "no-key", message: "Add your SerpApi key in Settings → Job search first." });
+  });
+});
+
+describe("agencies in what a search finds", () => {
+  const fromAgency = (company: string, id = "sj-1") => ({ ...jsearchV2LastPage, data: { jobs: [{ job_id: id, job_title: "Regulatory Reporting Specialist", employer_name: company, job_publisher: "LinkedIn" }], cursor: null } });
+
+  it("go on the Recruiters list, with the role they posted, and an employer doesn't", async () => {
+    await useJSearch();
+    stubFetch(() => json(fromAgency("Selby Jennings")));
+    await runSearch(query);
+    stubFetch(() => json(fromAgency("Fielmann AG", "f-1")));
+    await runSearch({ ...query, keywords: "analyst" });
+    expect(await prisma().recruiter.findMany({ select: { name: true, source: true, events: { select: { text: true }, orderBy: { at: "asc" } } } })).toEqual([
+      { name: "Selby Jennings", source: "found in search", events: [{ text: "Found in a search" }, { text: "Posted: Regulatory Reporting Specialist" }] },
+    ]);
+  });
+
+  it("come from the next page, and from jobs an AI client adds", async () => {
+    await useJSearch();
+    stubFetch(() => json({ ...jsearchV2Page, data: { ...jsearchV2Page.data, cursor: "MORE" } }));
+    const run = await runSearch(query);
+    stubFetch(() => json(fromAgency("Robert Walters", "rw-1")));
+    await showMoreFor(run.ok ? run.id : "");
+    await addClientSearch({
+      addedBy: "Gemini CLI",
+      query,
+      postings: [{ ...EMPTY_POSTING, source: "CLIENT", externalId: "h-1", title: "Financial Analyst", company: "Hays", url: "https://www.hays.de/jobs/1" }],
+    });
+    expect((await prisma().recruiter.findMany({ select: { name: true }, orderBy: { name: "asc" } })).map((entry) => entry.name)).toEqual(["Hays", "Robert Walters"]);
+  });
+
+  it("stay off once the user removed them", async () => {
+    await useJSearch();
+    stubFetch(() => json(fromAgency("Hays")));
+    await runSearch(query);
+    const { id } = await prisma().recruiter.findFirstOrThrow();
+    await removeRecruiter(id);
+    stubFetch(() => json(fromAgency("Hays", "sj-2")));
+    await runSearch({ ...query, keywords: "other" });
+    expect(await prisma().recruiter.count()).toBe(0);
   });
 });

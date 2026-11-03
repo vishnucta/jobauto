@@ -10,6 +10,7 @@ import { AiError } from "@/lib/ai/errors";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { scorePosting } from "@/lib/ai/tasks";
 import { searchPostings } from "@/lib/job-search";
+import { noteAgencies } from "@/lib/recruiters/store";
 import { credentialsFor, loadJobSearchConfig, requestContext } from "@/lib/job-search/config";
 import { JobSearchError } from "@/lib/job-search/errors";
 import { postingKey, postingText, type FoundPosting, type SearchQuery } from "@/lib/job-search/search";
@@ -123,6 +124,8 @@ export async function runAgentScan({ manual }: { manual: boolean }, context: Job
     throw error;
   }
 
+  // The agent's daily search can show an agency too: it goes on the Recruiters list.
+  await noteAgencies(postings, "search");
   const fresh = await newPostings(postings);
   const counts = { found: postings.length, fresh: fresh.length, skipped: postings.length - fresh.length, drafted: 0 };
   if (fresh.length === 0) return finish({ ...counts, scored: 0, message: postings.length === 0 ? "The search found no postings this time." : "No new postings this time." });
