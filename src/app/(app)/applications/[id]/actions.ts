@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { DocumentKind } from "@/generated/prisma/enums";
-import { action } from "@/lib/action";
+import { action, ActionError } from "@/lib/action";
 import { addApplicationNote, deleteApplicationNote, noteBody, restoreApplicationNote, updateApplicationNote } from "@/lib/application-notes";
 import { leaveOut, putBack, saveUnitText } from "@/lib/document-edits";
 import { listDocumentVersions, loadDocumentVersion, restoreDocumentVersion } from "@/lib/document-history";
@@ -14,6 +14,7 @@ import { putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { DOCUMENT_LABELS } from "@/lib/file-name";
 import { followInCalendar, saveInterviewDate } from "@/lib/interview-date";
 import { addMissingSkill } from "@/lib/match-skills";
+import { checkResume, cleanDocumentText } from "@/lib/resume-check";
 
 const refresh = (id: string) => revalidatePath(`/applications/${id}`);
 
@@ -46,6 +47,36 @@ export const setShowPhoto = action(z.object({ id: z.string().min(1), show: z.boo
 export const setApplicationTheme = action(z.object({ id: z.string().min(1), themeId: z.string().min(1) }), async ({ id, themeId }) => {
   await setDocumentLook(id, { themeId });
   refresh(id);
+  return null;
+});
+
+/**
+ * The language the documents are written in, from the ATS check's "Set the
+ * language" fix: their headings and dates follow it. One from the "Write
+ * documents in" list or added there, in any spelling of its case.
+ */
+export const setDocumentLanguage = action(z.object({ id: z.string().min(1), language: z.string().max(100) }), async ({ id, language }) => {
+  await setDocumentLook(id, { language });
+  refresh(id);
+  return null;
+});
+
+// ─── The ATS check (Resume tab) ──────────────────────────────────────────────
+// The check itself is src/lib/resume-check.ts, which the Claude connector's
+// check_resume uses too. Its report holds labels and counts, never the text.
+
+/** "Check for ATS": prints the tailored resume as Download PDF does and reads it back the way a parser would. */
+export const checkResumeAts = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
+  const report = await checkResume("resume", id);
+  if ("error" in report) throw new ActionError(report.error);
+  return report;
+});
+
+/** The check's "Clean up the text" fix: the resume's and letter's parts written again without the characters a parser misreads. */
+export const cleanUpDocument = action(z.object({ id: z.string().min(1) }), async ({ id }, { toast }) => {
+  await cleanDocumentText(id);
+  refresh(id);
+  toast("Rewrote the resume and the cover letter with plain characters.");
   return null;
 });
 

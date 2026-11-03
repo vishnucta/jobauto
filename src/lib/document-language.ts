@@ -103,3 +103,45 @@ export function documentLanguage(
   if (known) return { lang: known.tag, dir: known.dir ?? "ltr" };
   return { lang: detectTag(sample), dir: detectDirection(sample) };
 }
+
+// Function words of the Latin-script languages in the list, for telling
+// which of them a tailored resume's text is in (the resume check): a text
+// in one language is full of its own little words and has few of another's.
+const STOPWORDS: Record<string, string> = {
+  en: "the and of to in a is that for with as on was at by an be this from are or it which have has were not but their its into over than also our they been where while",
+  nl: "de het een en van in is dat op te met voor zijn die niet aan er ook als bij door om uit naar over dan maar nog wordt werd worden heeft hebben ik we jaar meer tot onder tussen waar deze dit hun mijn",
+  de: "der die das und in zu den von mit ist des dem nicht ein eine als auch es an auf für sich im bei aus nach einer einem über um wurde wurden werden hat haben ich wir sowie durch oder zur zum dass einen bis unter mehr jahre jahren",
+  fr: "le la les de des du et en un une à est que qui dans pour pas sur par au aux avec ce cette ces il elle ils nous vous sont plus ou ne se son sa ses leur mais été ans dont comme où lors ainsi",
+  es: "el la los las de del y en un una que es por para con se no su sus al lo como más pero años fue han ha sobre entre desde hasta también donde este esta son o ser muy sin durante",
+  it: "il lo la i gli le di del della dei delle e ed in un una che è per con non su da al alla come più anche sono ha hanno nel nella degli anni tra fra questo questa dove sia suo sua dal ma o",
+  pt: "o a os as de do da dos das e em um uma que é para com não se por no na nos nas ao mais como foi são ou anos pelo pela sobre entre também onde este esta ser muito sem durante tem",
+  pl: "i w z na do nie się jest że to oraz dla od po przez jak ale przy lub jako są był była było były które który która tym ich jego jej pod nad lat roku latach bardzo także również aby czy tego tej",
+  sv: "och i att det som en ett av är för med på till har de den inte om var så kan från vid eller men också under efter över mellan år sedan hos genom samt denna detta dessa vi jag mer nya",
+  da: "og i at det som en et af er for med på til har de den ikke om var så kan fra ved eller men også under efter over mellem år siden hos gennem samt denne dette disse vi jeg mere nye hvor hvad nogle noget meget blev været bliver",
+  no: "og i at det som en et av er for med på til har de den ikke om var så kan fra ved eller men også under etter over mellom år siden hos gjennom samt denne dette disse vi jeg mer nye hvor hva noen noe mye ble vært blir",
+  fi: "ja on ei että oli se hän tämä joka kanssa myös mutta kun niin vuotta sekä tai ovat olen olin ollut vuoden jossa jonka kuin nyt vain voi mukaan sen sitä tässä josta ole jo",
+  cs: "a v ve na se je s z že do pro o k jako jsem jsme byl byla bylo byly který která které od po při ale nebo také let roku během kde než tak již aby i u za ze až mezi",
+  tr: "ve bir bu ile için da de olarak olan gibi daha çok en her sonra kadar ya ama ancak ise yıl yıllık tarafından üzerinde içinde arasında göre hem ne mi mı ben biz şu ki olduğu ederek yaparak",
+};
+const STOPWORD_SETS = Object.entries(STOPWORDS).map(([tag, words]) => ({ tag, words: new Set(words.split(" ")) }));
+
+/** Fewer words than a summary has say nothing: a headline or a skills line is in no language. */
+const MIN_TOKENS = 20;
+
+/**
+ * The name of the language a text is written in ("German"), for the
+ * Latin-script languages in the list, or undefined when there's too little
+ * text or no clear winner, as in a resume half in English and half in German.
+ */
+export function detectLanguageName(text: string): string | undefined {
+  const tokens = text.toLowerCase().match(/\p{L}+/gu) ?? [];
+  if (tokens.length < MIN_TOKENS) return undefined;
+  const scored = STOPWORD_SETS.map((entry) => ({ ...entry, hits: tokens.filter((token) => entry.words.has(token)).length })).sort((a, b) => b.hits - a.hits);
+  const [winner, runnerUp] = scored;
+  if (winner.hits < tokens.length * 0.03) return undefined;
+  // Words both share (Dutch and German "die", Danish and Norwegian "og") say nothing about which of the two it is, so the margin is judged on the rest.
+  const own = (a: (typeof scored)[number], b: (typeof scored)[number]) => tokens.filter((token) => a.words.has(token) && !b.words.has(token)).length;
+  const lead = own(winner, runnerUp);
+  if (lead === 0 || lead < 1.5 * own(runnerUp, winner)) return undefined;
+  return DOCUMENT_LANGUAGES.find((entry) => entry.tag === winner.tag)?.name;
+}

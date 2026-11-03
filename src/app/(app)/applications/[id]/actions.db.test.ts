@@ -5,6 +5,8 @@ import { createTestClient, resetDatabase } from "@/test/db";
 import {
   addMatchSkill,
   addNote,
+  checkResumeAts,
+  cleanUpDocument,
   deleteNote,
   leaveOutUnit,
   listVersions,
@@ -16,6 +18,7 @@ import {
   saveUnit,
   sendMessage,
   setApplicationTheme,
+  setDocumentLanguage,
   setFollowThemeLayout,
   setInterviewDate,
   setShowPhoto,
@@ -138,6 +141,53 @@ describe("setShowPhoto (#224)", () => {
 
   it("says so when the application is gone", async () => {
     expect(await setShowPhoto({ id: "gone", show: true })).toEqual({ ok: false, error: "That application no longer exists." });
+  });
+});
+
+describe("setDocumentLanguage (the ATS check's language fix)", () => {
+  const language = async () => (await prisma().application.findUniqueOrThrow({ where: { id: "app-1" } })).language;
+
+  it("saves the language as the list spells it", async () => {
+    expect(await setDocumentLanguage({ id: "app-1", language: "german" })).toEqual({ ok: true, data: null });
+    expect(await language()).toBe("German");
+  });
+
+  it("refuses an empty or unknown language, and says so when the application is gone", async () => {
+    const before = await language();
+    expect(await setDocumentLanguage({ id: "app-1", language: " " })).toEqual({ ok: false, error: "Say which language the documents are written in." });
+    expect(await setDocumentLanguage({ id: "app-1", language: "Klingon" })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^Dossier doesn't know the language "Klingon"/),
+    });
+    expect(await language()).toBe(before);
+    expect(await setDocumentLanguage({ id: "gone", language: "German" })).toEqual({ ok: false, error: "That application no longer exists." });
+  });
+});
+
+describe("the ATS check (checkResumeAts, cleanUpDocument)", () => {
+  it("says so when the application has no tailored resume, or is gone", async () => {
+    await prisma().application.create({ data: { id: "app-2", title: "Other", company: "Other" } });
+    expect(await checkResumeAts({ id: "app-2" })).toEqual({ ok: false, error: "This application has no tailored resume." });
+    expect(await checkResumeAts({ id: "gone" })).toEqual({ ok: false, error: "That application no longer exists." });
+  });
+
+  it("writes the resume's and the letter's parts again with plain characters, leaving a publication as written", async () => {
+    const odd = [
+      { id: "summary", label: "Summary", text: "An eﬃcient designer​." },
+      { id: "experience:e1", label: "Northwind role", text: "‑ Led the portal\n​\nBuilt the design system" },
+      { id: "publication:p1", label: "Publication “Doe, J.”", text: "Doe, J. (2020). Eﬃciency." },
+    ];
+    await prisma().document.update({ where: { applicationId_kind: { applicationId: "app-1", kind: "RESUME" } }, data: { units: odd } });
+    await prisma().document.create({ data: { applicationId: "app-1", kind: "COVER_LETTER", units: [{ id: "paragraph:1", label: "Opening", text: "Soft­ware" }] } });
+
+    expect(await cleanUpDocument({ id: "app-1" })).toEqual({ ok: true, data: null, toast: "Rewrote the resume and the cover letter with plain characters." });
+    expect(await units()).toEqual([
+      { id: "summary", label: "Summary", text: "An efficient designer." },
+      { id: "experience:e1", label: "Northwind role", text: "Led the portal\nBuilt the design system" },
+      odd[2],
+    ]);
+    const letter = await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: "app-1", kind: "COVER_LETTER" } } });
+    expect(letter.units).toEqual([{ id: "paragraph:1", label: "Opening", text: "Software" }]);
   });
 });
 

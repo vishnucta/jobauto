@@ -98,6 +98,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
           "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application. " +
           "Or let Dossier's AI draft it with draft_application. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
+          "check_resume says whether a resume's PDF reads correctly for an applicant tracking system, names the posting's requirements, and has clean text. " +
           "Change the profile only with what the user told you or confirmed. " +
           "Work that takes a while answers with a task_id: follow it with check_task. " +
           "start_apply fills in the employer's application form in a browser window on the user's computer; the user checks it and presses Send there, then settle_apply records it. " +

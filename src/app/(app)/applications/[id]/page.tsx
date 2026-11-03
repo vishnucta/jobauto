@@ -16,6 +16,7 @@ import { googleConnection } from "@/lib/google/account";
 import { pullInterviewEvents } from "@/lib/google/availability";
 import { loadConversation } from "@/lib/google/inbox-data";
 import { refineSuggestions } from "@/lib/refine-suggestions";
+import { maxPages } from "@/lib/settings";
 import { loadThemes } from "@/lib/theme-data";
 import { userTimeZone } from "@/lib/time-zone";
 
@@ -84,6 +85,8 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       application={{
         id,
         title,
+        // The job title as saved, or as the posting was read; "" when neither knows it.
+        role: application.role.trim() || extracted?.role?.trim() || "",
         company,
         location,
         status,
@@ -133,6 +136,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       paper={settings.paper}
       dateFormat={settings.dateFormat}
       includeReferences={includeReferences}
+      maxPages={maxPages(settings.pageLimit)}
       letterDate={letterDate}
       score={match && match.items.length > 0 ? matchScore(match) : null}
       initialTab={tabFrom(tab)}

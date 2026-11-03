@@ -5,14 +5,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "@/components/toast";
 import type { ActionResult } from "@/lib/action";
 import { demoProfile } from "@/lib/demo-profile";
+import type { ResumeCheck } from "@/lib/resume-check";
 import { BUILT_IN_THEMES } from "@/lib/themes";
 
 import { themeFile } from "@/lib/theme-file";
 
-import { deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
 import { ResumeWorkspace, type ResumeWorkspaceProps } from "./resume-workspace";
 
-vi.mock("./actions", () => ({ setBaseTheme: vi.fn(), saveTheme: vi.fn(), duplicateTheme: vi.fn(), deleteTheme: vi.fn(), importTheme: vi.fn() }));
+vi.mock("./actions", () => ({
+  setBaseTheme: vi.fn(),
+  saveTheme: vi.fn(),
+  duplicateTheme: vi.fn(),
+  deleteTheme: vi.fn(),
+  importTheme: vi.fn(),
+  checkBaseResumeAts: vi.fn(),
+}));
 vi.mock("@/components/toast", () => {
   const toast = vi.fn();
   return {
@@ -202,6 +210,77 @@ describe("managing themes (E5-7)", () => {
     await user.upload(input, new File(["{\"hello\":1}"], "other.json", { type: "application/json" }));
     expect(toast).toHaveBeenCalledWith("That file isn't a Dossier theme.");
     expect(importTheme).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the ATS check", () => {
+  const report: ResumeCheck = {
+    document: "base",
+    fileName: "Jane Doe – Resume.pdf",
+    pages: 1,
+    maxPages: 1,
+    reads: [
+      { id: "text-layer", level: "ok", title: "Text reads as text" },
+      { id: "columns", level: "warn", title: "Two columns", fix: { kind: "theme" } },
+      { id: "photo", level: "warn", title: "Photo on the resume", fix: { kind: "photo" } },
+    ],
+    requirements: null,
+    text: [{ id: "characters", level: "ok", title: "Plain characters" }],
+    checkedAt: "2026-11-02T10:00:00.000Z",
+  };
+  const button = () => screen.getByRole("button", { name: "Check for ATS" });
+
+  beforeEach(() => {
+    vi.mocked(checkBaseResumeAts).mockReset().mockResolvedValue({ ok: true, data: report });
+    vi.mocked(setBaseTheme).mockReset().mockResolvedValue({ ok: true, data: null });
+    vi.mocked(toast).mockReset();
+  });
+
+  it("prints the base resume and shows the report, whose fixes point to the Themes panel and the profile", async () => {
+    const user = userEvent.setup();
+    render(<ResumeWorkspace {...props} />);
+    await user.click(button());
+    expect(checkBaseResumeAts).toHaveBeenCalledWith({});
+    const card = await screen.findByRole("region", { name: "ATS check" });
+    expect(within(card).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Reads correctly", "Clean text"]);
+    expect(within(card).getByText("Pick a single-column theme in the Themes panel.")).toBeInTheDocument();
+    expect(within(card).getByRole("link", { name: "Turn the photo off in your profile" })).toHaveAttribute("href", "/profile?section=basics");
+    // The preview's own page count is still the one line that ends that way.
+    expect(previewLabel()).toBe("Modern");
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("waits while a theme is being customised, and says so", async () => {
+    const user = userEvent.setup();
+    render(<ResumeWorkspace {...props} />);
+    await user.click(button());
+    await screen.findByRole("region", { name: "ATS check" });
+
+    await user.click(screen.getByRole("tab", { name: "Customize" }));
+    expect(button()).toHaveAttribute("aria-disabled", "true");
+    // The preview shows the draft, which the report isn't about.
+    expect(screen.queryByRole("region", { name: "ATS check" })).not.toBeInTheDocument();
+    await user.click(button());
+    expect(toast).toHaveBeenCalledWith("Save or cancel the theme you're customising first: the check prints your saved base theme.");
+    expect(checkBaseResumeAts).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(button()).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("region", { name: "ATS check" })).toBeInTheDocument();
+    expect(screen.queryByText(/changed since this check/)).not.toBeInTheDocument();
+  });
+
+  it("marks the report stale once another theme is in use, and says when the check fails", async () => {
+    const user = userEvent.setup();
+    render(<ResumeWorkspace {...props} />);
+    await user.click(button());
+    await screen.findByRole("region", { name: "ATS check" });
+    await user.click(screen.getByRole("button", { name: "Classic theme" }));
+    expect(screen.getByText("The resume changed since this check — run it again.")).toBeInTheDocument();
+
+    vi.mocked(checkBaseResumeAts).mockResolvedValueOnce({ ok: false, error: "The PDF couldn't be made just now." });
+    await user.click(button());
+    expect(toast).toHaveBeenCalledWith("The PDF couldn't be made just now.");
   });
 });
 

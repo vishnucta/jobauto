@@ -5,20 +5,22 @@ import { useEffect, useRef, useState } from "react";
 
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
+import { ResumeCheckCard } from "@/components/documents/resume-check-card";
 import { ResumeDocument } from "@/components/documents/resume-document";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
-import { buttonClassName } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PaperSize } from "@/generated/prisma/enums";
 import type { ProfileData } from "@/lib/profile";
+import type { ResumeCheck } from "@/lib/resume-check";
 import { saveFile } from "@/lib/save-file";
 import { pagesInWords } from "@/lib/settings";
 import { parseThemeFile, themeFile, themeFileName } from "@/lib/theme-file";
 import { PAPER_SIZES, type ThemeData } from "@/lib/themes";
 
-import { deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
 import { draftFrom, ThemeBuilder, type ThemeDraft } from "./theme-builder";
 import { ThemePicker } from "./theme-picker";
 
@@ -51,6 +53,9 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
   const [draft, setDraft] = useState<ThemeDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<ThemeData | null>(null);
+  // The ATS check's report, with the base theme it was made from.
+  const [check, setCheck] = useState<{ report: ResumeCheck; of: string } | null>(null);
+  const [checking, setChecking] = useState(false);
   // The last base theme the server confirmed, to go back to if a save fails,
   // and the last one picked, so an older failure doesn't undo a newer pick.
   const savedId = useRef(baseThemeId);
@@ -154,6 +159,20 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
     openPanel("themes", true);
   };
 
+  /** What the ATS check prints: the saved base theme, so another one, or an edit to it, makes the report stale. */
+  const checkedState = JSON.stringify(base);
+
+  /** "Check for ATS": prints the base resume and reads it back as a parser would. A draft isn't printed, so it waits. */
+  const runCheck = async () => {
+    if (checking) return;
+    if (draft) return toast("Save or cancel the theme you're customising first: the check prints your saved base theme.");
+    setChecking(true);
+    const of = checkedState;
+    const result = toastResult(await checkBaseResumeAts({}));
+    setChecking(false);
+    if (result.ok) setCheck({ report: result.data, of });
+  };
+
   return (
     <>
       <PageHeader
@@ -164,6 +183,9 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
             <Link href="/profile" className={buttonClassName("secondary")}>
               Edit profile
             </Link>
+            <Button variant="secondary" aria-disabled={draft !== null || checking || undefined} onClick={() => void runCheck()}>
+              Check for ATS
+            </Button>
             <DownloadPdfButton href="/api/pdf?doc=base">Download PDF</DownloadPdfButton>
           </>
         }
@@ -192,6 +214,26 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
                 </p>
               )
             )
+          }
+          panel={
+            // The preview shows the draft while one is open, which the report isn't about.
+            !draft && (checking || check) ? (
+              <div className="flex flex-col gap-3">
+                {checking && (
+                  <p role="status" className="text-meta text-muted">
+                    Checking…
+                  </p>
+                )}
+                {/* The base resume's fixes are links and a line: its switches live on the Profile screen and in Settings. */}
+                {check && (
+                  <ResumeCheckCard
+                    report={check.report}
+                    onFix={() => toast("The base resume prints your profile: change that on the Profile screen or in Settings.")}
+                    stale={check.of !== checkedState}
+                  />
+                )}
+              </div>
+            ) : undefined
           }
         >
           <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} />

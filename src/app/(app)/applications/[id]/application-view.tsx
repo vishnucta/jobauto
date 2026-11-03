@@ -8,6 +8,7 @@ import { useEffect, useId, useOptimistic, useRef, useState, useTransition, type 
 import { plainUnit, type UnitRenderer } from "@/components/documents/document-page";
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
+import { ResumeCheckCard } from "@/components/documents/resume-check-card";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
 import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
@@ -33,11 +34,14 @@ import type { JobView } from "@/lib/jobs/runner";
 import type { WriteEmailResult } from "@/lib/jobs/write-email";
 import type { FactItem, ProfileData } from "@/lib/profile";
 import type { RefineSuggestions } from "@/lib/refine-suggestions";
+import type { CheckFix, ResumeCheck } from "@/lib/resume-check";
 import { hasSidebar, type ThemeData } from "@/lib/themes";
 import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
 
 import {
   addMatchSkill,
+  checkResumeAts,
+  cleanUpDocument,
   leaveOutUnit,
   putBackTrimmed,
   restoreUnit,
@@ -45,6 +49,7 @@ import {
   saveUnit,
   sendMessage,
   setApplicationTheme,
+  setDocumentLanguage,
   setFollowThemeLayout,
   setShowPhoto,
   startRegenerating,
@@ -102,6 +107,8 @@ export type ApplicationViewProps = {
   application: {
     id: string;
     title: string;
+    /** The posting's job title ("Senior Product Designer"), which the ATS check looks for in the resume; "" when unknown. */
+    role: string;
     company: string;
     location: string;
     status: ApplicationStatus;
@@ -147,6 +154,8 @@ export type ApplicationViewProps = {
   dateFormat: DateFormat;
   /** Settings → "Include references", when the posting asks for them (SET-9). */
   includeReferences: boolean;
+  /** Settings → "Resume length" (SET-9), which the ATS check judges the pages by; null for no limit. */
+  maxPages: number | null;
   /** The date on the letter, at UTC midnight. */
   letterDate: Date;
   /** "5/7 match" on the Job posting tab, when the requirements were matched. */
@@ -191,6 +200,7 @@ export function ApplicationView({
   paper,
   dateFormat,
   includeReferences,
+  maxPages,
   letterDate,
   score,
   initialTab,
@@ -235,6 +245,10 @@ export function ApplicationView({
     Object.fromEntries(rewritingAtLoad.map(({ jobId, document, unitId }) => [keyOf(document, unitId), { jobId, revision: 0 }])),
   );
   const [emailJob, setEmailJob] = useState<Rewrite | null>(writingEmail ? { jobId: writingEmail, revision: 0 } : null);
+  // The ATS check's report on the Resume tab, with the state of the resume it was made from.
+  const [check, setCheck] = useState<{ report: ResumeCheck; of: string } | null>(null);
+  const [checking, startChecking] = useTransition();
+  const [fixing, startFixing] = useTransition();
 
   /** The document on screen, which a chat message without a target is most likely about. */
   const onScreen = (): DocumentKind | null =>
@@ -357,27 +371,29 @@ export function ApplicationView({
     });
   };
 
+  const targetOf = (kind: DocumentKind, unit: Unit): Target => ({ document: kind, unitId: unit.id, label: unit.label, name: unitName(unit) });
+
   /** "Ask AI" (APP-5): the next message is about this unit. */
   const askAbout = (kind: DocumentKind, unit: Unit) => {
-    setTarget({ document: kind, unitId: unit.id, label: unit.label, name: unitName(unit) });
+    setTarget(targetOf(kind, unit));
     focusChat((count) => count + 1);
   };
 
-  /** Sends a chat message (E8-5); resolves to whether it went. */
-  const send = (text: string) =>
+  /** Sends a chat message (E8-5) about the picked unit, or `about`; resolves to whether it went. */
+  const send = (text: string, about: Target | null = target) =>
     new Promise<boolean>((resolve) => {
       const viewing = onScreen();
-      if ((viewing || target) && !aiReady) {
+      if ((viewing || about) && !aiReady) {
         needsAi();
         return resolve(false);
       }
       startTransition(async () => {
-        showSending({ id: "sending", role: "USER", text, targetUnit: target?.label ?? null, opening: false, canUndo: false, undone: false });
+        showSending({ id: "sending", role: "USER", text, targetUnit: about?.label ?? null, opening: false, canUndo: false, undone: false });
         const result = await sendMessage({
           id: application.id,
           text,
           viewing,
-          target: target && { document: target.document, unitId: target.unitId },
+          target: about && { document: about.document, unitId: about.unitId },
         });
         if (!result.ok) {
           toast(result.error);
@@ -495,6 +511,71 @@ export function ApplicationView({
       if (!result.ok) return toast(result.error);
       flashing.start(result.data.edited.map(({ document, unitId }) => keyOf(document, unitId)));
     });
+
+  // ─── The ATS check (Resume tab) ────────────────────────────────────────────
+
+  /** What the check printed: a change to any of it makes the report stale. */
+  const checkedState = JSON.stringify([
+    followLayout,
+    showPhoto,
+    resumeTheme?.id,
+    application.language,
+    application.role,
+    maxPages,
+    resume?.units.map((unit) => [unit.id, unit.text]),
+  ]);
+
+  /** "Check for ATS": prints the resume and reads it back as a parser would; the report stays until the next check. */
+  const runCheck = () => {
+    if (checking) return;
+    const of = checkedState;
+    startChecking(async () => {
+      const result = await checkResumeAts({ id: application.id });
+      if (!result.ok) return toast(result.error);
+      setCheck({ report: result.data, of });
+    });
+  };
+
+  /** A fix the report offers: the tab's own switch or setting, an edit, or a request to the chat. The links it offers go to Settings and the profile themselves. */
+  const applyFix = (fix: CheckFix) => {
+    switch (fix.kind) {
+      case "single-column":
+        return changeLayout(false);
+      case "photo":
+        return changePhoto(false);
+      case "language":
+        return startFixing(async () => {
+          if (toastResult(await setDocumentLanguage({ id: application.id, language: fix.language })).ok) startTransition(() => router.refresh());
+        });
+      case "clean-up":
+        return startFixing(async () => {
+          if (toastResult(await cleanUpDocument({ id: application.id })).ok) startTransition(() => router.refresh());
+        });
+      case "add-skill": {
+        const skills = resume?.units.find((unit) => unit.id === "skills");
+        if (!skills) return toast("This resume has no Skills section to add it to.");
+        return save(DocumentKind.RESUME, skills, `${skills.text} · ${fix.skill}`);
+      }
+      case "mention": {
+        if (!aiReady) {
+          return toast("Dossier's own AI isn't set up, so ask Claude or edit the summary by hand.", {
+            action: { label: "Open Settings", onClick: () => router.push("/settings?section=ai") },
+          });
+        }
+        const summary = resume?.units.find((unit) => unit.id === "summary");
+        if (!summary) return toast("This resume has no summary to mention it in.");
+        // One message at a time, as the chat's own Send allows: not while a reply is coming, nor twice on a double click.
+        if (reply) return toast("The chat is still answering. Try again when it's done.");
+        askAbout(DocumentKind.RESUME, summary);
+        return startFixing(async () => {
+          await send(`Mention ${fix.term} in the summary, from my profile.`, targetOf(DocumentKind.RESUME, summary));
+        });
+      }
+      case "settings":
+      case "theme":
+        return;
+    }
+  };
 
   /** The document's units, with texts being saved in place. */
   const shown = (kind: DocumentKind, units: Unit[]) =>
@@ -682,7 +763,25 @@ export function ApplicationView({
                   )}
                   {profile.photo && <PreviewSwitch label="Photo" checked={showPhoto} onCheckedChange={changePhoto} />}
                   {historyButton(DocumentKind.RESUME)}
+                  {!viewed(DocumentKind.RESUME) && (
+                    <Button variant="text" size="sm" aria-disabled={checking || undefined} onClick={runCheck}>
+                      Check for ATS
+                    </Button>
+                  )}
                 </span>
+              }
+              panel={
+                // The report is about the current resume, so an earlier version hides it.
+                !viewed(DocumentKind.RESUME) && (checking || check) ? (
+                  <div className="flex flex-col gap-3">
+                    {checking && (
+                      <p role="status" className="text-meta text-muted">
+                        Checking…
+                      </p>
+                    )}
+                    {check && <ResumeCheckCard report={check.report} onFix={applyFix} fixing={fixing} stale={check.of !== checkedState} />}
+                  </div>
+                ) : undefined
               }
             >
               <TailoredResume

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
 import { demoLetterUnits, demoProfile, demoResumeUnits } from "@/lib/demo-profile";
+import type { ResumeCheck } from "@/lib/resume-check";
 import { BUILT_IN_THEMES } from "@/lib/themes";
 
 import { retry } from "@/lib/jobs/actions";
@@ -13,6 +14,8 @@ import type { JobView } from "@/lib/jobs/runner";
 import {
   addMatchSkill,
   addNote,
+  checkResumeAts,
+  cleanUpDocument,
   deleteNote,
   leaveOutUnit,
   listVersions,
@@ -24,6 +27,7 @@ import {
   saveUnit,
   sendMessage,
   setApplicationTheme,
+  setDocumentLanguage,
   setFollowThemeLayout,
   setShowPhoto,
   startRegenerating,
@@ -34,10 +38,43 @@ import {
 } from "./actions";
 import { ApplicationView, type ApplicationViewProps } from "./application-view";
 
+/** A report as the check gives it (src/lib/resume-check.ts), with one of each fix the tab can apply. */
+const atsReport = vi.hoisted(
+  (): ResumeCheck => ({
+    document: "resume",
+    fileName: "Jane Doe – Ledgerly – Resume.pdf",
+    pages: 2,
+    maxPages: 1,
+    reads: [
+      { id: "text-layer", level: "ok", title: "Text reads as text" },
+      { id: "columns", level: "warn", title: "Two columns", fix: { kind: "single-column" } },
+      { id: "pages", level: "warn", title: "Over the page limit", detail: "2 pages, limit 1", fix: { kind: "settings", section: "documents" } },
+      { id: "photo", level: "warn", title: "Photo on the resume", fix: { kind: "photo" } },
+    ],
+    requirements: {
+      items: [
+        { index: -1, requirement: "Senior Product Designer", named: false, inProfile: true, skill: null },
+        { index: 0, requirement: "Experience with Kubernetes", named: false, inProfile: true, skill: "Kubernetes" },
+      ],
+      named: 0,
+      total: 1,
+    },
+    text: [
+      { id: "characters", level: "fail", title: "Characters parsers misread", fix: { kind: "clean-up" } },
+      { id: "language", level: "warn", title: "No language recorded", fix: { kind: "language", language: "German" } },
+      { id: "dates", level: "ok", title: "Dates in one style" },
+    ],
+    checkedAt: "2026-11-02T10:00:00.000Z",
+  }),
+);
+
 vi.mock("./actions", () => ({
   setApplicationTheme: vi.fn(async () => ({ ok: true, data: null })),
   setFollowThemeLayout: vi.fn(async () => ({ ok: true, data: null })),
   setShowPhoto: vi.fn(async () => ({ ok: true, data: null })),
+  setDocumentLanguage: vi.fn(async () => ({ ok: true, data: null })),
+  checkResumeAts: vi.fn(async () => ({ ok: true, data: atsReport })),
+  cleanUpDocument: vi.fn(async () => ({ ok: true, data: null, toast: "Rewrote the resume and the cover letter with plain characters." })),
   saveUnit: vi.fn(async ({ text }: { text: string }) => ({ ok: true, data: { text } })),
   startRegenerating: vi.fn(async () => ({ ok: true, data: "job-1" })),
   restoreUnit: vi.fn(async () => ({ ok: true, data: null })),
@@ -90,6 +127,7 @@ const props: ApplicationViewProps = {
   application: {
     id: "app-1",
     title: "Senior Product Designer · Ledgerly",
+    role: "Senior Product Designer",
     company: "Ledgerly",
     location: "Amsterdam",
     status: "DRAFT",
@@ -117,6 +155,7 @@ const props: ApplicationViewProps = {
   paper: "A4",
   dateFormat: "DAY_MONTH_YEAR",
   includeReferences: false,
+  maxPages: 1,
   letterDate: new Date(Date.UTC(2026, 8, 28)),
   score: { hit: 5, total: 7 },
   initialTab: "resume",
@@ -147,6 +186,9 @@ beforeEach(() => {
   vi.mocked(undoMessage).mockClear();
   vi.mocked(startWritingEmail).mockClear();
   vi.mocked(undoEmailRewrite).mockClear();
+  vi.mocked(checkResumeAts).mockClear();
+  vi.mocked(setDocumentLanguage).mockClear();
+  vi.mocked(cleanUpDocument).mockClear();
   vi.mocked(toast).mockClear();
   router.refresh.mockClear();
   router.push.mockClear();
@@ -908,6 +950,136 @@ describe("version history (E8-10)", () => {
     expect(restoreVersion).toHaveBeenCalledWith({ id: props.application.id, versionId: "v1" });
     expect(router.refresh).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Restore this version" })).not.toBeInTheDocument();
+  });
+});
+
+describe("the ATS check on the Resume tab", () => {
+  const button = () => screen.getByRole("button", { name: "Check for ATS" });
+  const card = () => screen.findByRole("region", { name: "ATS check" });
+  const rowOf = async (text: string) => within(await card()).getByText(text).closest("li")!;
+
+  it("prints the resume, says it's checking, then shows the report in its three groups", async () => {
+    const user = userEvent.setup();
+    let answer: (result: { ok: true; data: ResumeCheck }) => void = () => {};
+    vi.mocked(checkResumeAts).mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    expect(checkResumeAts).toHaveBeenCalledWith({ id: "app-1" });
+    expect(screen.getByText("Checking…")).toHaveAttribute("role", "status");
+    expect(button()).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => answer({ ok: true, data: atsReport }));
+    const report = await card();
+    expect(within(report).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([
+      "Reads correctly",
+      "Says what the posting asks for",
+      "Clean text",
+    ]);
+    expect(within(report).getByText(/^Checked at .+ · 2 pages · Jane Doe – Ledgerly – Resume\.pdf$/)).toBeInTheDocument();
+    expect(within(report).getByText("0 of 1 named")).toBeInTheDocument();
+    expect(screen.queryByText("Checking…")).not.toBeInTheDocument();
+    expect(button()).not.toHaveAttribute("aria-disabled");
+    // A card, not a notice: the report is about the resume, not a change to it.
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.queryByText(/changed since this check/)).not.toBeInTheDocument();
+  });
+
+  it("says so when the check can't run", async () => {
+    const user = userEvent.setup();
+    vi.mocked(checkResumeAts).mockResolvedValueOnce({ ok: false, error: "The PDF couldn't be made just now." });
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("The PDF couldn't be made just now."));
+    expect(screen.queryByRole("region", { name: "ATS check" })).not.toBeInTheDocument();
+  });
+
+  it("turns the sidebar layout off from the report", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} application={{ ...props.application, followThemeLayout: true }} resume={{ units: demoResumeUnits(), theme: theme("modern") }} />);
+    await user.click(button());
+    await user.click(within(await card()).getByRole("button", { name: "Use a single column" }));
+    expect(setFollowThemeLayout).toHaveBeenCalledWith({ id: "app-1", follow: false });
+  });
+
+  it("marks the report stale once the resume changes, e.g. with another theme", async () => {
+    const user = userEvent.setup();
+    let answer: (result: { ok: true; data: null }) => void = () => {};
+    vi.mocked(setApplicationTheme).mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await card();
+    await user.click(screen.getByRole("button", { name: "Theme: Editorial" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Modern base theme" }));
+    expect(screen.getByText("The resume changed since this check — run it again.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "ATS check" })).toBeInTheDocument();
+    await act(async () => answer({ ok: true, data: null }));
+  });
+
+  it("sets the language the report found, then reloads", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await user.click(within(await card()).getByRole("button", { name: "Set the language to German" }));
+    expect(setDocumentLanguage).toHaveBeenCalledWith({ id: "app-1", language: "German" });
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  });
+
+  it("cleans up the text, then reloads", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await user.click(within(await card()).getByRole("button", { name: "Clean up the text" }));
+    expect(cleanUpDocument).toHaveBeenCalledWith({ id: "app-1" });
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  });
+
+  it("adds a skill the profile has to the Skills section, as an edit", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await user.click(within(await rowOf("Experience with Kubernetes")).getByRole("button", { name: "Add to Skills" }));
+    const skills = demoResumeUnits().find((unit) => unit.id === "skills")!;
+    expect(saveUnit).toHaveBeenCalledWith({ id: "app-1", document: "RESUME", unitId: "skills", text: `${skills.text} · Kubernetes`, expected: skills.text });
+  });
+
+  it("asks the chat to mention the job title in the summary, from the profile", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await user.click(within(await rowOf("Job title: Senior Product Designer")).getByRole("button", { name: "Mention in the summary" }));
+    expect(sendMessage).toHaveBeenCalledWith({
+      id: "app-1",
+      text: "Mention Senior Product Designer in the summary, from my profile.",
+      viewing: "RESUME",
+      target: { document: "RESUME", unitId: "summary" },
+    });
+    expect(within(screen.getByRole("complementary", { name: "Refine with AI" })).getByText("Thinking…")).toBeInTheDocument();
+  });
+
+  it("needs Dossier's own AI for a mention", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} aiReady={false} />);
+    await user.click(button());
+    await user.click(within(await rowOf("Experience with Kubernetes")).getByRole("button", { name: "Mention in the summary" }));
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenLastCalledWith("Dossier's own AI isn't set up, so ask Claude or edit the summary by hand.", {
+      action: expect.objectContaining({ label: "Open Settings" }),
+    });
+  });
+
+  it("isn't offered on an earlier version, which hides the report too", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listVersions).mockResolvedValueOnce({ ok: true, data: [{ id: "v1", cause: "WRITTEN", detail: "", createdAt: "2026-09-29T08:05:00.000Z" }] });
+    vi.mocked(loadVersion).mockResolvedValueOnce({ ok: true, data: { document: "RESUME", units: demoResumeUnits() } });
+    render(<ApplicationView {...props} />);
+    await user.click(button());
+    await card();
+    await user.click(screen.getAllByRole("button", { name: "History" })[0]);
+    await user.click(await screen.findByRole("button", { name: /^Look at the version from/ }));
+    expect(screen.queryByRole("button", { name: "Check for ATS" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "ATS check" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back to the current one" }));
+    expect(screen.getByRole("region", { name: "ATS check" })).toBeInTheDocument();
   });
 });
 

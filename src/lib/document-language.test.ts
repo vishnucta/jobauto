@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DOCUMENT_LANGUAGES, detectDirection, documentLanguage, hasRightToLeft } from "./document-language";
+import { DOCUMENT_LANGUAGES, detectDirection, detectLanguageName, documentLanguage, hasRightToLeft } from "./document-language";
 
 describe("documentLanguage", () => {
   it("knows every built-in language (SET-7)", () => {
@@ -41,5 +41,37 @@ describe("text direction", () => {
   it("spots right-to-left letters", () => {
     expect(hasRightToLeft("تهران, ایران")).toBe(true);
     expect(hasRightToLeft("sample@example.com")).toBe(false);
+  });
+});
+
+describe("detectLanguageName", () => {
+  const german =
+    "Produktdesignerin mit neun Jahren Erfahrung darin, komplexe Software ruhig und verständlich zu gestalten. Ich habe die Neugestaltung eines Portals geleitet, das täglich von vielen Disponenten genutzt wird, und ein Designsystem für die Teams aufgebaut.";
+  const english =
+    "Product designer with nine years of experience turning complicated operational tools into calm, usable software. I led the redesign of the carrier portal used daily by thousands of dispatchers and built a design system that the whole company uses.";
+  const dutch =
+    "Productontwerper met negen jaar ervaring in het rustig en overzichtelijk maken van complexe software. Ik leidde het herontwerp van een portaal dat dagelijks door duizenden planners wordt gebruikt en bouwde een designsysteem dat het hele bedrijf gebruikt.";
+  const french =
+    "Designer produit avec neuf ans d'expérience dans la conception d'outils complexes, pour les rendre calmes et clairs. J'ai dirigé la refonte du portail utilisé chaque jour par des milliers de répartiteurs et construit un système de design pour toute l'entreprise.";
+
+  it("tells the language of a summary by its little words", () => {
+    expect(detectLanguageName(german)).toBe("German");
+    expect(detectLanguageName(english)).toBe("English");
+    expect(detectLanguageName(dutch)).toBe("Dutch");
+    expect(detectLanguageName(french)).toBe("French");
+  });
+
+  it("says nothing about a few words, or a text half in each language", () => {
+    expect(detectLanguageName("Senior Produktdesignerin")).toBeUndefined();
+    expect(detectLanguageName("Figma · User research · Design systems · Prototyping · HTML & CSS")).toBeUndefined();
+    expect(
+      detectLanguageName(
+        "The team built the portal and shipped it to the users in a year. Das Team hat das Portal gebaut und es in einem Jahr an die Nutzer geliefert.",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("names the language as the list spells it", () => {
+    expect(DOCUMENT_LANGUAGES.map((language) => language.name)).toContain(detectLanguageName(german));
   });
 });

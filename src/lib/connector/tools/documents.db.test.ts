@@ -1,7 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { demoProfile, demoResumeUnits } from "@/lib/demo-profile";
+import { documentLabels, ENGLISH_LABELS, type DocumentLabels } from "@/lib/document-labels";
+import { resumeContent, type ResumeContent } from "@/lib/resume-content";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
+import { pdfWith } from "@/test/resume-files";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../../prisma/seed/demo";
@@ -94,6 +98,41 @@ const summaryText = async () => (await units()).find((unit) => unit.id === "summ
 const revision = async (document: "resume" | "cover_letter" | "email", partId: string) =>
   (await tool("get_document", { application_id: id, document })).json.parts.find((part) => part.id === partId)!.revision;
 const PRIVATE = "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.";
+
+type CheckLine = { id: string; level: "ok" | "warn" | "fail"; title: string; detail?: string; fix?: Record<string, unknown> };
+type RequirementLine = { index: number; requirement: string; named: boolean; in_profile: boolean; skill: string | null };
+type Report = {
+  document: string;
+  file_name: string;
+  pages: number;
+  max_pages: number | null;
+  reads: CheckLine[];
+  requirements: { named: number; total: number; items: RequirementLine[] } | null;
+  text: CheckLine[];
+  checked_at: string;
+  link: string;
+};
+/** The ATS check's answer, as check_resume writes it. */
+const report = (answer: { json: unknown }) => answer.json as Report;
+
+/** The resume's lines as its PDF reads back, in one column and in ASCII (the test PDF's Helvetica has no en dash or middle dot). */
+function resumeLines(content: ResumeContent, labels: DocumentLabels = ENGLISH_LABELS): string[] {
+  const section = (heading: string, lines: string[]) => (lines.length > 0 ? [heading, ...lines] : []);
+  const dated = (title: string, at: string, dates: string, bullets: string[]) => [`${title}, ${at} ${dates}`, ...bullets];
+  return [
+    content.name,
+    content.headline,
+    content.contacts.join("  -  "),
+    ...section(labels.profile, content.summary ? [content.summary] : []),
+    ...section(labels.experience, content.experience.flatMap((role) => dated(role.role, role.company, role.dates, role.bullets))),
+    ...section(labels.projects, content.projects.flatMap((project) => dated(project.name, project.link, project.dates, project.bullets))),
+    ...section(labels.education, content.education.map((degree) => `${degree.degree}, ${degree.school} ${degree.dates}`)),
+    ...section(labels.publications, content.publications.map((publication) => publication.citation)),
+    ...section(labels.references, content.references.flatMap((reference) => [reference.name, reference.role, reference.contact])),
+    ...section(labels.skills, content.skills ? [content.skills] : []),
+    ...section(labels.languages, content.languages ? [content.languages] : []),
+  ].map((line) => line.replace(/[^\x20-\x7e]/g, "-"));
+}
 
 describe("the connector's document tools", () => {
   it("reads a document as its tab shows it, without the letter's sender and signature", async () => {
@@ -448,7 +487,7 @@ describe("the connector's document tools", () => {
     expect(themes.map((row) => row.themeId)).toEqual(["classic", "classic"]);
     expect((await tool("set_document_look", { application_id: id, theme: "Neon" })).text).toMatch(/^There's no theme called "Neon"\. The themes are Editorial, Classic, /);
     expect(await tool("set_document_look", { application_id: id, photo: true })).toMatchObject({ isError: true, text: "The profile has no photo. Add one on the Profile screen first." });
-    expect(await tool("set_document_look", { application_id: id })).toMatchObject({ isError: true, text: "Say what to change: theme, photo or sidebar_layout." });
+    expect(await tool("set_document_look", { application_id: id })).toMatchObject({ isError: true, text: "Say what to change: theme, photo, sidebar_layout or language." });
 
     const layout = await tool("set_document_look", { application_id: id, sidebar_layout: true });
     expect(layout.json.note).toBe("The Classic theme has no sidebar, so the layout switch shows once the documents have a theme with one.");
@@ -544,5 +583,124 @@ describe("the connector's document tools", () => {
     expect(await tool("export_pdf", { document: "resume" })).toMatchObject(unnamed);
     expect(await tool("export_pdf", { document: "cover_letter" })).toMatchObject(unnamed);
     expect(renderPdf).not.toHaveBeenCalled();
+  });
+
+  it("checks a tailored resume's PDF as a parser reads it, answering with verdicts, labels and counts only", async () => {
+    const content = resumeContent(demoProfile(), { units: demoResumeUnits() });
+    vi.mocked(renderPdf).mockResolvedValueOnce(pdfWith(resumeLines(content)));
+    const checked = await tool("check_resume", { application_id: id });
+    expect(renderPdf).toHaveBeenLastCalledWith(`/print/resume/${id}`);
+    const { reads, requirements, text, ...rest } = report(checked);
+    expect(rest).toEqual({
+      document: "resume",
+      file_name: "Jane Doe – Ledgerly – Resume.pdf",
+      pages: 1,
+      max_pages: 2,
+      checked_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      link: `https://dossier.example/applications/${id}`,
+    });
+    expect(reads.map((item) => [item.id, item.level])).toEqual([
+      ["text-layer", "ok"],
+      ["contact", "ok"],
+      ["columns", "ok"],
+      ["headings", "ok"],
+      ["pages", "ok"],
+      ["file-name", "ok"],
+    ]);
+    expect(reads[0].detail).toMatch(/^Every heading, title and bullet is in the PDF's text layer \(\d+ checked\)\.$/);
+    expect(reads[3].detail).toBe("Profile, Experience, Projects, Education, Publications, Skills, Languages");
+    // The posting's requirements, the job title first; years of experience aren't a word to find.
+    expect(requirements).toMatchObject({ named: 4, total: 6 });
+    expect(requirements!.items.map((item) => [item.index, item.named, item.in_profile, item.skill])).toEqual([
+      [-1, true, true, null],
+      [1, true, true, "Design systems"],
+      [2, true, true, "User research"],
+      [3, true, true, "Figma"],
+      [4, false, false, null],
+      [5, false, false, null],
+      // A language: in the profile, but not one for the skills part.
+      [6, true, true, null],
+    ]);
+    expect(requirements!.items[0].requirement).toBe("Senior Product Designer");
+    expect(requirements!.items[4].requirement).toBe("Accessibility know-how (WCAG 2.2)");
+    expect(text.map((item) => [item.id, item.level, item.title])).toEqual([
+      ["characters", "ok", "Plain characters"],
+      ["language", "ok", "Written in English"],
+      ["dates", "ok", "Dates in one style"],
+    ]);
+    // Nothing the resume says, and no contact detail.
+    for (const secret of ["jane.doe@example.com", "+31 6 1234 5678", "1234 5678", "Westersingel", "linkedin.com/in", content.summary.slice(0, 40), content.experience[0].bullets[0]]) {
+      expect(checked.text).not.toContain(secret);
+    }
+  });
+
+  it("checks the base resume without an application, and says why a check can't run", async () => {
+    await saveSettings({ includeRefs: true });
+    vi.mocked(renderPdf).mockResolvedValueOnce(pdfWith(resumeLines(resumeContent(demoProfile(), { includeReferences: true }))));
+    const base = await tool("check_resume", { document: "base_resume" });
+    expect(renderPdf).toHaveBeenLastCalledWith("/print/base");
+    const { reads, requirements, text, ...rest } = report(base);
+    expect(rest).toMatchObject({ document: "base_resume", file_name: "Jane Doe – Resume.pdf", pages: 1, max_pages: 2, link: "https://dossier.example/resume" });
+    expect(requirements).toBeNull();
+    expect(reads.map((item) => [item.id, item.level])).toEqual([
+      ["text-layer", "ok"],
+      ["contact", "ok"],
+      ["columns", "ok"],
+      ["headings", "ok"],
+      ["pages", "ok"],
+      ["file-name", "ok"],
+    ]);
+    expect(reads[3].detail).toBe("Profile, Experience, Projects, Education, Publications, References, Skills, Languages");
+    expect(text.map((item) => item.id)).toEqual(["characters", "dates"]);
+    // A reference's email stays out as the user's own does.
+    for (const secret of ["jane.doe@example.com", "john.doe@example.com", "+31 6 1234 5678"]) expect(base.text).not.toContain(secret);
+
+    // A tailored resume names its application; one that's gone is a refusal, not an error to log.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    errors.mockClear();
+    vi.mocked(renderPdf).mockClear();
+    expect(await tool("check_resume", { document: "resume" })).toMatchObject({ isError: true, text: "Give the application_id of the application whose resume to check." });
+    expect(await tool("check_resume", { application_id: "gone" })).toMatchObject({ isError: true, text: "That application no longer exists." });
+    expect(renderPdf).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+
+    vi.mocked(renderPdf).mockRejectedValueOnce(new Error("Chromium crashed"));
+    expect(await tool("check_resume", { application_id: id })).toMatchObject({
+      isError: true,
+      text: "The resume couldn't be checked just now. Try again in a moment, or check it in Dossier on the application's Resume tab.",
+    });
+    expect(errors).toHaveBeenCalledTimes(1);
+    await prisma().document.deleteMany({ where: { applicationId: id, kind: "RESUME" } });
+    expect(await tool("check_resume", { application_id: id })).toMatchObject({ isError: true, text: "This application has no tailored resume." });
+  });
+
+  it("changes the language the documents are written in, which their headings, dates and the check follow", async () => {
+    const changed = await tool("set_document_look", { application_id: id, language: "german" });
+    expect(changed.json).toMatchObject({ theme: "Editorial", language: "German", link: `https://dossier.example/applications/${id}` });
+    expect((await prisma().application.findUniqueOrThrow({ where: { id } })).language).toBe("German");
+
+    // The resume's English text under German headings: the check says so, with the language to set.
+    const labels = documentLabels("German");
+    vi.mocked(renderPdf).mockResolvedValueOnce(pdfWith(resumeLines(resumeContent(demoProfile(), { units: demoResumeUnits() }, labels), labels)));
+    const { reads, text } = report(await tool("check_resume", { application_id: id }));
+    expect(reads.find((item) => item.id === "headings")).toMatchObject({
+      level: "ok",
+      detail: [labels.profile, labels.experience, labels.projects, labels.education, labels.publications, labels.skills, labels.languages].join(", "),
+    });
+    expect(text.find((item) => item.id === "language")).toEqual({
+      id: "language",
+      level: "warn",
+      title: "Text in English under German headings and dates",
+      detail: "The application is set to German, which the headings and dates follow, but the text reads as English.",
+      fix: { kind: "language", language: "English" },
+    });
+
+    // A language added with “Other language…” counts; one Dossier doesn't know is refused, and nothing changes then.
+    await saveSettings({ customLanguages: ["Klingon"] });
+    expect((await tool("set_document_look", { application_id: id, language: "klingon" })).json).toMatchObject({ language: "Klingon" });
+    const unknown = await tool("set_document_look", { application_id: id, language: "Elvish" });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toMatch(/^Dossier doesn't know the language "Elvish"\. The languages are English, Dutch, German, /);
+    expect((await prisma().application.findUniqueOrThrow({ where: { id } })).language).toBe("Klingon");
   });
 });

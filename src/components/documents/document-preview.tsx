@@ -61,6 +61,7 @@ export function DocumentPreview({
   label,
   meta,
   notice,
+  panel,
   className,
   children,
 }: {
@@ -68,6 +69,8 @@ export function DocumentPreview({
   meta?: ReactNode | ((pages: number) => ReactNode);
   /** A note between the label row and the page, e.g. what was left out to fit the page limit. */
   notice?: ReactNode | ((pages: number) => ReactNode);
+  /** A panel under the notice, before the page, as wide as the page: the ATS check's report. */
+  panel?: ReactNode;
   className?: string;
   /** A document component, e.g. ResumeDocument. */
   children: ReactNode;
@@ -113,6 +116,7 @@ export function DocumentPreview({
           <span>{typeof meta === "function" ? meta(pages) : meta}</span>
         </div>
         {notice && <div className="w-[calc(var(--u)*640)]">{typeof notice === "function" ? notice(pages) : notice}</div>}
+        {panel && <div className="w-[calc(var(--u)*640)]">{panel}</div>}
         <div
           ref={pageRef}
           className={cn("relative isolate w-fit", paged ? styles.paged : "shadow-page")}

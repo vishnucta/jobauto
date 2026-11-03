@@ -21,13 +21,15 @@ const SOUTHEAST_ASIA = list("bn id kh la mm my ph sg th tl vn");
 const EAST_ASIA = list("cn hk jp kp kr mn mo tw");
 const ASIA = [...SOUTH_ASIA, ...SOUTHEAST_ASIA, ...EAST_ASIA, ...list("kz kg tj tm uz")];
 const OCEANIA = list("au nz fj pg sb vu ws to ki fm mh nr pw tv nc pf ck nu");
+/** Germany, Austria and Switzerland, where a photo on a resume is the custom (the resume check's photo note). */
+export const DACH = list("de at ch");
 
 /** Regions and time zones hiring posts name, with the countries in them. Abbreviations are matched in capitals only. */
 const REGIONS: { name: string; words?: RegExp; caps?: RegExp; codes: string[] }[] = [
   { name: "the EU", words: /\beuropean union\b/i, caps: /\b(?:EU|EEA)\b/, codes: [...EU, "is", "li", "no"] },
   { name: "Europe", words: /\beurope(?:an)?\b/i, caps: /\b(?:CET|CEST|EET|EEST|WET)\b/, codes: EUROPE },
   { name: "EMEA", caps: /\bEMEA\b/, codes: [...EUROPE, ...MIDDLE_EAST, ...AFRICA] },
-  { name: "DACH", caps: /\bDACH\b/, codes: list("de at ch") },
+  { name: "DACH", caps: /\bDACH\b/, codes: DACH },
   { name: "the Nordics", words: /\b(?:nordics?|scandinavian?)\b/i, codes: list("dk fi is no se") },
   { name: "Benelux", words: /\bbenelux\b/i, codes: list("be nl lu") },
   { name: "Eastern Europe", words: /\b(?:central\s+(?:and|&)\s+)?eastern\s+europe\b/i, caps: /\bCEE\b/, codes: CEE },
@@ -196,6 +198,12 @@ function placesIn(text: string): { codes: Set<string>; regions: string[]; anywhe
     }
   }
   return { codes, regions, anywhere: ANYWHERE.test(text) };
+}
+
+/** The countries a posting's location or work mode names, as codes, and the regions it names ("the US"): for the resume check's photo note. */
+export function countriesNamed(text: string): { codes: string[]; regions: string[] } {
+  const { codes, regions } = placesIn(text);
+  return { codes: [...codes], regions };
 }
 
 /** Where a post or location hires, read against `place`. */

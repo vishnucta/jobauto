@@ -29,6 +29,7 @@ import { countPdfPages } from "@/lib/pdf/pages";
 import type { ProfilePhoto } from "@/lib/photo";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
+import { checkResume, type CheckItem } from "@/lib/resume-check";
 import { loadSettings } from "@/lib/settings-data";
 import { loadThemes } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, hasSidebar, type ThemeData } from "@/lib/themes";
@@ -36,11 +37,11 @@ import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
 
 import { failure, started, text, type ToolContext } from "../kit";
 
-// A tailored resume, cover letter and email: their parts, rewrites, versions, looks and PDFs (jobauto fork).
+// A tailored resume, cover letter and email: their parts, rewrites, versions, looks, PDFs and the ATS check (jobauto fork).
 // What the application's Resume, Cover letter and Email tabs do, and the
-// Base resume screen's Download PDF, through the library functions their
-// actions use. The letter's sender and signature hold contact details:
-// Claude neither reads nor changes them.
+// Base resume screen's Download PDF and ATS check, through the library
+// functions their actions use. The letter's sender and signature hold
+// contact details: Claude neither reads nor changes them.
 
 const GONE = "That application no longer exists.";
 
@@ -225,6 +226,13 @@ function lookOf(
     sidebar_layout: hasSidebar(theme.layout) ? followThemeLayout : undefined,
   };
 }
+
+/**
+ * An item of the ATS check as Claude reads it: a verdict, a label and the fix.
+ * The check names things by their labels and counts only (src/lib/resume-check.ts);
+ * listing the fields keeps one added to it later from reaching Claude unseen.
+ */
+const checkLine = ({ id, level, title, detail, fix }: CheckItem) => ({ id, level, title, detail, fix });
 
 /**
  * What the fact guard (E6-6) can't back in a part Claude wrote, with "Never
@@ -513,29 +521,43 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
     {
       title: "Change how the documents look",
       description:
-        "Changes how an application's resume and cover letter look: their theme (one for both, by name or id), and on the resume, the profile photo and the theme's sidebar layout. " +
-        "Answers with the look as it is now.",
+        "Changes how an application's resume and cover letter look: their theme (one for both, by name or id), on the resume, the profile photo and the theme's sidebar layout, " +
+        "and the language the documents are written in, which their headings and dates follow. Answers with the look as it is now.",
       inputSchema: z.object({
         application_id: applicationId,
         theme: z.string().trim().min(1).max(100).optional().describe("A theme's name or id, e.g. 'Classic'"),
         photo: z.boolean().optional().describe("The profile photo on this resume, or not"),
         sidebar_layout: z.boolean().optional().describe("The theme's sidebar layout, or a single column. Only some themes have a sidebar."),
+        language: z
+          .string()
+          .trim()
+          .min(1)
+          .max(60)
+          .optional()
+          .describe("The document language, one of Dossier's (German, English…) or a custom one from Settings; relabels headings and dates at once"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ application_id, theme, photo, sidebar_layout }) =>
+    async ({ application_id, theme, photo, sidebar_layout, language }) =>
       refusalsAsFailures(async () => {
-        if (theme === undefined && photo === undefined && sidebar_layout === undefined) return failure("Say what to change: theme, photo or sidebar_layout.");
+        if (theme === undefined && photo === undefined && sidebar_layout === undefined && language === undefined) {
+          return failure("Say what to change: theme, photo, sidebar_layout or language.");
+        }
         const [themes, profile, settings] = await Promise.all([loadThemes(), loadProfile(), loadSettings()]);
         const picked =
           theme === undefined ? undefined : (themes.find((entry) => entry.id === theme) ?? themes.find((entry) => entry.name.trim().toLowerCase() === theme.toLowerCase()));
         if (theme !== undefined && !picked) return failure(`There's no theme called "${theme}". The themes are ${themes.map((entry) => entry.name).join(", ")}.`);
         if (photo && !profile.photo) return failure("The profile has no photo. Add one on the Profile screen first.");
 
-        await setDocumentLook(application_id, { themeId: picked?.id, showPhoto: photo, followThemeLayout: sidebar_layout });
+        await setDocumentLook(application_id, { themeId: picked?.id, showPhoto: photo, followThemeLayout: sidebar_layout, language });
         const application = await prisma.application.findUnique({
           where: { id: application_id },
-          select: { showPhoto: true, followThemeLayout: true, documents: { where: { kind: { in: [DocumentKind.RESUME, DocumentKind.COVER_LETTER] } }, select: { kind: true, themeId: true } } },
+          select: {
+            showPhoto: true,
+            followThemeLayout: true,
+            language: true,
+            documents: { where: { kind: { in: [DocumentKind.RESUME, DocumentKind.COVER_LETTER] } }, select: { kind: true, themeId: true } },
+          },
         });
         if (!application) return failure(GONE);
         const themeId = (application.documents.find((entry) => entry.kind === DocumentKind.RESUME) ?? application.documents[0])?.themeId ?? null;
@@ -546,6 +568,8 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         );
         return text({
           ...look,
+          // An application made before languages were recorded has none: its headings and dates are English.
+          language: application.language || "none recorded",
           note:
             sidebar_layout !== undefined && look.sidebar_layout === undefined
               ? `The ${look.theme} theme has no sidebar, so the layout switch shows once the documents have a theme with one.`
@@ -623,5 +647,61 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         content: [...answer.content, { type: "resource", resource: { uri: download, mimeType: "application/pdf", blob: Buffer.from(rendered.pdf).toString("base64") } }],
       };
     },
+  );
+
+  server.registerTool(
+    "check_resume",
+    {
+      title: "Check a resume for applicant tracking systems",
+      description:
+        "Checks a resume's PDF the way an applicant tracking system's parser reads it: whether it reads correctly (the text, contact details and headings are in the text layer; one column; within the page limit; the file named after the user), " +
+        "whether it names the posting's requirements and job title, and whether its text is clean (no ligature glyphs, odd hyphens or invisible characters; written in the language its headings and dates follow). " +
+        "Prints the PDF as Download PDF does (one Chromium render, no quota) and answers with verdicts, labels and counts only, never the document's text or contact details. " +
+        "An item's fix names what puts it right: single-column, photo and language through set_document_look; theme, a single-column base theme with set_base_theme; " +
+        "settings, in Settings → Documents; clean-up, on the application's Resume tab in Dossier. " +
+        "A requirement that isn't named but is in_profile can go into the resume, with the user's OK: its skill (the profile's spelling) added to the skills part with edit_document, or worked into the summary with rewrite_document. " +
+        "One that isn't in_profile stays out: the resume only says what the profile has.",
+      inputSchema: z.object({
+        application_id: applicationId.optional().describe("For resume: the application"),
+        document: z
+          .enum(["resume", "base_resume"])
+          .default("resume")
+          .describe("resume is an application's tailored one, which needs application_id; base_resume the one on the Base resume screen, built from the profile"),
+      }),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ application_id = "", document }) =>
+      refusalsAsFailures(async () => {
+        const doc = document === "base_resume" ? "base" : "resume";
+        if (doc === "resume" && !application_id) return failure("Give the application_id of the application whose resume to check.");
+        let report: Awaited<ReturnType<typeof checkResume>>;
+        try {
+          report = await checkResume(doc, application_id);
+        } catch (error) {
+          // A refusal written for the user goes to Claude as it is; anything else is unexpected.
+          if (error instanceof ActionError) throw error;
+          logServerError("Claude connector check_resume", error);
+          return failure(`The resume couldn't be checked just now. Try again in a moment, or check it in Dossier on ${doc === "base" ? "the Base resume screen" : "the application's Resume tab"}.`);
+        }
+        if ("error" in report) return failure(report.error);
+        return text({
+          document,
+          file_name: report.fileName,
+          pages: report.pages,
+          max_pages: report.maxPages,
+          reads: report.reads.map(checkLine),
+          // The job title comes first, with index -1; the counts leave it out.
+          requirements: report.requirements
+            ? {
+                named: report.requirements.named,
+                total: report.requirements.total,
+                items: report.requirements.items.map(({ index, requirement, named, inProfile, skill }) => ({ index, requirement, named, in_profile: inProfile, skill })),
+              }
+            : null,
+          text: report.text.map(checkLine),
+          checked_at: report.checkedAt,
+          link: doc === "base" ? linkTo("/resume") : documentLink(application_id, DocumentKind.RESUME),
+        });
+      }),
   );
 }

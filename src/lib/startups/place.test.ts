@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { placeOf, reach } from "./place";
+import { countriesNamed, DACH, placeOf, reach } from "./place";
 
 const berlin = placeOf({ city: "Berlin", country: "Deutschland" });
 const bangalore = placeOf({ city: "Bangalore", country: "India" });
@@ -45,5 +45,20 @@ describe("where a startup hires, for users anywhere (#222)", () => {
   it("can't judge remote work's limits without a country", () => {
     expect(reach("Acme | Remote (US only)", nowhere)).toEqual({ here: null, remote: true, remoteOpen: null, remoteOnly: "" });
     expect(reach("Acme | Anywhere in the world", nowhere)).toMatchObject({ remote: true, remoteOpen: true });
+  });
+});
+
+describe("the countries a posting's location names, for the resume check's photo note", () => {
+  it("gives the countries as codes and the regions by name", () => {
+    expect(countriesNamed("San Francisco, CA, USA")).toEqual({ codes: ["us"], regions: ["the US"] });
+    expect(countriesNamed("Amsterdam, Netherlands")).toEqual({ codes: ["nl"], regions: [] });
+    const europe = countriesNamed("Berlin, Germany or remote in the EU");
+    expect(europe.regions).toEqual(["the EU"]);
+    expect(europe.codes).toEqual(expect.arrayContaining(["de", "fr", "nl"]));
+    expect(countriesNamed("Hybrid · 3 days in office")).toEqual({ codes: [], regions: [] });
+  });
+
+  it("knows the DACH countries", () => {
+    expect(DACH).toEqual(["de", "at", "ch"]);
   });
 });

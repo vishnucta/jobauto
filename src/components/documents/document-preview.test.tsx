@@ -83,6 +83,16 @@ describe("DocumentPreview", () => {
     expect(screen.getByText("Runs over one page")).toBeInTheDocument();
   });
 
+  it("shows a panel under the notice and before the page: the ATS check's report", () => {
+    const { container } = render(
+      <DocumentPreview label="Editorial" notice={<p>Left out to fit the page limit</p>} panel={<section aria-label="ATS check">Reads correctly</section>}>
+        <article aria-label="Resume" />
+      </DocumentPreview>,
+    );
+    expect(screen.getByRole("region", { name: "ATS check" })).toHaveTextContent("Reads correctly");
+    expect([...container.querySelectorAll("p, section, article")].map((element) => element.tagName)).toEqual(["P", "SECTION", "ARTICLE"]);
+  });
+
   it("draws a sheet behind each page where the browser can page", () => {
     vi.spyOn(CSS, "supports").mockReturnValue(true);
     const { container } = render(

@@ -99,6 +99,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "check_draft",
       "check_for_updates",
       "check_inbox",
+      "check_resume",
       "check_task",
       "confirm_interview",
       "delete_application",

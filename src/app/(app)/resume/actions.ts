@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
+import { checkResume } from "@/lib/resume-check";
 import { copyTheme, createTheme, deleteCustomTheme, makeBaseTheme, updateCustomTheme } from "@/lib/theme-changes";
 import { parseThemeFile, themeFieldsSchema } from "@/lib/theme-file";
 import type { ThemeData } from "@/lib/themes";
@@ -56,6 +57,18 @@ export const deleteTheme = action(z.object({ id: z.string().min(1) }), async ({ 
   toast(`Deleted “${deleted.name}”.`);
   revalidatePath("/resume");
   return { baseThemeId: deleted.baseThemeId };
+});
+
+/**
+ * "Check for ATS" on the Base resume screen: prints the base resume as
+ * Download PDF does and reads it back the way a parser would
+ * (src/lib/resume-check.ts, which the Claude connector uses too). The report
+ * holds labels and counts, never the text.
+ */
+export const checkBaseResumeAts = action(z.object({}), async () => {
+  const report = await checkResume("base");
+  if ("error" in report) throw new ActionError(report.error);
+  return report;
 });
 
 /** A theme from an exported theme file, checked again here; it becomes the base theme. */
