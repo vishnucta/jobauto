@@ -17,6 +17,7 @@ import { ProjectsSection } from "./projects-section";
 import { PublicationsSection } from "./publications-section";
 import { ReferencesSection } from "./references-section";
 import { TrackSaveContext, useSaveTracker } from "@/components/save-tracker";
+import { SearchWordsPanel } from "./search-words-panel";
 import { SkillsSection } from "./skills-section";
 import { StrengthMeter } from "./strength-meter";
 import { SECTIONS, sectionHref, type SectionId } from "./sections";
@@ -138,6 +139,8 @@ export function ProfileEditor({ initial, section, order }: { initial: ProfileDat
             )}
           </div>
         </div>
+
+        <SearchWordsPanel profile={profile} />
       </div>
     </TrackSaveContext>
   );

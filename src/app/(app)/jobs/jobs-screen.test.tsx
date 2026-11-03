@@ -619,3 +619,23 @@ describe("the Source list: one or several sources for a search", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 });
+
+describe("search words from the profile, above the form", () => {
+  it("fills What with a word in one click, and searches only when Search is pressed", async () => {
+    renderScreen({ suggestions: ["Financial Analyst", "Meldewesen"] });
+    const row = screen.getByRole("group", { name: "Search words from your profile" });
+    expect(within(row).getAllByRole("button").map((button) => button.textContent)).toEqual(["Financial Analyst", "Meldewesen"]);
+
+    await userEvent.click(within(row).getByRole("button", { name: "Meldewesen" }));
+    expect(screen.getByLabelText("What")).toHaveValue("Meldewesen");
+    expect(within(row).getByRole("button", { name: "Meldewesen" })).toHaveAttribute("aria-pressed", "true");
+    expect(runJobSearch).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, keywords: "Meldewesen" }, sources: ["JSEARCH"] });
+  });
+
+  it("shows no row without words", () => {
+    renderScreen();
+    expect(screen.queryByRole("group", { name: "Search words from your profile" })).not.toBeInTheDocument();
+  });
+});

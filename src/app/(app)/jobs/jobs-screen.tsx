@@ -41,6 +41,8 @@ export type JobsScreenProps = {
   source: JobSource | null;
   /** Every source the server offers, with why one can't be searched now, for the form's Source list. */
   sources: SourceState[];
+  /** Search words from the profile, for one-click chips above the form. */
+  suggestions?: string[];
   /** The Bundesagentur für Arbeit is chosen, but its note isn't accepted yet: it isn't searched until then (#223). */
   arbeitsagenturNote?: boolean;
   /** Score opens a Claude chat, which scores through the connector (#221). */
@@ -73,6 +75,7 @@ const SETTINGS_HREF = "/settings?section=jobs";
 export function JobsScreen({
   source,
   sources,
+  suggestions = [],
   arbeitsagenturNote = false,
   scoreInClaude = false,
   countries,
@@ -166,7 +169,7 @@ export function JobsScreen({
     <>
       {header}
       {arbeitsagenturNote && <ArbeitsagenturNote accepted={false} onAccept={acceptArbeitsagentur} className="mx-10 mb-5 max-w-[760px]" />}
-      <SearchForm sources={sources} startSources={startSources} countries={countries} query={query} pending={pending} onSearch={run} />
+      <SearchForm sources={sources} startSources={startSources} suggestions={suggestions} countries={countries} query={query} pending={pending} onSearch={run} />
       {/* Announces each new set of results; the list itself is replaced. */}
       <p role="status" className="sr-only">
         {pending ? "Searching…" : failed ? failed.problem.message : search ? `${search.postings.length} postings found.` : ""}
@@ -199,6 +202,7 @@ export function JobsScreen({
 function SearchForm({
   sources,
   startSources,
+  suggestions,
   countries,
   query,
   pending,
@@ -206,6 +210,7 @@ function SearchForm({
 }: {
   sources: readonly SourceState[];
   startSources: readonly JobSource[];
+  suggestions: readonly string[];
   countries: readonly Country[];
   query: SearchQuery;
   pending: boolean;
@@ -247,6 +252,25 @@ function SearchForm({
       onSubmit={submit}
       className="mx-10 mb-7 grid grid-cols-1 items-start gap-x-4 gap-y-4 rounded-panel border border-line-card bg-card p-6 sm:grid-cols-2 lg:grid-cols-[2fr_1.4fr_1.2fr_0.9fr_1fr_1.3fr]"
     >
+      {suggestions.length > 0 && (
+        <div role="group" aria-label="Search words from your profile" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-6">
+          <span className="text-meta text-muted">From your profile:</span>
+          {suggestions.map((word) => (
+            <button
+              key={word}
+              type="button"
+              aria-pressed={form.keywords === word}
+              onClick={() => set({ keywords: word })}
+              className={cn(
+                "rounded-full border px-3 py-1 text-control",
+                form.keywords === word ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink",
+              )}
+            >
+              {word}
+            </button>
+          ))}
+        </div>
+      )}
       <SearchFields value={form} onChange={set} source={selected} countries={countries} errors={errors} />
       <SourcePicker sources={sources} selected={selected} onChange={setSelected} error={errors.sources} />
       <div className="flex flex-wrap items-center justify-between gap-4 sm:col-span-2 lg:col-span-6">

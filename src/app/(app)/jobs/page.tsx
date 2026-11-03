@@ -4,6 +4,8 @@ import { isAiUsable } from "@/lib/ai/config";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
+import { searchChips, searchWords } from "@/lib/job-search/suggestions";
+import { loadProfile } from "@/lib/profile-data";
 import { sourceStates } from "@/lib/job-search/find";
 import { defaultSearch, latestRole, queryFromParams, sourceFilterFromParams, viewFromParams } from "@/lib/job-search/search";
 import { countSearches, listSearches, loadSearch } from "@/lib/posting-searches";
@@ -29,12 +31,13 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const from = sourceFilterFromParams(params);
   const typed = queryFromParams(params);
   const searchId = typeof params.search === "string" ? params.search : undefined;
-  const [config, timeZone, postingCounts, searches, recruiters, scoreInClaude] = await Promise.all([
+  const [config, timeZone, postingCounts, searches, recruiters, profile, scoreInClaude] = await Promise.all([
     loadJobSearchConfig(),
     userTimeZone(),
     countPostings(),
     countSearches(),
     prisma.recruiter.count(),
+    loadProfile(),
     isAiUsable().then(handsOffToClaude),
   ]);
   const now = new Date();
@@ -48,6 +51,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   return (
     <JobsScreen
       source={config.source}
+      // The profile's own search words, as one-click chips above the form.
+      suggestions={searchChips(searchWords(profile, now))}
       sources={sourceStates(config)}
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
