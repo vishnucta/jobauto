@@ -1,17 +1,23 @@
 import "server-only";
 
 import { ApplyAttemptStatus, DocumentKind } from "@/generated/prisma/enums";
-import { applyJob, applyJobKey } from "@/lib/jobs/apply";
+import { applyJob, applyJobKey, applyPageJob } from "@/lib/jobs/apply";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
 
 import { planFor } from "./plan";
+import { OPEN_ATTEMPT_STATUSES } from "./view";
 import { isWatching } from "./watches";
 
 // Starting a run of the apply assistant (Phase A): "Open and fill it in" on
 // the Apply tab, and start_apply in the Claude connector. Both make the same
 // checks; whether the run may press Send is the caller's to say.
+
+/** Why "Fill this page" didn't start; the message is written for the Apply tab. */
+export type FillPageStart =
+  | { ok: true; jobId: string; attemptId: string; alreadyRunning: boolean }
+  | { ok: false; problem: "gone" | "no-run" | "not-watched"; message: string };
 
 /** Why a run didn't start; the message is written for the Apply tab. */
 export type ApplyStartProblem =
@@ -74,4 +80,32 @@ export async function startApplyRun(id: string, { mayPressSend }: { mayPressSend
   });
   const jobId = await startJob(applyJob, { applicationId: id, attemptId: attempt.id }, { key: applyJobKey(id), applicationId: id });
   return { ok: true, jobId, attemptId: attempt.id, alreadyRunning: false };
+}
+
+/**
+ * Starts "Fill this page" for an application: the page the user is looking at,
+ * in the window of the run that is waiting for her. It needs that run, and the
+ * server still watching its window: a restart loses the window, and then the
+ * run has to be started again. Asking while a run or a fill is going follows
+ * that one. Send stays hers: this never presses it.
+ */
+export async function startFillPage(applicationId: string): Promise<FillPageStart> {
+  if (!(await prisma.application.count({ where: { id: applicationId } }))) return { ok: false, problem: "gone", message: "That application no longer exists." };
+  const open = await prisma.applyAttempt.findFirst({
+    where: { applicationId, status: { in: [...OPEN_ATTEMPT_STATUSES] } },
+    orderBy: { startedAt: "desc" },
+    select: { id: true },
+  });
+  if (!open) return { ok: false, problem: "no-run", message: "There's no run waiting for you on this application. Start one with Open and fill it in." };
+  const [running] = await findUnfinishedJobs(applyJobKey(applicationId));
+  if (running) return { ok: true, jobId: running.id, attemptId: open.id, alreadyRunning: true };
+  if (!isWatching(open.id)) {
+    return {
+      ok: false,
+      problem: "not-watched",
+      message: "I'm not watching the browser window any more (the server was restarted), so I can't fill it. Start again with Open and fill it in again, or say whether you sent it.",
+    };
+  }
+  const jobId = await startJob(applyPageJob, { applicationId, attemptId: open.id }, { key: applyJobKey(applicationId), applicationId });
+  return { ok: true, jobId, attemptId: open.id, alreadyRunning: false };
 }

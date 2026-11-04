@@ -14,6 +14,22 @@ export const REF_ATTRIBUTE = "data-bewerbung-ref";
 
 const ACTION_TIMEOUT_MS = 8_000;
 
+/** How long a frame gets to answer before it is left out: one still loading, or that never will, mustn't hold the run or its watcher. */
+const FRAME_ANSWER_MS = 4_000;
+
+/** `work`'s answer, or `fallback` when it hasn't come within `ms`. */
+async function within<T>(work: Promise<T>, fallback: T, ms = FRAME_ANSWER_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 type ScanArgs = { prefix: string; attribute: string };
 
 /**
@@ -117,7 +133,7 @@ export async function scanControls(page: Page): Promise<FormControl[]> {
   for (const [index, frame] of page.frames().entries()) {
     try {
       const args: ScanArgs = { prefix: `f${index}`, attribute: REF_ATTRIBUTE };
-      controls.push(...((await frame.evaluate(`${SCAN_SCRIPT}(${JSON.stringify(args)})`)) as FormControl[]));
+      controls.push(...(await within(frame.evaluate(`${SCAN_SCRIPT}(${JSON.stringify(args)})`) as Promise<FormControl[]>, [])));
     } catch {
       // A frame that navigated away, or one that can't be scripted: nothing to fill there.
     }
@@ -261,7 +277,7 @@ export async function clickSubmit(page: Page): Promise<boolean> {
 export async function pageText(page: Page): Promise<string> {
   const parts: string[] = [];
   for (const frame of page.frames()) {
-    parts.push(await frame.evaluate(() => document.body?.innerText ?? "").catch(() => ""));
+    parts.push(await within(frame.evaluate(() => document.body?.innerText ?? "").catch(() => ""), ""));
   }
   return parts.join("\n");
 }
@@ -269,7 +285,7 @@ export async function pageText(page: Page): Promise<string> {
 /** Whether the controls the scan marked are still on the page. */
 export async function formStillThere(page: Page): Promise<boolean> {
   for (const frame of page.frames()) {
-    const count = await frame.locator(`[${REF_ATTRIBUTE}]`).count().catch(() => 0);
+    const count = await within(frame.locator(`[${REF_ATTRIBUTE}]`).count().catch(() => 0), 0);
     if (count > 0) return true;
   }
   return false;

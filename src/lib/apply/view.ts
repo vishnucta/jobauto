@@ -35,6 +35,8 @@ export type ApplyTabData = {
   attempts: ApplyAttemptView[];
   /** The apply job still running, e.g. since before a reload. */
   running: string | null;
+  /** What it is: a run opening the employer's page, or "Fill this page" on a page the user is at. */
+  runningKind: "run" | "page" | null;
   hasResume: boolean;
   hasLetter: boolean;
   /** Profile basics forms usually ask for that are empty, e.g. "phone number". */

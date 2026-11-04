@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { APPLY_ENTRY_TEXTS, entryButtons, looksLikeCaptcha, looksSubmitted, SUBMIT_TEXTS } from "./confirmation";
+import { APPLY_ENTRY_TEXTS, entryButtons, looksBlocked, looksLikeCaptcha, looksSubmitted, SUBMIT_TEXTS } from "./confirmation";
+
+describe("telling a bot check from the page", () => {
+  it("knows the page a site answers an automated browser with", () => {
+    // As read from a job aggregator behind Cloudflare.
+    const german = "www.learn4good.com Sicherheitsüberprüfung wird durchgeführt Diese Website nutzt einen Sicherheitsservice, um sich vor böswilligen Bots zu schützen. Diese Seite wird angezeigt, solange die Website überprüft, dass Sie kein Bot sind. Ray ID: a55198f99bfc5fb9";
+    expect(looksBlocked({ title: "Nur einen Moment…", text: german })).toBe(true);
+    expect(looksBlocked({ title: "", text: german })).toBe(true);
+    expect(looksBlocked({ title: "Just a moment...", text: "" })).toBe(true);
+    expect(looksBlocked({ title: "Access denied", text: "You don't have permission to access this server." })).toBe(true);
+    expect(looksBlocked({ title: "Attention Required! | Cloudflare", text: "Please complete the security check to access the site." })).toBe(true);
+    expect(looksBlocked({ title: "", text: "Verifying that you are human. This may take a few seconds. Ray ID: 8a1" })).toBe(true);
+  });
+
+  it("doesn't take a real page for one, however it is worded", () => {
+    expect(looksBlocked({ title: "Senior Analyst Aktienstrategie m/w/d | DZ BANK", text: "Das erwartet Sie. Als Senior Analyst analysieren Sie die Märkte. Jetzt bewerben" })).toBe(false);
+    expect(looksBlocked({ title: "Bewerbung · Acme", text: "Vorname Nachname E-Mail Lebenslauf hochladen Absenden" })).toBe(false);
+    // A long posting that mentions a security check in passing is a posting.
+    const long = `${"Wir suchen Verstärkung für unser Team im Bereich Informationssicherheit. ".repeat(60)} Sie führen die Security Check Prozesse durch.`;
+    expect(long.length).toBeGreaterThan(3_000);
+    expect(looksBlocked({ title: "Security Engineer (m/w/d)", text: long })).toBe(false);
+    expect(looksBlocked({ title: "", text: "" })).toBe(false);
+  });
+});
 
 describe("reading the employer's page", () => {
   it.each([

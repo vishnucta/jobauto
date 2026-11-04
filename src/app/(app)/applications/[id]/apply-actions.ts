@@ -7,7 +7,7 @@ import { ApplicationStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
 import { applyAnswersSchema } from "@/lib/apply/answers";
 import { resolveAttempt } from "@/lib/apply/run";
-import { startApplyRun } from "@/lib/apply/start";
+import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { prisma } from "@/lib/prisma";
 import { saveSettings } from "@/lib/settings-data";
 import { statusInfo } from "@/lib/status";
@@ -24,6 +24,18 @@ const refresh = (id: string) => revalidatePath(`/applications/${id}`);
  */
 export const startApply = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
   const started = await startApplyRun(id, { mayPressSend: true });
+  if (!started.ok) throw new ActionError(started.message);
+  if (!started.alreadyRunning) refresh(id);
+  return { jobId: started.jobId, attemptId: started.attemptId };
+});
+
+/**
+ * "Fill this page": fills the page the user is looking at, in the window of the run
+ * that is waiting for her, and returns the job to follow (src/lib/apply/start.ts).
+ * She has got past a login, a bot check or a step of the form herself; Send stays hers.
+ */
+export const fillThisPage = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
+  const started = await startFillPage(id);
   if (!started.ok) throw new ActionError(started.message);
   if (!started.alreadyRunning) refresh(id);
   return { jobId: started.jobId, attemptId: started.attemptId };

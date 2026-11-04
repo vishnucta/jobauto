@@ -112,6 +112,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "edit_profile_items",
       "export_data",
       "export_pdf",
+      "fill_apply_page",
       "find_free_slots",
       "finish_profile_import",
       "get_application",

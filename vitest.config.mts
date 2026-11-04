@@ -32,6 +32,8 @@ export default defineConfig({
         "src/lib/apply/run.ts",
         "src/lib/apply/form.ts",
         "src/lib/apply/browser.ts",
+        // Filling a page: fill.browser.test.ts runs it in a real headless browser when there is one.
+        "src/lib/apply/fill.ts",
       ],
       reporter: ["text-summary", "json-summary", "html"],
       reportsDirectory: "coverage",

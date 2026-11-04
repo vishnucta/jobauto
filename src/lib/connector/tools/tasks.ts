@@ -8,7 +8,7 @@ import { agentScanJob } from "@/lib/agent/jobs";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
 import { viewHref } from "@/lib/job-search/search";
-import { applyJob } from "@/lib/jobs/apply";
+import { applyJob, applyPageJob } from "@/lib/jobs/apply";
 import { draftReplyJob } from "@/lib/jobs/draft-reply";
 import { importProfileJob } from "@/lib/jobs/import-profile";
 import { readPostingJob } from "@/lib/jobs/read-posting";
@@ -203,6 +203,17 @@ const KINDS: Record<string, Tell> = {
       link: input ? linkTo(`/applications/${input.applicationId}?tab=apply`) : undefined,
     };
   },
+  [applyPageJob.type]: (task, linkTo) => {
+    const input = inputOf(applyPageJob, task);
+    const fill = resultOf(applyPageJob, task);
+    return {
+      task: "Filling in the page the user is at",
+      about: { application_id: input?.applicationId, run_id: input?.attemptId },
+      result: fill ? { outcome: fill.status, note: withoutAddresses(fill.note) } : undefined,
+      link: input ? linkTo(`/applications/${input.applicationId}?tab=apply`) : undefined,
+      next: fill ? "get_apply_status shows what was filled in and what's left." : undefined,
+    };
+  },
 };
 
 /** What to do next with a task as it stands. */
@@ -214,6 +225,7 @@ function nextFor(task: Task, told: Told): string | undefined {
       return "Check again in a little while.";
     case JobStatus.FAILED:
       if (task.type === applyJob.type) return "Start a new apply run with start_apply.";
+      if (task.type === applyPageJob.type) return "Call fill_apply_page again, once the user is at the form.";
       if (task.type === draftReplyJob.type) return DRAFT_AGAIN;
       return "retry_task runs it again.";
     case JobStatus.DONE:
@@ -284,6 +296,7 @@ export function registerTaskTools({ server, linkTo }: ToolContext): void {
       if (!task) return failure(NO_TASK);
       // An apply run may press Send when the user allowed it for runs she starts; one Claude starts never does.
       if (task.type === applyJob.type) return failure("An apply run can't be run again from here. Start a new apply run with start_apply.");
+      if (task.type === applyPageJob.type) return failure("Filling a page can't be run again from here. Call fill_apply_page again, once the user is at the form.");
       // Run again, it would draft from an email dismissed or answered since, and save the draft back onto it.
       if (task.type === draftReplyJob.type) return failure(DRAFT_AGAIN);
       if (!(await retryJob(task_id))) return failure("This can't be retried: it's still running or already done.");

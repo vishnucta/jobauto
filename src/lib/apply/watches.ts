@@ -28,6 +28,11 @@ export function stopWatchingAll(): void {
   for (const attemptId of [...watches.keys()]) stopWatching(attemptId);
 }
 
+/** The page the server is watching for a run: the last one it filled or opened; null when it isn't watching. */
+export function watchedPage(attemptId: string): Page | null {
+  return watches.get(attemptId)?.page ?? null;
+}
+
 /** Whether the server is still watching a run's page. */
 export function isWatching(attemptId: string): boolean {
   return watches.has(attemptId);

@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { ApplyAttemptStatus } from "@/generated/prisma/enums";
-import { runApplyAttempt } from "@/lib/apply/run";
+import { runApplyAttempt, runFillThisPage } from "@/lib/apply/run";
 
 import { defineJob } from "./runner";
 
@@ -22,6 +22,22 @@ export const applyJob = defineJob({
   result: z.object({ attemptId: z.string(), status: z.enum(ApplyAttemptStatus), note: z.string() }),
   async run({ attemptId }, context) {
     const outcome = await runApplyAttempt(attemptId, context);
+    return { attemptId, ...outcome };
+  },
+});
+
+/**
+ * "Fill this page": fills the page the user is looking at in the window of a run
+ * that is waiting for her (src/lib/apply/run.ts runFillThisPage). It shares the
+ * run's key, so only one of the two works on an application at a time, and its
+ * result has the run's shape: the Apply tab follows both the same way.
+ */
+export const applyPageJob = defineJob({
+  type: "apply-page",
+  input: z.object({ applicationId: z.string().min(1), attemptId: z.string().min(1) }),
+  result: z.object({ attemptId: z.string(), status: z.enum(ApplyAttemptStatus), note: z.string() }),
+  async run({ attemptId }, context) {
+    const outcome = await runFillThisPage(attemptId, context);
     return { attemptId, ...outcome };
   },
 });

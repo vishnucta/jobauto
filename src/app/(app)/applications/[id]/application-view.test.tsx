@@ -171,6 +171,7 @@ const props: ApplicationViewProps = {
     answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
     attempts: [],
     running: null,
+    runningKind: null,
     hasResume: true,
     hasLetter: true,
     missing: [],

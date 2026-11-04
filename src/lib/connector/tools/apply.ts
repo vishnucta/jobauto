@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 import { applyAnswersSchema, LANGUAGE_LEVEL_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { resolveAttempt } from "@/lib/apply/run";
-import { startApplyRun } from "@/lib/apply/start";
+import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyPlanView } from "@/lib/apply/view";
 import { loadApplyTab } from "@/lib/apply/view-data";
 import { applyJob, applyJobKey } from "@/lib/jobs/apply";
@@ -34,7 +34,8 @@ const RUN_STATUS: Record<ApplyAttemptStatus, string> = {
 
 const FILLING = "Still filling in the form: follow running_task_id with check_task.";
 const WATCHING =
-  "Waiting for the user to check the browser window and press Send. Dossier notices the confirmation itself; if the user tells you how it ended, record it with settle_apply.";
+  "Waiting for the user to check the browser window and press Send. Dossier notices the confirmation itself; if the user tells you how it ended, record it with settle_apply. " +
+  "If they have got past a login, a bot check or a step of the form themselves and ask you to fill in the page they are at, use fill_apply_page.";
 const NOT_WATCHING = "Dossier isn't watching the browser window any more (it was restarted). Ask the user whether they sent it, then record it with settle_apply.";
 
 /** An answer the AI wrote can be long; Claude gets its start. */
@@ -80,7 +81,7 @@ function runView(attempt: ApplyAttemptView, filling: boolean, linkTo: (path: str
     note: attempt.note || undefined,
     started: attempt.startedAt,
     page: attempt.host || undefined,
-    filled: attempt.filled.map((entry) => ({ field: entry.label, filled_with: entry.what, value: shorten(entry.value) || undefined, by_ai: entry.byAi })),
+    filled: attempt.filled.map((entry) => ({ field: entry.label, filled_with: entry.what, value: shorten(entry.value) || undefined, by_ai: entry.byAi, form_step: entry.page })),
     left_to_user: attempt.unfilled.map((entry) => ({ field: entry.label, required: entry.required, reason: entry.reason })),
     captcha: attempt.captcha || undefined,
     check_ai_answers:
@@ -160,6 +161,29 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
           : undefined,
         link: applyTab(id),
         afterwards: "Once it's done, get_apply_status shows what was filled in and what's left. The user checks the browser window and presses Send there.",
+      });
+    },
+  );
+
+  server.registerTool(
+    "fill_apply_page",
+    {
+      title: "Fill in the page the user is at",
+      description:
+        "Fills in the form on the page the user is looking at, in the browser window of an apply run that is waiting for them, from the profile and the standard answers, and attaches the PDFs, as Fill this page on the Apply tab does. " +
+        "Use it after the user got past a login, a bot check or a step of the form themselves: Dossier never does those. It types only into encrypted (https) pages, never presses Send, and says so when the page has no form. " +
+        "Follow it with check_task, then get_apply_status.",
+      inputSchema: z.object({ id: z.string().min(1).max(100).describe("The application's id") }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ id }) => {
+      const fill = await startFillPage(id);
+      if (!fill.ok) return failure(fill.message);
+      return started(fill.jobId, {
+        run_id: fill.attemptId,
+        already_running: fill.alreadyRunning || undefined,
+        link: applyTab(id),
+        afterwards: "Once it's done, get_apply_status shows what was filled in on that page and what's left. The user checks the window and presses Send there, or goes on to the next step and asks again.",
       });
     },
   );

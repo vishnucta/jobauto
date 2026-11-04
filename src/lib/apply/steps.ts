@@ -10,3 +10,6 @@ export const APPLY_STEPS = [
   "Handing over to you",
 ] as const;
 export type ApplyStep = (typeof APPLY_STEPS)[number];
+
+// "Fill this page": the page in front of her in the same window, filled by a run already waiting for her.
+export const FILL_STEPS = ["Reading the page", "Filling in your details", "Attaching your PDFs", "Handing over to you"] as const;

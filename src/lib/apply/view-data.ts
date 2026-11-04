@@ -66,6 +66,7 @@ export async function loadApplyTab(
     answers: settings.applyAnswers,
     attempts,
     running: jobs.at(-1)?.id ?? null,
+    runningKind: jobs.length === 0 ? null : jobs.at(-1)?.type === "apply-page" ? "page" : "run",
     hasResume: application.documents.some((document) => document.kind === DocumentKind.RESUME),
     hasLetter: application.documents.some((document) => document.kind === DocumentKind.COVER_LETTER),
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),

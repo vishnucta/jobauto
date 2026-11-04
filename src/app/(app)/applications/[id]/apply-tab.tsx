@@ -13,13 +13,13 @@ import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 import { LANGUAGE_LEVEL_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
-import { APPLY_STEPS } from "@/lib/apply/steps";
+import { APPLY_STEPS, FILL_STEPS } from "@/lib/apply/steps";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyTabData } from "@/lib/apply/view";
 import { cn } from "@/lib/cn";
 import type { ApplyJobResult } from "@/lib/jobs/apply";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { saveApplyAnswers, settleApplyAttempt, startApply } from "./apply-actions";
+import { fillThisPage, saveApplyAnswers, settleApplyAttempt, startApply } from "./apply-actions";
 import { JobWatcher } from "./job-watcher";
 
 /** How often the tab asks the server whether the browser saw the confirmation, while it's watching. */
@@ -44,9 +44,11 @@ const STATUS_LABELS: Record<ApplyAttemptStatus, string> = {
 export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: string; data: ApplyTabData; onGoToEmail: () => void }) {
   const router = useRouter();
   // The job to follow: one started here, else the one the server reports (e.g. since before a reload), unless it's the one just seen finish.
-  const [started, setStarted] = useState<{ id: string; revision: number } | null>(null);
+  const [started, setStarted] = useState<{ id: string; revision: number; kind: "run" | "page" } | null>(null);
   const [finished, setFinished] = useState<string | null>(null);
-  const job = started ?? (data.running && data.running !== finished ? { id: data.running, revision: 0 } : null);
+  const job = started ?? (data.running && data.running !== finished ? { id: data.running, revision: 0, kind: data.runningKind ?? "run" } : null);
+  // "Fill this page" works on the window of the run that is waiting; the run itself opens the employer's page.
+  const filling = job?.kind === "page";
   const [step, setStep] = useState<string | null>(null);
   const [starting, startStarting] = useTransition();
   const [settling, startSettling] = useTransition();
@@ -74,7 +76,15 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
     startStarting(async () => {
       const result = await startApply({ id: applicationId });
       if (!result.ok) return toast(result.error);
-      setStarted({ id: result.data.jobId, revision: 0 });
+      setStarted({ id: result.data.jobId, revision: 0, kind: "run" });
+      router.refresh();
+    });
+
+  const fill = () =>
+    startStarting(async () => {
+      const result = await fillThisPage({ id: applicationId });
+      if (!result.ok) return toast(result.error);
+      setStarted({ id: result.data.jobId, revision: 0, kind: "page" });
       router.refresh();
     });
 
@@ -86,7 +96,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
       router.refresh();
     });
 
-  const current = step ? Math.max(0, (APPLY_STEPS as readonly string[]).indexOf(step)) : 0;
+  const current = step ? Math.max(0, ((filling ? FILL_STEPS : APPLY_STEPS) as readonly string[]).indexOf(step)) : 0;
   const { plan } = data;
   const busy = job !== null || starting;
 
@@ -115,7 +125,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
               </p>
             )}
             {!data.hasResume && <p className="text-sm text-muted">This application has no resume to attach yet.</p>}
-            {job ? (
+            {job && !filling ? (
               <ProgressSteps steps={APPLY_STEPS} current={current} className="mt-1" />
             ) : (
               <div className="mt-1 flex flex-wrap items-center gap-3">
@@ -148,7 +158,15 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
         )}
       </Panel>
 
-      {latest && !job && <AttemptPanel attempt={latest} settling={settling} onSettle={settle} onRetry={plan.kind === "web" ? start : undefined} />}
+      {latest && (!job || filling) && (
+        <AttemptPanel
+          attempt={latest}
+          settling={settling}
+          onSettle={settle}
+          onRetry={plan.kind === "web" ? start : undefined}
+          fill={{ available: !job && !starting, running: filling, step: current, onFill: fill }}
+        />
+      )}
 
       <AnswersPanel applicationId={applicationId} answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} />
 
@@ -176,12 +194,18 @@ function AttemptPanel({
   settling,
   onSettle,
   onRetry,
+  fill,
 }: {
   attempt: ApplyAttemptView;
   settling: boolean;
   onSettle: (attemptId: string, sent: boolean) => void;
   onRetry?: () => void;
+  /** "Fill this page": whether it can start now, whether it is running (and at which step), and what starts it. */
+  fill: { available: boolean; running: boolean; step: number; onFill: () => void };
 }) {
+  const canFill = attempt.watching && fill.available;
+  const pages = pagesOf(attempt.filled);
+  const shown = pages.length > 0 ? pages : [{ page: 1, entries: [] as ApplyAttemptView["filled"] }];
   const open = OPEN_ATTEMPT_STATUSES.includes(attempt.status);
   const required = attempt.unfilled.filter((entry) => entry.required);
   const optional = attempt.unfilled.filter((entry) => !entry.required);
@@ -199,8 +223,9 @@ function AttemptPanel({
       tone={attempt.status === "SUBMITTED" ? "success" : open ? "warning" : attempt.status === "FAILED" ? "danger" : "plain"}
     >
       <p className="text-sm text-pretty">{attempt.note}</p>
+      {fill.running && <ProgressSteps steps={FILL_STEPS} current={fill.step} className="mt-1" />}
       {open && !attempt.watching && (
-        <p className="text-sm text-muted">The server isn&apos;t watching the browser window any more (it was restarted). Say below how it ended.</p>
+        <p className="text-sm text-muted">The server isn&apos;t watching the browser window any more (it was restarted), so Fill this page can&apos;t reach it. Say below how it ended.</p>
       )}
 
       {aiWrote.length > 0 && (
@@ -225,13 +250,19 @@ function AttemptPanel({
 
       {open && (
         <div className="mt-1 flex flex-wrap items-center gap-3">
-          <Button aria-disabled={settling || undefined} onClick={() => !settling && onSettle(attempt.id, true)}>
+          <Button aria-disabled={!canFill || undefined} onClick={() => canFill && fill.onFill()}>
+            {fill.running ? "Filling this page…" : "Fill this page"}
+          </Button>
+          <Button variant="secondary" aria-disabled={settling || undefined} onClick={() => !settling && onSettle(attempt.id, true)}>
             I sent it
           </Button>
           <Button variant="text" aria-disabled={settling || undefined} onClick={() => !settling && onSettle(attempt.id, false)}>
             I didn&apos;t send it
           </Button>
         </div>
+      )}
+      {canFill && (
+        <p className="text-meta text-muted">Get to the form in the browser window, then click Fill this page. On the next step of a form, click it again.</p>
       )}
       {!open && attempt.status !== "SUBMITTED" && onRetry && (
         <div className="mt-1">
@@ -244,25 +275,32 @@ function AttemptPanel({
       {(attempt.filled.length > 0 || optional.length > 0) && (
         <details className="text-sm">
           <summary className="cursor-pointer text-muted">
-            What I filled in ({attempt.filled.length}){optional.length > 0 && <>, and {optional.length} optional {optional.length === 1 ? "field" : "fields"} I left</>}
+            What I filled in ({pages.length > 1 ? `${pages[0].entries.length} on this page, ${attempt.filled.length - pages[0].entries.length} earlier` : attempt.filled.length})
+            {optional.length > 0 && <>, and {optional.length} optional {optional.length === 1 ? "field" : "fields"} I left</>}
           </summary>
-          <ul className="mt-2 flex flex-col gap-1">
-            {attempt.filled.map((entry, index) => (
-              <li key={index} className="flex flex-wrap gap-x-2">
-                <span className="text-ink">{entry.label}</span>
-                <span className="text-muted">
-                  · {entry.what}
-                  {entry.value && <> · {entry.value.length > 80 ? `${entry.value.slice(0, 80)}…` : entry.value}</>}
-                </span>
-              </li>
-            ))}
-            {optional.map((entry, index) => (
-              <li key={`left-${index}`} className="flex flex-wrap gap-x-2">
-                <span className="text-ink">{entry.label}</span>
-                <span className="text-muted">· left to you · {entry.reason}</span>
-              </li>
-            ))}
-          </ul>
+          {shown.map((group, index) => (
+            <div key={group.page} className={index > 0 ? "mt-3" : "mt-2"}>
+              {pages.length > 1 && <h4 className="mb-1 text-meta text-muted">{index === 0 ? `This page · step ${group.page}` : `Earlier · step ${group.page}`}</h4>}
+              <ul className="flex flex-col gap-1">
+                {group.entries.map((entry, entryIndex) => (
+                  <li key={entryIndex} className="flex flex-wrap gap-x-2">
+                    <span className="text-ink">{entry.label}</span>
+                    <span className="text-muted">
+                      · {entry.what}
+                      {entry.value && <> · {entry.value.length > 80 ? `${entry.value.slice(0, 80)}…` : entry.value}</>}
+                    </span>
+                  </li>
+                ))}
+                {index === 0 &&
+                  optional.map((entry, optionalIndex) => (
+                    <li key={`left-${optionalIndex}`} className="flex flex-wrap gap-x-2">
+                      <span className="text-ink">{entry.label}</span>
+                      <span className="text-muted">· left to you · {entry.reason}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ))}
         </details>
       )}
 
@@ -282,6 +320,13 @@ function AttemptPanel({
       )}
     </Panel>
   );
+}
+
+/** The report's entries by the page of the form they were on, the page just filled first; a run from before pages were kept is one page. */
+function pagesOf(filled: ApplyAttemptView["filled"]): { page: number; entries: ApplyAttemptView["filled"] }[] {
+  const byPage = new Map<number, ApplyAttemptView["filled"]>();
+  for (const entry of filled) byPage.set(entry.page ?? 1, [...(byPage.get(entry.page ?? 1) ?? []), entry]);
+  return [...byPage].map(([page, entries]) => ({ page, entries })).sort((a, b) => b.page - a.page);
 }
 
 /** The standard answers every form asks for, saved once. */

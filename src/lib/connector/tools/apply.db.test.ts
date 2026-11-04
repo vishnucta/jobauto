@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import { addWatch, isWatching, stopWatchingAll } from "@/lib/apply/watches";
-import { applyJob } from "@/lib/jobs/apply";
+import { applyJob, applyPageJob } from "@/lib/jobs/apply";
 import { startJob } from "@/lib/jobs/runner";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
@@ -311,12 +311,53 @@ describe("the Apply tab's tools in the Claude connector", () => {
     expect((await loadSettings()).applyAnswers).toMatchObject({ germanLevel: "B2", postalCode: "", noticePeriod: "3 Monate zum Monatsende" });
   });
 
+  it("fills the page the user is at, once a run is waiting and its window is watched, and says why it can't otherwise", async () => {
+    await onPersonio();
+    expect(await tool("fill_apply_page", { id: "gone" })).toMatchObject({ isError: true, text: "That application no longer exists." });
+    expect(await tool("fill_apply_page", { id: ledgerly })).toMatchObject({ isError: true, text: expect.stringContaining("no run waiting for you") });
+    const waiting = await run({ status: "WAITING" });
+    expect(await tool("fill_apply_page", { id: ledgerly })).toMatchObject({ isError: true, text: expect.stringContaining("not watching the browser window") });
+    expect(startJob).not.toHaveBeenCalled();
+
+    watch(waiting.id);
+    const filling = await tool("fill_apply_page", { id: ledgerly });
+    expect(filling.json).toMatchObject({
+      task_id: "apply-job",
+      status: "started",
+      run_id: waiting.id,
+      link: `https://dossier.example/applications/${ledgerly}?tab=apply`,
+      afterwards: expect.stringContaining("presses Send there"),
+    });
+    expect(startJob).toHaveBeenCalledWith(applyPageJob, { applicationId: ledgerly, attemptId: waiting.id }, { key: `apply:${ledgerly}`, applicationId: ledgerly });
+
+    // While a run or a fill is going, asking again follows it.
+    await going(waiting.id);
+    expect((await tool("fill_apply_page", { id: ledgerly })).json).toMatchObject({ already_running: true });
+  });
+
+  it("shows which step of the form each filled field was on, and points to the new tool while it waits", async () => {
+    await onPersonio();
+    const waiting = await run({
+      status: "WAITING",
+      filled: [
+        { label: "First name", what: "First name", value: "Jane", page: 1 },
+        { label: "Kündigungsfrist", what: "Notice period", value: "keine", page: 2 },
+      ],
+    });
+    watch(waiting.id);
+    const runs = (await tool("get_apply_status", { id: ledgerly })).json.runs as { filled: { field: string; form_step?: number }[]; next: string }[];
+    expect(runs[0].filled.map((entry) => [entry.field, entry.form_step])).toEqual([["First name", 1], ["Kündigungsfrist", 2]]);
+    expect(runs[0].next).toContain("fill_apply_page");
+  });
+
   it("lists the tools with what they do to the world, and says a run Claude starts leaves Send to the user", async () => {
     const { tools } = (await rpc("tools/list")) as { tools: { name: string; description: string; annotations: Record<string, boolean> }[] };
     const listed = (name: string) => tools.find((entry) => entry.name === name);
     expect(listed("get_apply_status")?.annotations).toEqual({ readOnlyHint: true });
     expect(listed("start_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
     expect(listed("start_apply")?.description).toContain("leaves Send to the user");
+    expect(listed("fill_apply_page")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+    expect(listed("fill_apply_page")?.description).toContain("never presses Send");
     expect(listed("settle_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(listed("save_apply_answers")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });

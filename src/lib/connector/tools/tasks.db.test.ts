@@ -269,6 +269,25 @@ describe("the task tools", () => {
       link: app("?tab=apply"),
     });
 
+    const page = await task("apply-page", {
+      input: { applicationId, attemptId: "attempt-1" },
+      result: { attemptId: "attempt-1", status: "WAITING", note: "Filled in this page. Write to jobs@acme.example if it asks." },
+    });
+    expect(await check(page.id)).toMatchObject({
+      task: "Filling in the page the user is at",
+      application_id: applicationId,
+      run_id: "attempt-1",
+      result: { outcome: "WAITING", note: "Filled in this page. Write to address left out if it asks." },
+      link: app("?tab=apply"),
+      next: "get_apply_status shows what was filled in and what's left.",
+    });
+    const failedFill = await task("apply-page", { status: "FAILED", error: "Cancelled.", input: { applicationId, attemptId: "attempt-1" } });
+    expect(await check(failedFill.id)).toMatchObject({ status: "failed", next: "Call fill_apply_page again, once the user is at the form." });
+    expect(await tool("retry_task", { task_id: failedFill.id })).toMatchObject({
+      isError: true,
+      text: "Filling a page can't be run again from here. Call fill_apply_page again, once the user is at the form.",
+    });
+
     expect(await check((await task("something-new")).id)).toMatchObject({ task: "Background work", status: "done" });
   });
 

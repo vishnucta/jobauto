@@ -22,6 +22,21 @@ export function looksLikeCaptcha({ html, frameUrls }: { html: string; frameUrls:
   return CAPTCHA.test(html);
 }
 
+// A site's own check that it isn't talking to a bot (Cloudflare's "Just a moment…", and the like) answers an automated browser with a page that
+// has no form on it. Its title is short and fixed, its text a few lines.
+const BLOCKED_TITLE = /^(just a moment|nur einen moment|un instant|un momento|even geduld|attention required|access denied|zugriff verweigert|pardon our interruption|checking your browser)/i;
+const BLOCKED_TEXT =
+  /sicherheits(ü|ue)berpr(ü|ue)fung|security check|verify(ing)? (that )?you are (a )?human|are you a robot|ich bin kein roboter|schutz vor (b(ö|oe)swilligen )?bots|against (malicious )?bots|enable javascript and cookies to continue|\bray id\b/i;
+
+/**
+ * Whether the page is a site's bot check, not the page asked for. The assistant
+ * doesn't try to get past one: the user's own browser does, and she carries on.
+ * A long page is a real page, whatever words it uses.
+ */
+export function looksBlocked({ title, text }: { title: string; text: string }): boolean {
+  return BLOCKED_TITLE.test(title.trim()) || (text.length < 3_000 && BLOCKED_TEXT.test(text));
+}
+
 /** Buttons and links that lead from a posting to its form, most specific first. */
 export const APPLY_ENTRY_TEXTS: readonly RegExp[] = [
   /jetzt (online )?bewerben/i,
