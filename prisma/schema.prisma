@@ -634,6 +634,7 @@ enum PostingSource {
   JSEARCH
   SERPAPI
   ADZUNA
+  JOOBLE
   ARBEITSAGENTUR
   CLIENT
 }

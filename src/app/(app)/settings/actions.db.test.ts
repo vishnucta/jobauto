@@ -159,6 +159,7 @@ describe("job search settings (E14-4)", () => {
         jsearch: { host: "openwebninja", keyState: "none" },
         serpapi: { keyState: "none" },
         adzuna: { appId: "", keyState: "none" },
+        jooble: { keyState: "none" },
         arbeitsagentur: { offered: true, acceptedAt: null },
       },
     });
@@ -202,6 +203,31 @@ describe("job search settings (E14-4)", () => {
     expect((await settings()).jsearchKeyEnc).toBeNull();
     await saveJobSearchDetails({ adzunaAppId: "" });
     expect((await settings()).adzunaAppId).toBeNull();
+  });
+
+  it("stores Jooble's key encrypted, and tests it in the address Jooble takes it in, without logging it", async () => {
+    clearJobSearchCache();
+    await saveJobSource({ source: "JOOBLE" });
+    expect(await testJobSource({})).toEqual({ ok: true, data: { connected: false, message: "Add your Jooble key in Settings → Job search first." } });
+
+    const result = await saveJobSourceKey({ source: "JOOBLE", change: { action: "set", value: " jooble_secret " } });
+    expect(result).toMatchObject({ ok: true, data: { source: "JOOBLE", jooble: { keyState: "set" } } });
+    expect(JSON.stringify(result)).not.toContain("jooble_secret");
+    const stored = (await settings()).joobleKeyEnc!;
+    expect(stored).not.toContain("jooble_secret");
+    expect(decryptSecret(JOB_SOURCE_KEY, stored)).toBe("jooble_secret");
+
+    const requests = stubFetch(() => json({ totalCount: 0, jobs: [] }));
+    expect(await testJobSource({})).toEqual({ ok: true, data: { connected: true, seconds: expect.any(Number) } });
+    expect(requests[0]).toMatchObject({ method: "POST" });
+    expect(requests[0].url.pathname).toBe("/api/jooble_secret");
+
+    stubFetch(() => json({}, { status: 403 }));
+    expect(await testJobSource({})).toMatchObject({ ok: true, data: { connected: false, message: expect.stringContaining("Jooble didn't accept your key") } });
+    vi.unstubAllGlobals();
+
+    await saveJobSourceKey({ source: "JOOBLE", change: { action: "clear" } });
+    expect((await settings()).joobleKeyEnc).toBeNull();
   });
 
   it("saves where the JSearch key is from", async () => {

@@ -7,6 +7,7 @@ import { cached, remember } from "./cache";
 import { JobSearchError, jobSearchError } from "./errors";
 import { adzuna } from "./adzuna";
 import { arbeitsagentur } from "./arbeitsagentur";
+import { jooble } from "./jooble";
 import { jsearch } from "./jsearch";
 import { postingKey, type FoundPosting, type JobSource, type SearchPage, type SearchQuery } from "./search";
 import { serpapi } from "./serpapi";
@@ -24,6 +25,7 @@ const ADAPTERS: { [S in JobSource]: JobSourceAdapter<S> } = {
   JSEARCH: jsearch,
   SERPAPI: serpapi,
   ADZUNA: adzuna,
+  JOOBLE: jooble,
   ARBEITSAGENTUR: arbeitsagentur,
 };
 

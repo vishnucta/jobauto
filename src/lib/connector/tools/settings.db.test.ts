@@ -234,7 +234,7 @@ describe("get_settings and update_settings", () => {
     const read = await tool("get_settings");
     expect(read.json).toMatchObject({
       ai: { ai_provider: "ANTHROPIC", provider_name: "Anthropic", ai_address: "https://api.anthropic.com", ai_model: "claude-opus-5-5", api_key: "set", ready: true, creativity: "BALANCED", never_invent_experience: true },
-      job_search: { job_source: "JSEARCH", jsearch_host: "openwebninja", jsearch_key: "set", serpapi_key: "none", adzuna_app_id: "app-1", adzuna_key: "none", arbeitsagentur: { offered: true, understood: false } },
+      job_search: { job_source: "JSEARCH", jsearch_host: "openwebninja", jsearch_key: "set", serpapi_key: "none", adzuna_app_id: "app-1", adzuna_key: "none", jooble_key: "none", arbeitsagentur: { offered: true, understood: false } },
       documents: { paper: "A4", document_language: "German", resume_language: "English", page_limit: "2", languages: expect.arrayContaining(["English", "German", "Hebrew"]) },
       your_data: { nightly_backup: true, last_backup: null, keep_task_data_hours: 24 },
       // Set up, but no account connected yet.

@@ -13,6 +13,7 @@ export type SourceCredentials = {
   JSEARCH: { key: string; host: JSearchHost };
   SERPAPI: { key: string };
   ADZUNA: { appId: string; key: string };
+  JOOBLE: { key: string };
   ARBEITSAGENTUR: Record<string, never>;
 };
 

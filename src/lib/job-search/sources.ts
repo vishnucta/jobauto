@@ -9,6 +9,7 @@ export type JobSearchSettingsView = {
   jsearch: { host: JSearchHost; keyState: JobKeyState };
   serpapi: { keyState: JobKeyState };
   adzuna: { appId: string; keyState: JobKeyState };
+  jooble: { keyState: JobKeyState };
   /** Whether this server offers the Bundesagentur für Arbeit, and when its note was accepted (#223). */
   arbeitsagentur: { offered: boolean; acceptedAt: string | null };
 };
@@ -75,6 +76,17 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     // Its terms: "Adzuna" on each displayed advert, at least 116 × 23 px, linked to adzuna.co.uk or the local site.
     attributionLink: { home: "https://www.adzuna.co.uk", local: /^www\.adzuna\.(?:[a-z]{2,3}|co\.[a-z]{2}|com\.[a-z]{2})$/ },
     countries: ["at", "au", "be", "br", "ca", "ch", "de", "es", "fr", "gb", "in", "it", "mx", "nl", "nz", "pl", "sg", "us", "za"],
+  },
+  JOOBLE: {
+    name: "Jooble",
+    description: "Jooble's own job index. A key is for one country (Germany's is asked for on de.jooble.org), and it only shares the start of each posting.",
+    tag: "One country per key · free key, 500 searches in all",
+    keyUrl: "https://jooble.org/api/about",
+    // Not a month or a day: the free plan's 500 searches are for good.
+    quotaPeriod: "in all",
+    attribution: "Jobs by Jooble",
+    attributionLink: null,
+    countries: null,
   },
   ARBEITSAGENTUR: {
     name: "Bundesagentur für Arbeit",

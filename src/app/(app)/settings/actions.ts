@@ -90,17 +90,20 @@ export const saveJobSource = action(
 /** Saves where the JSearch key is from, or the Adzuna app ID, which isn't a secret. */
 export const saveJobSearchDetails = action(jobSearchDetailsSchema, (details) => saveJobSourceDetails(details));
 
+/** Where each keyed job source's key is saved. */
+const JOB_KEY_FIELDS = { JSEARCH: "jsearchKeyEnc", SERPAPI: "serpapiKeyEnc", ADZUNA: "adzunaKeyEnc", JOOBLE: "joobleKeyEnc" } as const;
+
 /** Saves a source's key, encrypted for job sources only, or removes it. The key never comes back to the browser. */
 export const saveJobSourceKey = action(
   z.object({
-    source: z.enum(["JSEARCH", "SERPAPI", "ADZUNA"]),
+    source: z.enum(["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE"]),
     change: z.discriminatedUnion("action", [
       z.object({ action: z.literal("set"), value: z.string().trim().min(1).max(1000) }),
       z.object({ action: z.literal("clear") }),
     ]),
   }),
   async ({ source, change }) => {
-    const field = source === "JSEARCH" ? "jsearchKeyEnc" : source === "SERPAPI" ? "serpapiKeyEnc" : "adzunaKeyEnc";
+    const field = JOB_KEY_FIELDS[source];
     const current = await loadSettings();
     await saveSettings({ [field]: applySecretChange(JOB_SOURCE_KEY, current[field], change) });
     return loadJobSearchView();

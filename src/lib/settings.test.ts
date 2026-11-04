@@ -60,6 +60,7 @@ describe("stored settings", () => {
       jsearchKeyEnc: null,
       jsearchHost: "openwebninja",
       serpapiKeyEnc: null,
+      joobleKeyEnc: null,
       adzunaAppId: null,
       adzunaKeyEnc: null,
       arbeitsagenturAcceptedAt: null,

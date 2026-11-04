@@ -22,6 +22,7 @@ export type JobSearchConfig = {
   jsearch: { key: string | null; host: JSearchHost; keyState: JobKeyState };
   serpapi: { key: string | null; keyState: JobKeyState };
   adzuna: { appId: string; key: string | null; keyState: JobKeyState };
+  jooble: { key: string | null; keyState: JobKeyState };
   /**
    * The Bundesagentur für Arbeit (#223): whether this server offers it, and
    * when its note was accepted. Its searches wait until then.
@@ -29,7 +30,7 @@ export type JobSearchConfig = {
   arbeitsagentur: { offered: boolean; acceptedAt: string | null };
 };
 
-type SavedJobSettings = Pick<SettingsData, "jobSource" | "jsearchKeyEnc" | "jsearchHost" | "serpapiKeyEnc" | "adzunaAppId" | "adzunaKeyEnc" | "arbeitsagenturAcceptedAt">;
+type SavedJobSettings = Pick<SettingsData, "jobSource" | "jsearchKeyEnc" | "jsearchHost" | "serpapiKeyEnc" | "adzunaAppId" | "adzunaKeyEnc" | "joobleKeyEnc" | "arbeitsagenturAcceptedAt">;
 type JobEnv = Pick<
   Env,
   | "DOSSIER_JOBS_SOURCE"
@@ -38,6 +39,7 @@ type JobEnv = Pick<
   | "DOSSIER_SERPAPI_KEY"
   | "DOSSIER_ADZUNA_APP_ID"
   | "DOSSIER_ADZUNA_KEY"
+  | "DOSSIER_JOOBLE_KEY"
   | "DOSSIER_JOBS_ARBEITSAGENTUR"
 >;
 
@@ -45,6 +47,7 @@ const FROM_ENV: Record<NonNullable<Env["DOSSIER_JOBS_SOURCE"]>, JobSource | null
   jsearch: "JSEARCH",
   serpapi: "SERPAPI",
   adzuna: "ADZUNA",
+  jooble: "JOOBLE",
   arbeitsagentur: "ARBEITSAGENTUR",
   off: null,
 };
@@ -80,6 +83,7 @@ export function resolveJobSearchConfig(saved: SavedJobSettings, source: JobEnv, 
       appId: saved.adzunaAppId ?? source.DOSSIER_ADZUNA_APP_ID ?? "",
       ...keyOf(saved.adzunaKeyEnc, source.DOSSIER_ADZUNA_KEY, secret),
     },
+    jooble: keyOf(saved.joobleKeyEnc, source.DOSSIER_JOOBLE_KEY, secret),
     arbeitsagentur: { offered, acceptedAt: saved.arbeitsagenturAcceptedAt },
   };
 }
@@ -106,6 +110,7 @@ export function jobSearchView(config: JobSearchConfig): JobSearchSettingsView {
     jsearch: { host: config.jsearch.host, keyState: config.jsearch.keyState },
     serpapi: { keyState: config.serpapi.keyState },
     adzuna: { appId: config.adzuna.appId, keyState: config.adzuna.keyState },
+    jooble: { keyState: config.jooble.keyState },
     arbeitsagentur: config.arbeitsagentur,
   };
 }
@@ -143,6 +148,11 @@ export function credentialsFor<S extends JobSource>(config: JobSearchConfig, sou
       const { appId, key, keyState } = config.adzuna;
       if (!key || !appId) throw missing(keyState);
       return { appId, key } as SourceCredentials[S];
+    }
+    case "JOOBLE": {
+      const { key, keyState } = config.jooble;
+      if (!key) throw missing(keyState);
+      return { key } as SourceCredentials[S];
     }
     case "ARBEITSAGENTUR": {
       if (!config.arbeitsagentur.offered) throw jobSearchError("off", source);

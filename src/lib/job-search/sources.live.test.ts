@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { adzuna } from "./adzuna";
 import { arbeitsagentur } from "./arbeitsagentur";
+import { jooble } from "./jooble";
 import { EMPTY_QUERY } from "./search";
 import { serpapi } from "./serpapi";
 
@@ -12,6 +13,8 @@ import { serpapi } from "./serpapi";
 //   JOBS_LIVE=arbeitsagentur docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
 //   JOBS_LIVE=adzuna ADZUNA_TEST_APP_ID=… ADZUNA_TEST_KEY=… docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
 //   JOBS_LIVE=serpapi SERPAPI_TEST_KEY=… docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
+//   JOBS_LIVE=jooble JOOBLE_TEST_KEY=… docker/bin/yarn vitest run src/lib/job-search/sources.live.test.ts
+// Jooble's free plan is 500 searches in all, and a key is for one country (Germany's, for this query): the test spends two.
 
 const live = new Set((process.env.JOBS_LIVE ?? "").split(",").map((name) => name.trim()));
 const adzunaKey = { appId: process.env.ADZUNA_TEST_APP_ID ?? "", key: process.env.ADZUNA_TEST_KEY ?? "" };
@@ -34,6 +37,17 @@ describe.runIf(live.has("adzuna") && adzunaKey.appId && adzunaKey.key)("Adzuna (
     expect(page.postings.length).toBeGreaterThan(0);
     expect(page.postings.every((posting) => posting.title && !posting.complete)).toBe(true);
     expect((await adzuna.search({ ...query, keywords: "software developer" }, adzunaKey, page.next)).postings.length).toBeGreaterThan(0);
+  });
+});
+
+describe.runIf(live.has("jooble"))("Jooble (live)", { timeout: 30_000 }, () => {
+  it("finds postings near a place, with a snippet of each, and a second page", async () => {
+    const credentials = { key: process.env.JOOBLE_TEST_KEY ?? "" };
+    const page = await jooble.search(query, credentials, null);
+    expect(page.postings.length).toBeGreaterThan(0);
+    expect(page.postings.every((posting) => posting.title && !posting.complete)).toBe(true);
+    expect(page.next).toMatch(/^page:2:\d+$/);
+    expect((await jooble.search(query, credentials, page.next)).postings.length).toBeGreaterThan(0);
   });
 });
 

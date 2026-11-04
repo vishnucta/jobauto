@@ -115,6 +115,42 @@ export const adzunaPage = {
   ],
 };
 
+/** Jooble's answer to a search: a snippet with the board's markup, and a last-changed time with seven fractional digits and no zone (names made up). */
+export const joobleResponse = {
+  totalCount: 45,
+  jobs: [
+    {
+      title: "Senior <b>Financial Analyst</b> (m/w/d)",
+      location: "Hamburg",
+      snippet: "Ledgerly is hiring a <b>Financial Analyst</b> for regulatory reporting&nbsp;... EMIR and MiFIR",
+      salary: "65.000 - 80.000 EUR",
+      source: "stepstone.de",
+      type: "Vollzeit",
+      link: "https://jooble.org/jdp/2564425438897072736",
+      company: "Ledgerly GmbH",
+      updated: "2026-11-02T09:15:00.1230000",
+      // As JSON.parse leaves a 19-digit id: rounded. The link has it exactly.
+      id: JSON.parse("2564425438897072736") as number,
+    },
+    {
+      title: "Meldewesen Spezialist",
+      location: "Frankfurt am Main",
+      snippet: null,
+      salary: "",
+      source: "jooble",
+      type: "",
+      link: "javascript:alert(1)",
+      company: null,
+      updated: "not a date",
+      id: "88",
+    },
+    // The same posting twice: kept once.
+    { title: "Duplicate", link: "https://jooble.org/jdp/2564425438897072736", id: JSON.parse("2564425438897072736") as number },
+    // Without an id: skipped.
+    { title: "No id" },
+  ],
+};
+
 /** The Arbeitsagentur's v6 search, as it answered on 3 October 2026 (company and address made up). */
 export const arbeitsagenturPage = {
   ergebnisliste: [

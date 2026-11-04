@@ -20,6 +20,7 @@ const off: JobSearchSettingsView = {
   jsearch: { host: "openwebninja", keyState: "none" },
   serpapi: { keyState: "none" },
   adzuna: { appId: "", keyState: "none" },
+  jooble: { keyState: "none" },
   arbeitsagentur: { offered: true, acceptedAt: null },
 };
 const ACCEPTED = "2026-10-23T09:00:00.000Z";
@@ -36,13 +37,14 @@ beforeEach(() => {
 });
 
 describe("JobSearchSection", () => {
-  it("offers the four sources and Off, as a radio group, Off by default", () => {
+  it("offers the five sources and Off, as a radio group, Off by default", () => {
     render(<JobSearchSection initial={off} />);
     expect(screen.getByRole("heading", { name: "Job search" })).toBeInTheDocument();
     expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual([
       "JSearch",
       "SerpApi",
       "Adzuna",
+      "Jooble",
       "Bundesagentur für Arbeit",
       "Off",
     ]);
@@ -92,6 +94,17 @@ describe("JobSearchSection", () => {
     expect(saveJobSourceKey).toHaveBeenCalledWith({ source: "SERPAPI", change: { action: "set", value: "serp_secret" } });
   });
 
+  it("asks Jooble for its key, says a key is for one country and a test spends a search", async () => {
+    render(<JobSearchSection initial={withSource({ source: "JOOBLE" })} />);
+    expect(screen.getByRole("note")).toHaveTextContent("Your searches (keywords, place and filters) go to Jooble.");
+    expect(screen.getByRole("link", { name: "Jooble" })).toHaveAttribute("href", "https://jooble.org/api/about");
+    expect(screen.getByText(/A Jooble key is for one country/)).toHaveTextContent("de.jooble.org for Germany");
+    expect(screen.getByText(/The free plan has 500 searches in all/)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("a test uses one search from your plan");
+    await userEvent.type(screen.getByLabelText("API key"), "jooble_secret{Enter}");
+    expect(saveJobSourceKey).toHaveBeenCalledWith({ source: "JOOBLE", change: { action: "set", value: "jooble_secret" } });
+  });
+
   it("asks Adzuna for an app ID and key, saving the ID when you leave it", async () => {
     vi.mocked(saveJobSearchDetails).mockResolvedValue({ ok: true, data: withSource({ source: "ADZUNA", adzuna: { appId: "app-1", keyState: "none" } }) });
     render(<JobSearchSection initial={withSource({ source: "ADZUNA" })} />);
@@ -137,7 +150,7 @@ describe("JobSearchSection", () => {
 
   it("leaves the Arbeitsagentur out when the server doesn't offer it", () => {
     render(<JobSearchSection initial={withSource({ arbeitsagentur: { offered: false, acceptedAt: null } })} />);
-    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "SerpApi", "Adzuna", "Off"]);
+    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "SerpApi", "Adzuna", "Jooble", "Off"]);
   });
 
   it("shows keys from the environment and keys that can't be read", () => {
@@ -173,6 +186,7 @@ describe("each tile says when its key is kept", () => {
           jsearch: { host: "openwebninja", keyState: "set" },
           serpapi: { keyState: "env" },
           adzuna: { appId: "app-1", keyState: "none" },
+          jooble: { keyState: "set" },
           arbeitsagentur: { offered: true, acceptedAt: ACCEPTED },
         })}
       />,
@@ -180,6 +194,7 @@ describe("each tile says when its key is kept", () => {
     expect(screen.getByRole("radio", { name: "JSearch" })).toHaveAccessibleDescription(/Key saved/);
     expect(screen.getByRole("radio", { name: "SerpApi" })).toHaveAccessibleDescription(/Key from the server/);
     expect(screen.getByRole("radio", { name: "Adzuna" })).not.toHaveAccessibleDescription(/Key saved|Key from the server/);
+    expect(screen.getByRole("radio", { name: "Jooble" })).toHaveAccessibleDescription(/Key saved/);
     expect(screen.getByRole("radio", { name: "Bundesagentur für Arbeit" })).toHaveAccessibleDescription(/Note accepted/);
   });
 });

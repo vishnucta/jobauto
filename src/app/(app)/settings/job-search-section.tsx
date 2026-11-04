@@ -34,6 +34,8 @@ function keptLabel(source: JobSource, view: JobSearchSettingsView): string | nul
       return key(view.serpapi.keyState);
     case "ADZUNA":
       return view.adzuna.appId ? key(view.adzuna.keyState) : null;
+    case "JOOBLE":
+      return key(view.jooble.keyState);
     case "ARBEITSAGENTUR":
       return view.arbeitsagentur.acceptedAt ? "Note accepted" : null;
   }
@@ -90,7 +92,7 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
     apply(toastResult(await track(saveJobSearchDetails({ adzunaAppId: appId }))));
   };
 
-  const saveKey = async (keySource: "JSEARCH" | "SERPAPI" | "ADZUNA", change: { action: "set"; value: string } | { action: "clear" }) => {
+  const saveKey = async (keySource: "JSEARCH" | "SERPAPI" | "ADZUNA" | "JOOBLE", change: { action: "set"; value: string } | { action: "clear" }) => {
     changed();
     return apply(toastResult(await track(saveJobSourceKey({ source: keySource, change }))));
   };
@@ -194,6 +196,21 @@ export function JobSearchSection({ initial }: { initial: JobSearchSettingsView }
                   onSave={(change) => saveKey("ADZUNA", change)}
                 />
               </div>
+            )}
+            {source === "JOOBLE" && (
+              <>
+                <KeyField
+                  label="API key"
+                  keyState={view.jooble.keyState}
+                  envName="DOSSIER_JOOBLE_KEY"
+                  getKey={{ href: SOURCE_INFO.JOOBLE.keyUrl!, text: "Jooble" }}
+                  onSave={(change) => saveKey("JOOBLE", change)}
+                />
+                <p className="text-sm text-muted">
+                  A Jooble key is for one country: ask for yours on that country&apos;s Jooble site (de.jooble.org for Germany). The free plan has 500 searches in
+                  all, and every page of results, every test and every search of the job agent uses one.
+                </p>
+              </>
             )}
             {source === "ARBEITSAGENTUR" && (
               <>
@@ -305,7 +322,7 @@ function ConnectionStatus({ connection, source }: { connection: Connection; sour
         ? ["bg-error", "text-error", connection.message]
         : connection.status === "testing"
           ? ["bg-status-offer", "text-muted", "Sending a small search…"]
-          : ["bg-faint", "text-muted", source === "JSEARCH" || source === "SERPAPI" ? "Not tested since your last change · a test uses one search from your plan" : "Not tested since your last change"];
+          : ["bg-faint", "text-muted", source === "JSEARCH" || source === "SERPAPI" || source === "JOOBLE" ? "Not tested since your last change · a test uses one search from your plan" : "Not tested since your last change"];
   return (
     <p role="status" className={cn("flex items-center gap-2 text-control", text)}>
       <span aria-hidden className={cn("size-2 flex-none rounded-full", dot)} />

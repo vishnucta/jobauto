@@ -15,8 +15,29 @@ describe("requestJson", () => {
   it("returns the parsed answer and asks for JSON", async () => {
     const requests = stubFetch(() => json({ ok: true }));
     expect(await requestJson("JSEARCH", url, { headers: { "x-api-key": "k" } })).toEqual({ ok: true });
+    expect(requests[0].method).toBe("GET");
     expect(requests[0].headers.get("accept")).toBe("application/json");
     expect(requests[0].headers.get("x-api-key")).toBe("k");
+  });
+
+  it("posts a JSON body, and logs a label instead of a path that holds a key", async () => {
+    const requests = stubFetch(() => json({}, { status: 500 }));
+    const withKey = new URL("https://jobs.example/api/secret-key");
+    await expect(requestJson("JOOBLE", withKey, { body: { page: "1" }, label: "/api/{key}" })).rejects.toMatchObject({ detail: "JOOBLE: /api/{key}: HTTP 500" });
+    expect(requests[0]).toMatchObject({ method: "POST", body: { page: "1" } });
+    expect(requests[0].headers.get("content-type")).toBe("application/json");
+  });
+
+  it("says a bot check turned the request away, not that the key is wrong", async () => {
+    stubFetch(() => new Response("<title>Just a moment...</title>", { status: 403, headers: { "cf-mitigated": "challenge", "content-type": "text/html" } }));
+    await expect(requestJson("JOOBLE", new URL("https://jobs.example/api/secret-key"), { body: {}, label: "/api/{key}" })).rejects.toMatchObject({
+      problem: "unavailable",
+      message: "Jooble's site turned this request away with a bot check, so it can't be searched from this server for now. Choose another source in Settings → Job search.",
+      detail: "JOOBLE: /api/{key}: HTTP 403, turned away by a bot check",
+    });
+    // Without the check, a 403 is still the key.
+    stubFetch(() => json({}, { status: 403 }));
+    await expect(requestJson("JOOBLE", url)).rejects.toMatchObject({ problem: "key" });
   });
 
   it("names the path and status for the log, never the search", async () => {

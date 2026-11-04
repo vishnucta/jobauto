@@ -11,6 +11,7 @@ const nothingSaved = {
   jsearchKeyEnc: null,
   jsearchHost: "openwebninja" as const,
   serpapiKeyEnc: null,
+  joobleKeyEnc: null,
   adzunaAppId: null,
   adzunaKeyEnc: null,
   arbeitsagenturAcceptedAt: null,
@@ -27,6 +28,7 @@ describe("resolveJobSearchConfig", () => {
       jsearch: { host: "openwebninja", keyState: "none" },
       serpapi: { keyState: "none" },
       adzuna: { appId: "", keyState: "none" },
+      jooble: { keyState: "none" },
       arbeitsagentur: { offered: true, acceptedAt: null },
     });
   });
@@ -39,6 +41,7 @@ describe("resolveJobSearchConfig", () => {
       DOSSIER_SERPAPI_KEY: "serp-env",
       DOSSIER_ADZUNA_APP_ID: "app-env",
       DOSSIER_ADZUNA_KEY: "adz-env",
+      DOSSIER_JOOBLE_KEY: "jooble-env",
     });
     expect(config).toMatchObject({
       source: "JSEARCH",
@@ -46,6 +49,7 @@ describe("resolveJobSearchConfig", () => {
       jsearch: { key: "ak_env", host: "rapidapi", keyState: "env" },
       serpapi: { key: "serp-env", keyState: "env" },
       adzuna: { appId: "app-env", key: "adz-env", keyState: "env" },
+      jooble: { key: "jooble-env", keyState: "env" },
     });
     expect(resolveJobSearchConfig(nothingSaved, { DOSSIER_JOBS_SOURCE: "off" }).source).toBeNull();
   });
@@ -56,6 +60,7 @@ describe("resolveJobSearchConfig", () => {
       jsearchKeyEnc: encryptSecret(JOB_SOURCE_KEY, "ak_saved"),
       jsearchHost: "openwebninja" as const,
       serpapiKeyEnc: null,
+      joobleKeyEnc: null,
       adzunaAppId: "app-saved",
       adzunaKeyEnc: encryptSecret(JOB_SOURCE_KEY, "adz-saved"),
       arbeitsagenturAcceptedAt: null,
@@ -89,12 +94,14 @@ describe("credentialsFor", () => {
   it("gives each source its own key", () => {
     expect(credentialsFor(config, "JSEARCH")).toEqual({ key: "ak_saved", host: "rapidapi" });
     expect(credentialsFor({ ...config, serpapi: { key: "serp-saved", keyState: "set" } }, "SERPAPI")).toEqual({ key: "serp-saved" });
+    expect(credentialsFor({ ...config, jooble: { key: "jooble-saved", keyState: "set" } }, "JOOBLE")).toEqual({ key: "jooble-saved" });
     expect(credentialsFor({ ...config, arbeitsagentur: { offered: true, acceptedAt: ACCEPTED } }, "ARBEITSAGENTUR")).toEqual({});
   });
 
   it("says what's missing", () => {
     expect(() => credentialsFor(config, "ADZUNA")).toThrow("Add your Adzuna app ID and key in Settings → Job search first.");
     expect(() => credentialsFor(config, "SERPAPI")).toThrow("Add your SerpApi key in Settings → Job search first.");
+    expect(() => credentialsFor(config, "JOOBLE")).toThrow("Add your Jooble key in Settings → Job search first.");
     expect(() => credentialsFor(resolveJobSearchConfig(nothingSaved, noEnv), "JSEARCH")).toThrow("Add your JSearch key in Settings → Job search first.");
     const keyOnly = resolveJobSearchConfig({ ...nothingSaved, adzunaKeyEnc: encryptSecret(JOB_SOURCE_KEY, "adz") }, noEnv);
     expect(() => credentialsFor(keyOnly, "ADZUNA")).toThrow(/app ID and key/);

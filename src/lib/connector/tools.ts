@@ -82,7 +82,7 @@ function guardTools(server: McpServer): McpServer {
  * answers point to, `clientName` the name the client signed in with.
  */
 /** The sources search_jobs can be asked for, as the From filter names them. */
-const SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "arbeitsagentur"] as const satisfies readonly Lowercase<JobSource>[];
+const SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "jooble", "arbeitsagentur"] as const satisfies readonly Lowercase<JobSource>[];
 
 export function createDossierServer(origin: string, clientName = ""): McpServer {
   const linkTo = (path: string) => `${origin}${path}`;
@@ -131,7 +131,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           .array(z.enum(SOURCE_NAMES))
           .min(1)
           .optional()
-          .describe("Which sources to search, together, with the same job listed once: jsearch, serpapi, adzuna, arbeitsagentur. Defaults to the one chosen in Settings. A source that can't answer is reported, and a ready one stands in for it."),
+          .describe("Which sources to search, together, with the same job listed once: jsearch, serpapi, adzuna, jooble, arbeitsagentur. Defaults to the one chosen in Settings. A source that can't answer is reported, and a ready one stands in for it."),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },

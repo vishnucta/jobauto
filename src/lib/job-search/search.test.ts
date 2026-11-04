@@ -47,6 +47,7 @@ describe("search in the URL", () => {
     expect(sourceFilterFromParams({ from: "client" })).toBe("CLIENT");
     expect(sourceFilterFromParams({ from: "JSearch" })).toBe("JSEARCH");
     expect(sourceFilterFromParams({ from: "serpapi" })).toBe("SERPAPI");
+    expect(sourceFilterFromParams({ from: "jooble" })).toBe("JOOBLE");
     expect(sourceFilterFromParams({ from: "other" })).toBeNull();
     expect(sourceFilterFromParams({})).toBeNull();
   });

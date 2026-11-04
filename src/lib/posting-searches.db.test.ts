@@ -8,7 +8,7 @@ import { savePosting } from "@/lib/postings";
 import { encryptSecret, JOB_SOURCE_KEY } from "@/lib/secrets";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
-import { jsearchV2LastPage, jsearchV2Page, serpapiLastPage, serpapiPage } from "@/test/job-search-fixtures";
+import { joobleResponse, jsearchV2LastPage, jsearchV2Page, serpapiLastPage, serpapiPage } from "@/test/job-search-fixtures";
 
 import { removeRecruiter } from "@/lib/recruiters/store";
 
@@ -248,6 +248,26 @@ describe("searches on several sources", () => {
     const more = bySource({ jsearch: () => json(jsearchV2LastPage), serpapi: () => json(serpapiLastPage) });
     expect(await showMoreFor(kept!.id)).toEqual({ ok: true, postings: [], more: false, problems: [] });
     expect(more.map((request) => request.url.searchParams.get("cursor") ?? request.url.searchParams.get("next_page_token")).sort()).toEqual(["CURSOR-PAGE-2", "TOKEN-PAGE-2"]);
+  });
+
+  it("searches Jooble beside another source, keeping its page position for Show more", async () => {
+    await useJSearch();
+    await saveSettings({ joobleKeyEnc: encryptSecret(JOB_SOURCE_KEY, "jooble_test") });
+    const requests = stubFetch(({ url }) => (url.hostname === "jooble.org" ? json(joobleResponse) : json(jsearchV2Page)));
+    const run = await runSearch(query, ["JSEARCH", "JOOBLE"]);
+    expect(run).toEqual({ ok: true, id: expect.any(String), problems: [] });
+    const jooble = requests.find((request) => request.url.hostname === "jooble.org");
+    expect(jooble).toMatchObject({ method: "POST" });
+    expect(jooble!.url.pathname).toBe("/api/jooble_test");
+    const kept = await loadSearch(run.ok ? run.id : "");
+    expect(kept).toMatchObject({ sources: ["JSEARCH", "JOOBLE"], more: true });
+    expect(kept!.postings.some((posting) => posting.source === "JOOBLE" && posting.title === "Meldewesen Spezialist")).toBe(true);
+    expect(await prisma().postingSearch.findUniqueOrThrow({ where: { id: kept!.id } })).toMatchObject({ cursors: { JOOBLE: "page:2:4" } });
+
+    // Show more asks Jooble for the page after, by number.
+    const more = stubFetch(({ url }) => (url.hostname === "jooble.org" ? json({ totalCount: 45, jobs: [] }) : json(jsearchV2LastPage)));
+    await showMoreFor(kept!.id);
+    expect(more.find((request) => request.url.hostname === "jooble.org")!.body).toMatchObject({ page: "2" });
   });
 
   it("goes on without a source that can't answer, with a ready one standing in, and says so", async () => {

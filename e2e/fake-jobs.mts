@@ -10,6 +10,8 @@ const port = Number(process.env.FAKE_JOBS_PORT ?? 3998);
 const JSEARCH_KEY = "e2e-jsearch-key";
 /** The SerpApi key, for runs that choose it by hand (DOSSIER_SERPAPI_KEY). */
 const SERPAPI_KEY = "e2e-serpapi-key";
+/** The Jooble key, for runs that choose it by hand (DOSSIER_JOOBLE_KEY): it's in the path of Jooble's POST. */
+const JOOBLE_KEY = "e2e-jooble-key";
 
 const job = (id: string, title: string, company: string, extra: Record<string, unknown> = {}) => ({
   job_id: id,
@@ -141,6 +143,33 @@ createServer((request, response) => {
       jobs_results: (second ? secondPage : firstPage).map(googleJob),
       ...(second ? {} : { serpapi_pagination: { next_page_token: "PAGE-2" } }),
     });
+  }
+
+  if (url.pathname.startsWith("/jooble/")) {
+    if (request.method !== "POST") return send(response, 404, { error: "not found" });
+    if (url.pathname !== `/jooble/${JOOBLE_KEY}`) return send(response, 403, { error: "Access denied" });
+    searches += 1;
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      const { keywords = "", page = "1" } = JSON.parse(body || "{}") as { keywords?: string; page?: string };
+      // "nothing" finds nothing; otherwise two pages.
+      if (/nothing/i.test(keywords)) return send(response, 200, { totalCount: 0, jobs: [] });
+      const jobs = (page === "2" ? secondPage : firstPage).map((item, index) => ({
+        id: 9_000_000 + (page === "2" ? 100 : 0) + index,
+        title: item.job_title,
+        location: String(item.job_location).split("•")[0].trim(),
+        snippet: `${item.employer_name} is hiring a ${item.job_title}...`,
+        salary: "",
+        source: "jooble",
+        type: "Full-time",
+        link: item.job_apply_link,
+        company: item.employer_name,
+        updated: new Date(Date.now() - 2 * 86_400_000).toISOString().replace("Z", "0000"),
+      }));
+      send(response, 200, { totalCount: firstPage.length + secondPage.length, jobs });
+    });
+    return;
   }
 
   if (url.pathname.startsWith("/adzuna/")) {

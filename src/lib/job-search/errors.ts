@@ -37,16 +37,26 @@ export class JobSearchError extends Error {
 }
 
 /** The error for `problem` with `source`, worded for the screen. */
-export function jobSearchError(problem: JobSearchProblem, source: JobSource, { country = "", detail }: { country?: string; detail?: string } = {}) {
+export function jobSearchError(
+  problem: JobSearchProblem,
+  source: JobSource,
+  { country = "", detail, text }: { country?: string; detail?: string; /** Worded for this case, instead of the problem's usual words. */ text?: string } = {},
+) {
   const { name, quotaPeriod } = SOURCE_INFO[source];
   const message = {
     off: `${name} isn't offered on this server. Choose another source in Settings → Job search.`,
     "not-accepted": `Read the note about ${name} and tick “I understand” before Dossier searches it.`,
     "no-key": `Add your ${name} ${source === "ADZUNA" ? "app ID and key" : "key"} in Settings → Job search first.`,
-    key: `${name} didn't accept your key. Check it in Settings → Job search.`,
-    quota: quotaPeriod
-      ? `You've used up your ${name} searches for ${quotaPeriod}. Try again then, or move to a bigger plan.`
-      : `${name} is limiting searches right now. Wait a minute and try again.`,
+    key:
+      source === "JOOBLE"
+        ? "Jooble didn't accept your key. Check it in Settings → Job search: it must be the key for your country, and its 500 free searches may be used up."
+        : `${name} didn't accept your key. Check it in Settings → Job search.`,
+    quota:
+      source === "JOOBLE"
+        ? "Your Jooble key has no searches left. Ask Jooble for more at jooble.org/api/about, or choose another source in Settings → Job search."
+        : quotaPeriod
+          ? `You've used up your ${name} searches for ${quotaPeriod}. Try again then, or move to a bigger plan.`
+          : `${name} is limiting searches right now. Wait a minute and try again.`,
     country: `${name} doesn't list jobs in ${countryName(country)}. Choose another country, or another source in Settings → Job search.`,
     unavailable: `${name} isn't answering right now. Try again in a minute.`,
     changed:
@@ -54,5 +64,5 @@ export function jobSearchError(problem: JobSearchProblem, source: JobSource, { c
         ? "The Arbeitsagentur's job search has changed or isn't answering. Try another source in Settings → Job search."
         : `${name} answered in a way Dossier doesn't understand; its service may have changed. Try again later.`,
   }[problem];
-  return new JobSearchError(problem, message, detail ? `${source}: ${detail}` : undefined);
+  return new JobSearchError(problem, text ?? message, detail ? `${source}: ${detail}` : undefined);
 }
