@@ -174,6 +174,9 @@ export function describeSearch(query: SearchQuery, countryName: string): string 
 /** Identifies a posting across searches. */
 export const postingKey = (posting: { source: PostingOrigin; externalId: string }) => `${posting.source}:${posting.externalId}`;
 
+/** Highest score first; unscored postings after the scored ones, in the order they came. */
+export const byScore = (postings: readonly ShownPosting[]) => postings.toSorted((a, b) => (b.state.score?.score ?? -1) - (a.state.score?.score ?? -1));
+
 /** A link from a source, kept only when it's a web address, so it can't run script as an href. */
 export function safeLink(value: string | null | undefined): string {
   if (!value) return "";
@@ -303,8 +306,14 @@ export function sourceFilterFromParams(params: Record<string, string | string[] 
   return FROM_VALUES.get(one(params.from).trim().toLowerCase()) ?? null;
 }
 
-/** A view's URL, narrowed to one source when `from` is given: /jobs?view=saved&from=client. */
-export const viewHref = (view: "history" | "saved" | "dismissed", from: SourceFilter = null) => `/jobs?view=${view}${from ? `&from=${from.toLowerCase()}` : ""}`;
+/** Past searches as every posting they found, highest score first (?view=history&sort=score), instead of the searches. */
+export function byScoreFromParams(params: Record<string, string | string[] | undefined>): boolean {
+  return one(params.sort) === "score";
+}
+
+/** A view's URL, narrowed to one source when `from` is given: /jobs?view=saved&from=client; Past searches' postings by score with `byScore`. */
+export const viewHref = (view: "history" | "saved" | "dismissed", from: SourceFilter = null, { byScore = false } = {}) =>
+  `/jobs?view=${view}${byScore ? "&sort=score" : ""}${from ? `&from=${from.toLowerCase()}` : ""}`;
 
 /** A kept search on Find jobs (E14-10). */
 export const searchRunHref = (id: string) => `/jobs?search=${encodeURIComponent(id)}`;

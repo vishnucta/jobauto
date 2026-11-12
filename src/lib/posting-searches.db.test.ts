@@ -12,7 +12,7 @@ import { joobleResponse, jsearchV2LastPage, jsearchV2Page, serpapiLastPage, serp
 
 import { removeRecruiter } from "@/lib/recruiters/store";
 
-import { addClientSearch, countSearches, listSearches, loadSearch, removeSearch, runSearch, showMoreFor } from "./posting-searches";
+import { addClientSearch, countSearches, foundPostings, listSearches, loadSearch, removeSearch, runSearch, showMoreFor } from "./posting-searches";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -195,6 +195,21 @@ describe("listSearches and removeSearch", () => {
       ["Mon 28 Sep", [["10:00", "nurse", 3]]],
     ]);
     expect(await countSearches()).toBe(4);
+  });
+
+  it("gives every posting the searches found, each job once, newest search first, with where it stands", async () => {
+    const at = (iso: string, postings: object[]) => prisma().postingSearch.create({ data: { sources: ["JSEARCH"], query, postings, createdAt: new Date(iso) } });
+    const older = { ...EMPTY_POSTING, externalId: "older", title: "Analyst", company: "Kontora", place: "Hamburg" };
+    await at("2026-10-01T10:00:00Z", [older, { ...EMPTY_POSTING, externalId: "same" }]);
+    // The same job from SerpApi, and the same posting again.
+    await at("2026-10-02T10:00:00Z", [{ ...older, source: "SERPAPI", externalId: "newer" }, { ...EMPTY_POSTING, externalId: "same" }]);
+    await savePosting({ ...EMPTY_POSTING, externalId: "same", source: "JSEARCH" });
+
+    const found = await foundPostings();
+    expect(found.map((posting) => [posting.source, posting.externalId, posting.alsoOn ?? [], posting.state.saved])).toEqual([
+      ["SERPAPI", "newer", ["JSEARCH"], false],
+      ["JSEARCH", "same", [], true],
+    ]);
   });
 
   it("removes a search, and leaves saved postings alone", async () => {

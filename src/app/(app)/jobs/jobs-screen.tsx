@@ -8,6 +8,7 @@ import { ArbeitsagenturNote } from "@/components/arbeitsagentur-note";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { Country } from "@/lib/job-search/countries";
@@ -61,6 +62,10 @@ export type JobsScreenProps = {
   kept?: ShownPosting[];
   /** Past searches by day, in that view. */
   history?: PastSearchDay[];
+  /** Past searches shows every posting they found, highest score first, instead of the searches (?sort=score). */
+  byScore?: boolean;
+  /** Every posting past searches found, one per job, while `byScore`. */
+  found?: ShownPosting[];
   /** Saved, Dismissed and Past searches narrowed to one source (?from=client); null shows every source. */
   from?: SourceFilter;
   /** How many searches, saved and dismissed postings there are, for the tabs. */
@@ -85,6 +90,8 @@ export function JobsScreen({
   missingSearch = false,
   kept = [],
   history = [],
+  byScore = false,
+  found = [],
   from = null,
   counts,
   today,
@@ -106,11 +113,30 @@ export function JobsScreen({
   // What AI clients found stays apart from what the job source found: each list can be narrowed to one source.
   const fromSource = (origin: PostingOrigin) => from === null || origin === from;
 
+  if (view === "history" && byScore) {
+    return (
+      <>
+        {header}
+        <PastSearchesBy byScore from={from} />
+        <SourceFilter view={view} from={from} byScore present={found.map((posting) => posting.source)} />
+        <PostingResults
+          key={`found:${from ?? ""}`}
+          mode="found"
+          postings={found.filter((posting) => fromSource(posting.source))}
+          today={today}
+          scoreInClaude={scoreInClaude}
+          empty={from ? `No postings from ${filterName(from)}.` : undefined}
+        />
+      </>
+    );
+  }
+
   if (view === "history") {
     const days = history.map((day) => ({ ...day, searches: day.searches.filter((search) => search.sources.some(fromSource)) })).filter((day) => day.searches.length > 0);
     return (
       <>
         {header}
+        {history.length > 0 && <PastSearchesBy byScore={false} from={from} />}
         <SourceFilter view={view} from={from} present={history.flatMap((day) => day.searches.flatMap((search) => search.sources))} />
         <PastSearches days={days} countries={countries} empty={from ? `No searches from ${filterName(from)}.` : undefined} />
       </>
@@ -294,7 +320,18 @@ const filterName = (source: PostingOrigin) => (source === "CLIENT" ? "AI clients
  * ?from=jsearch…), so what AI clients found can be told from what the job
  * source found. Only shown once the list holds more than one source.
  */
-function SourceFilter({ view, from, present }: { view: "history" | "saved" | "dismissed"; from: SourceFilter; present: readonly PostingOrigin[] }) {
+function SourceFilter({
+  view,
+  from,
+  byScore = false,
+  present,
+}: {
+  view: "history" | "saved" | "dismissed";
+  from: SourceFilter;
+  /** Past searches' postings by score, which the filter keeps. */
+  byScore?: boolean;
+  present: readonly PostingOrigin[];
+}) {
   const router = useRouter();
   const sources = POSTING_SOURCES.filter((source) => present.includes(source) || source === from);
   if (sources.length < 2 && !from) return null;
@@ -303,7 +340,7 @@ function SourceFilter({ view, from, present }: { view: "history" | "saved" | "di
       <Select
         label="From"
         value={from ?? ""}
-        onChange={(event) => router.push(viewHref(view, (event.target.value || null) as SourceFilter), { scroll: false })}
+        onChange={(event) => router.push(viewHref(view, (event.target.value || null) as SourceFilter, { byScore }), { scroll: false })}
         className="w-full max-w-[300px]"
       >
         <option value="">All sources</option>
@@ -313,6 +350,25 @@ function SourceFilter({ view, from, present }: { view: "history" | "saved" | "di
           </option>
         ))}
       </Select>
+    </div>
+  );
+}
+
+/** Past searches as the searches, by day, or as every posting they found, highest score first; the From filter stays. */
+function PastSearchesBy({ byScore, from }: { byScore: boolean; from: SourceFilter }) {
+  const router = useRouter();
+  return (
+    <div className="px-10 pb-5">
+      <SegmentedControl
+        aria-label="Show past searches as"
+        size="sm"
+        value={byScore ? "score" : "searches"}
+        onValueChange={(value) => router.push(viewHref("history", from, { byScore: value === "score" }), { scroll: false })}
+        options={[
+          { value: "searches", label: "Searches" },
+          { value: "score", label: "Postings by score" },
+        ]}
+      />
     </div>
   );
 }

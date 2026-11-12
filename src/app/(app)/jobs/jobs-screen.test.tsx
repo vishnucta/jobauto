@@ -544,6 +544,57 @@ describe("the From filter (E14-7): what AI clients found, apart from the job sou
   });
 });
 
+describe("sorting by score", () => {
+  const scored = (score: number): PostingState => ({ ...state, score: { score, reasons: [], redFlags: [] } });
+  const found = [posting("a"), posting("b", { state: scored(60) }), posting("c", { source: "CLIENT", via: "Claude Code", state: scored(80) })];
+  const titles = () => within(screen.getByRole("list", { name: "Postings" })).getAllByRole("button", { name: /^Designer/ }).map((button) => button.textContent!.slice(0, 10));
+
+  it("switches Past searches to every posting they found, keeping the From filter", async () => {
+    const history = [{ day: "Today", searches: [{ id: "s1", sources: ["JSEARCH" as const], addedBy: "", query, found: 3, time: "14:32" }] }];
+    renderScreen({ view: "history", history, from: "JSEARCH" });
+    await userEvent.click(screen.getByRole("radio", { name: "Postings by score" }));
+    expect(router.push).toHaveBeenCalledWith("/jobs?view=history&sort=score&from=jsearch", { scroll: false });
+  });
+
+  it("lists them highest score first, unscored after, and can go back to the order they were found in", async () => {
+    renderScreen({ view: "history", byScore: true, found });
+    expect(screen.getByRole("radio", { name: "Postings by score" })).toBeChecked();
+    expect(screen.getByText("3 postings from your past searches, each job once · 2 scored")).toBeInTheDocument();
+    expect(titles()).toEqual(["Designer c", "Designer b", "Designer a"]);
+    expect(screen.getByRole("heading", { level: 2, name: "Designer c" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Sort by score", pressed: true }));
+    expect(titles()).toEqual(["Designer a", "Designer b", "Designer c"]);
+
+    await userEvent.click(screen.getByRole("radio", { name: "Searches" }));
+    expect(router.push).toHaveBeenCalledWith("/jobs?view=history", { scroll: false });
+  });
+
+  it("narrows them to one source, and keeps the sort", async () => {
+    const { unmount } = renderScreen({ view: "history", byScore: true, found, from: "CLIENT" });
+    expect(titles()).toEqual(["Designer c"]);
+    unmount();
+    renderScreen({ view: "history", byScore: true, found });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "From" }), "CLIENT");
+    expect(router.push).toHaveBeenCalledWith("/jobs?view=history&sort=score&from=client", { scroll: false });
+  });
+
+  it("says when past searches found nothing", () => {
+    renderScreen({ view: "history", byScore: true, found: [] });
+    expect(screen.getByText("Your past searches found no postings yet.")).toBeInTheDocument();
+  });
+
+  it("sorts a search's results, once one of them is scored", async () => {
+    const { unmount } = renderScreen({ search: stored([posting("a"), posting("b")]) });
+    expect(screen.queryByRole("button", { name: "Sort by score" })).not.toBeInTheDocument();
+    unmount();
+    renderScreen({ search: stored(found) });
+    expect(titles()).toEqual(["Designer a", "Designer b", "Designer c"]);
+    await userEvent.click(screen.getByRole("button", { name: "Sort by score", pressed: false }));
+    expect(titles()).toEqual(["Designer c", "Designer b", "Designer a"]);
+  });
+});
+
 describe("the Source list: one or several sources for a search", () => {
   it("starts from the Settings source, ticks more in a menu that stays open, and searches them together", async () => {
     renderScreen();

@@ -12,7 +12,7 @@ import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import { fitBand, type PostingFit } from "@/lib/fit";
 import type { JobView } from "@/lib/jobs/runner";
-import { postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
+import { byScore, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 import { arbeitsagenturPage, describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 
 import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
@@ -35,7 +35,8 @@ export type PostingResultsProps = {
       searching: boolean;
     }
   | {
-      mode: "saved" | "dismissed";
+      /** Saved or Dismissed postings (E14-7), or every posting past searches found, sorted by score to start with. */
+      mode: "saved" | "dismissed" | "found";
       postings: ShownPosting[];
       /** Replaces the message shown when there are none, e.g. when the list is narrowed to one source. */
       empty?: string;
@@ -54,7 +55,9 @@ const alsoOn = (posting: FoundPosting) => (posting.alsoOn?.length ? `Also on ${p
  * Postings in a list, and the selected one's whole text beside it, or above
  * it on narrow windows: what a kept search found (E14-6, E14-10), with
  * dismissed ones left out unless shown, or the Saved or Dismissed postings
- * (E14-7), which leave the list when they're no longer saved or dismissed.
+ * (E14-7), which leave the list when they're no longer saved or dismissed,
+ * or every posting past searches found. Sort by score puts the best fits
+ * first, unscored ones after.
  */
 export function PostingResults(props: PostingResultsProps) {
   const { mode } = props;
@@ -62,9 +65,10 @@ export function PostingResults(props: PostingResultsProps) {
   const [more, setMore] = useState(mode === "search" ? props.search.more : false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
+  const [sorted, setSorted] = useState(mode === "found");
   const inView = ({ state }: ShownPosting) => (mode === "saved" ? state.saved : mode === "dismissed" ? state.dismissed : showDismissed || !state.dismissed);
-  const visible = postings.filter(inView);
-  const hidden = mode === "search" ? postings.filter((posting) => posting.state.dismissed).length : 0;
+  const visible = (sorted ? byScore(postings) : postings).filter(inView);
+  const hidden = mode === "search" || mode === "found" ? postings.filter((posting) => posting.state.dismissed).length : 0;
   const [selectedKey, setSelectedKey] = useState(visible[0] ? postingKey(visible[0]) : null);
   const selected = visible.find((posting) => postingKey(posting) === selectedKey) ?? visible[0] ?? null;
   const detail = useRef<HTMLElement>(null);
@@ -176,9 +180,11 @@ export function PostingResults(props: PostingResultsProps) {
         ? "Nothing saved yet. Save a posting from your search results to keep it here."
         : mode === "dismissed"
           ? "Nothing dismissed. Postings you dismiss stay out of your searches and wait here."
-          : postings.length > 0 || !searched
+          : postings.length > 0
             ? "You've dismissed every posting here."
-            : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
+            : !searched
+              ? "Your past searches found no postings yet."
+              : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
 
   return (
     <div className="flex flex-wrap items-start gap-6 px-10 pb-16">
@@ -198,14 +204,26 @@ export function PostingResults(props: PostingResultsProps) {
             )}
           </div>
         )}
-        <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 text-meta text-muted", mode !== "search" && visible.length === 0 && "hidden")}>
+        <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 text-meta text-muted", (mode === "saved" || mode === "dismissed") && visible.length === 0 && "hidden")}>
           <span>
             {props.mode === "search"
               ? `${plural(postings.length, "posting", "postings")} from ${searchSourcesName(props.search.sources, props.search.addedBy)}${more ? ", more to come" : ""} · ${props.search.sources.includes("CLIENT") ? "added" : "searched"} ${props.search.ranAt}`
-              : mode === "saved"
-                ? plural(visible.length, "saved posting", "saved postings")
-                : `${plural(visible.length, "dismissed posting", "dismissed postings")}, kept out of your searches`}
+              : mode === "found"
+                ? `${plural(postings.length, "posting", "postings")} from your past searches, each job once · ${plural(postings.filter((posting) => posting.state.score).length, "scored", "scored")}`
+                : mode === "saved"
+                  ? plural(visible.length, "saved posting", "saved postings")
+                  : `${plural(visible.length, "dismissed posting", "dismissed postings")}, kept out of your searches`}
           </span>
+          {postings.some((posting) => posting.state.score) && (
+            <button
+              type="button"
+              aria-pressed={sorted}
+              onClick={() => setSorted(!sorted)}
+              className="underline-offset-3 hover:text-ink aria-pressed:text-ink aria-pressed:underline"
+            >
+              Sort by score
+            </button>
+          )}
           {props.mode === "search" && (
             <button
               type="button"

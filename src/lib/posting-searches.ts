@@ -15,6 +15,7 @@ import {
   postingKey,
   searchQuerySchema,
   sourceProblemSchema,
+  uniquePostings,
   type FoundPosting,
   type JobSource,
   type PastSearchDay,
@@ -212,6 +213,16 @@ export async function listSearches({ timeZone, now = new Date() }: { timeZone?: 
     days.at(-1)!.searches.push({ id: search.id, sources: search.sources, addedBy: search.addedBy, query: queryOf(search.query), found: search.found, time: formatTime(search.createdAt, timeZone) });
   }
   return days;
+}
+
+/**
+ * Every posting the kept searches found, one per job across them
+ * (uniquePostings), newest search first, with where each stands now: for
+ * Past searches by score.
+ */
+export async function foundPostings(): Promise<ShownPosting[]> {
+  const searches = await prisma.postingSearch.findMany({ select: { postings: true }, orderBy: { createdAt: "desc" } });
+  return withStates(uniquePostings(searches.flatMap((search) => postingsOf(search.postings))));
 }
 
 export const countSearches = () => prisma.postingSearch.count();

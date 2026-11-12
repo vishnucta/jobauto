@@ -7,8 +7,8 @@ import { COUNTRIES } from "@/lib/job-search/countries";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { loadProfile } from "@/lib/profile-data";
 import { sourceStates } from "@/lib/job-search/find";
-import { defaultSearch, latestRole, queryFromParams, sourceFilterFromParams, viewFromParams } from "@/lib/job-search/search";
-import { countSearches, listSearches, loadSearch } from "@/lib/posting-searches";
+import { byScoreFromParams, defaultSearch, latestRole, queryFromParams, sourceFilterFromParams, viewFromParams } from "@/lib/job-search/search";
+import { countSearches, foundPostings, listSearches, loadSearch } from "@/lib/posting-searches";
 import { countPostings, listPostings } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { userTimeZone } from "@/lib/time-zone";
@@ -21,7 +21,8 @@ export const metadata: Metadata = { title: "Find jobs" };
  * Find jobs (E14-6). Every search is kept with what it found (E14-10):
  * ?search=<id> opens one, and without it the latest one shows, so going back
  * costs no searches. ?view=history lists past searches; ?view=saved and
- * ?view=dismissed the postings kept from them (E14-7); ?from=client narrows
+ * ?view=dismissed the postings kept from them (E14-7); ?view=history&sort=score
+ * every posting past searches found, highest score first; ?from=client narrows
  * those views to one source, keeping what AI clients found apart. A search
  * written in the URL (?q=…) only fills in the form.
  */
@@ -43,9 +44,11 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const now = new Date();
 
   const search = view === "search" && !typed ? await loadSearch(searchId, { timeZone, now }) : null;
-  const [kept, history] = await Promise.all([
+  const byScore = view === "history" && byScoreFromParams(params);
+  const [kept, history, found] = await Promise.all([
     view === "saved" || view === "dismissed" ? listPostings(view) : undefined,
-    view === "history" ? listSearches({ timeZone, now }) : undefined,
+    view === "history" && !byScore ? listSearches({ timeZone, now }) : undefined,
+    byScore ? foundPostings() : undefined,
   ]);
 
   return (
@@ -65,6 +68,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       missingSearch={Boolean(searchId) && !search}
       kept={kept}
       history={history}
+      byScore={byScore}
+      found={found}
       counts={{ ...postingCounts, searches, recruiters }}
       today={now.toISOString()}
     />
