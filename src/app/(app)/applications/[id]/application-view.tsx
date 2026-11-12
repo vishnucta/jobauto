@@ -301,7 +301,8 @@ export function ApplicationView({
       toastResult(await setShowPhoto({ id: application.id, show }));
     });
 
-  const save = (kind: DocumentKind, unit: Unit, text: string) => {
+  /** Saves a unit's new text; `saved` is said once it's in, for a change made from elsewhere than the unit's own editor. */
+  const save = (kind: DocumentKind, unit: Unit, text: string, saved?: string) => {
     const key = keyOf(kind, unit.id);
     startTransition(async () => {
       showSaving({ key, text: cleanUnitText(unit.id, text) });
@@ -313,6 +314,7 @@ export function ApplicationView({
       }
       setEditing((current) => (current === key ? null : current));
       flashing.start([key]);
+      if (saved) toast(saved);
     });
   };
 
@@ -610,7 +612,10 @@ export function ApplicationView({
       case "add-skill": {
         const skills = resume?.units.find((unit) => unit.id === "skills");
         if (!skills) return toast("This resume has no Skills section to add it to.");
-        return save(DocumentKind.RESUME, skills, `${skills.text} · ${fix.skill}`);
+        // The report isn't run again, so its button stays: a second press mustn't add the skill twice.
+        const listed = skills.text.split(/[·,\n]/).map((name) => name.trim().toLocaleLowerCase());
+        if (listed.includes(fix.skill.trim().toLocaleLowerCase())) return toast(`“${fix.skill}” is in this resume's Skills already.`);
+        return save(DocumentKind.RESUME, skills, `${skills.text} · ${fix.skill}`, `Added “${fix.skill}” to this resume's Skills.`);
       }
       case "mention": {
         if (!aiReady) {
@@ -624,7 +629,10 @@ export function ApplicationView({
         if (reply) return toast("The chat is still answering. Try again when it's done.");
         askAbout(DocumentKind.RESUME, summary);
         return startFixing(async () => {
-          await send(`Mention ${fix.term} in the summary, from my profile.`, targetOf(DocumentKind.RESUME, summary));
+          // The chat may be out of view, so its "Thinking…" alone can go unseen.
+          if (await send(`Mention ${fix.term} in the summary, from my profile.`, targetOf(DocumentKind.RESUME, summary))) {
+            toast(`Asked the AI to mention “${fix.term}” in the summary. Its answer shows in Refine with AI.`);
+          }
         });
       }
       case "settings":

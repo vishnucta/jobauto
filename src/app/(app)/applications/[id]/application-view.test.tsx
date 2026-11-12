@@ -1178,6 +1178,17 @@ describe("the ATS check on the Resume tab", () => {
     await user.click(within(await rowOf("Experience with Kubernetes")).getByRole("button", { name: "Add to Skills" }));
     const skills = demoResumeUnits().find((unit) => unit.id === "skills")!;
     expect(saveUnit).toHaveBeenCalledWith({ id: "app-1", document: "RESUME", unitId: "skills", text: `${skills.text} · Kubernetes`, expected: skills.text });
+    await waitFor(() => expect(toast).toHaveBeenLastCalledWith("Added “Kubernetes” to this resume's Skills."));
+  });
+
+  it("doesn't add a skill the Skills section already lists", async () => {
+    const user = userEvent.setup();
+    const units = demoResumeUnits().map((unit) => (unit.id === "skills" ? { ...unit, text: `${unit.text} · kubernetes` } : unit));
+    render(<ApplicationView {...props} resume={{ ...props.resume!, units }} />);
+    await user.click(button());
+    await user.click(within(await rowOf("Experience with Kubernetes")).getByRole("button", { name: "Add to Skills" }));
+    expect(saveUnit).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenLastCalledWith("“Kubernetes” is in this resume's Skills already.");
   });
 
   it("asks the chat to mention the job title in the summary, from the profile", async () => {
@@ -1192,6 +1203,9 @@ describe("the ATS check on the Resume tab", () => {
       target: { document: "RESUME", unitId: "summary" },
     });
     expect(within(screen.getByRole("complementary", { name: "Refine with AI" })).getByText("Thinking…")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast).toHaveBeenLastCalledWith("Asked the AI to mention “Senior Product Designer” in the summary. Its answer shows in Refine with AI."),
+    );
   });
 
   it("needs Dossier's own AI for a mention", async () => {
