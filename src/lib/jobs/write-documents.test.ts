@@ -75,7 +75,9 @@ describe("writeDocumentsJob (E7-6)", () => {
       const [resume, letter] = await run({ language: null }, "Dutch");
       expect(resume).toContain("Write everything in English.");
       expect(resume).not.toContain("Dutch");
-      expect(letter).toContain("same language as the job posting");
+      // The letter is told the posting's language outright too, so an English profile doesn't decide it.
+      expect(letter).toContain("Write everything in English.");
+      expect(letter).not.toContain("Dutch");
     });
 
     it("follows Settings for a job from before the language was chosen per application", async () => {

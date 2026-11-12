@@ -83,7 +83,7 @@ export const refineChat: Task<RefineInput, Refinement> = async (provider, input,
   const { request, history, target, viewing, resume, letter, email = [], profile, extracted, tone, facts, posting } = input;
   const looking = viewing ? LOOKING_AT[viewing] : null;
   const answer = await provider.complete({
-    system: system(INSTRUCTIONS, `Current letter tone: ${TONES[tone].label}.`, truthfulness(options.strict), candidateFacts(profile, facts), CREATIVITY[options.creativity], languageRule(options.language), UNTRUSTED_POSTING, NO_EM_DASHES),
+    system: system(INSTRUCTIONS, `Current letter tone: ${TONES[tone].label}.`, truthfulness(options.strict), candidateFacts(profile, facts), CREATIVITY[options.creativity], languageRule(options.language ?? extracted.language), UNTRUSTED_POSTING, NO_EM_DASHES),
     messages: [
       {
         role: "user",
