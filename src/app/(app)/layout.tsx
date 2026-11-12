@@ -9,11 +9,9 @@ import { loadSettings } from "@/lib/settings-data";
 import { COLOR_SCHEME_COOKIE, parseColorScheme, parseSidebarCollapsed, SIDEBAR_COOKIE } from "@/lib/ui-preferences";
 import { rememberBrowserTimeZone, userTimeZone } from "@/lib/time-zone";
 import { checkForUpdatesDaily, updateNotice } from "@/lib/update-check";
-import { askForUsagePing, notePageLoad, USAGE_PING_HOST } from "@/lib/usage-ping";
 import { appVersion } from "@/lib/version";
 
 import { Sidebar } from "./sidebar";
-import { UsagePingDialog } from "./usage-ping-dialog";
 
 /**
  * The signed-in shell: sidebar on the left, the screen on the right. Routes
@@ -23,8 +21,7 @@ import { UsagePingDialog } from "./usage-ping-dialog";
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   // Proxy already redirects signed-out visitors; this is the check next to the data.
   await verifySession();
-  // The day's usage ping and update check, if they haven't run yet: after the page, so they never slow one down.
-  after(notePageLoad);
+  // The day's update check, if it hasn't run yet: after the page, so it never slows one down.
   after(checkForUpdatesDaily);
   // The browser's zone, for the inbox check, which runs without a request.
   const zone = await userTimeZone();
@@ -63,8 +60,6 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           {children}
         </main>
       </div>
-      {/* Asked once, until answered (#172); nothing is sent before a yes. */}
-      {askForUsagePing(settings) && <UsagePingDialog host={USAGE_PING_HOST} />}
     </div>
   );
 }

@@ -220,17 +220,6 @@ export const settingsSchema = z.object({
   /** Interview length and the gap kept around other meetings, in minutes. */
   slotMinutes: z.coerce.number().int().min(15).max(240).catch(45),
   bufferMinutes: z.coerce.number().int().min(0).max(120).catch(15),
-  // The usage ping (usage-ping.ts): this install's random ID, made by its
-  // first ping, and the UTC day of the last one. They belong to the install,
-  // not its data, so exports leave them out (INSTALL_SETTINGS).
-  usagePingId: z.string().nullable().catch(null),
-  usagePingDay: z.string().nullable().catch(null),
-  // Whether the operator agreed to the usage ping (#172), when, and which
-  // version of the question they answered (USAGE_PING_TEXT_VERSION), so the
-  // consent can be shown. Null: not answered yet, and nothing is sent.
-  usagePingChoice: z.enum(["on", "off"]).nullable().catch(null),
-  usagePingChoiceAt: z.string().nullable().catch(null),
-  usagePingChoiceText: z.coerce.number().int().nullable().catch(null),
   // The Claude connector (#221): when it was turned on, or Claude was last
   // disconnected; null while it's off, and then its addresses answer 404.
   // Every connector token carries it, so a new value signs Claude out. It

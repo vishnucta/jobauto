@@ -94,11 +94,6 @@ describe("stored settings", () => {
       workTimeZone: null,
       slotMinutes: 45,
       bufferMinutes: 15,
-      usagePingId: null,
-      usagePingDay: null,
-      usagePingChoice: null,
-      usagePingChoiceAt: null,
-      usagePingChoiceText: null,
       connectorEnabledAt: null,
       browserTimeZone: null,
     });
