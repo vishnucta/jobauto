@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { AiError } from "./errors";
 import { AnthropicProvider, ANTHROPIC_FALLBACK_MODELS } from "./providers/anthropic";
+import { DeepSeekProvider } from "./providers/deepseek";
 import { LMSTUDIO_UNREACHABLE, LmStudioProvider } from "./providers/lmstudio";
 import { LocalProvider } from "./providers/local";
 import { MISTRAL_FALLBACK_MODELS, MistralProvider } from "./providers/mistral";
@@ -153,6 +154,13 @@ describe("OpenAICompatibleProvider", () => {
     // DeepSeek answers a model it doesn't have with a 400, not a 404.
     stubFetch(() => json({ error: { message: "Model Not Exist" } }, { status: 400 }));
     expect(await failure(provider().complete(ask))).toMatchObject({ kind: "model", message: expect.stringContaining("deepseek-flash") });
+  });
+
+  it("leaves DeepSeek room to think on top of the answer", async () => {
+    const requests = stubFetch(() => json({ choices: [{ message: { content: "Hello!" }, finish_reason: "stop" }] }));
+    const provider = new DeepSeekProvider("https://api.deepseek.com", "sk", "deepseek-v4-pro", 60_000);
+    expect(await provider.complete(ask)).toBe("Hello!");
+    expect(requests[0].body).toMatchObject({ model: "deepseek-v4-pro", max_tokens: 4096 + 4096 });
   });
 
   it("lists models", async () => {

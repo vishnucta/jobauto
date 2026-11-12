@@ -7,6 +7,7 @@ import { AiError } from "./errors";
 import { providerOption } from "./provider-options";
 import type { AIProvider } from "./provider";
 import { AnthropicProvider } from "./providers/anthropic";
+import { DeepSeekProvider } from "./providers/deepseek";
 import { LocalProvider } from "./providers/local";
 import { LmStudioProvider } from "./providers/lmstudio";
 import { MistralProvider } from "./providers/mistral";
@@ -31,7 +32,7 @@ export function createProvider(config: AiConfig): AIProvider {
     case AiProvider.GROQ:
       return new OpenAICompatibleProvider("GROQ", baseUrl, apiKey, model, timeoutMs);
     case AiProvider.DEEPSEEK:
-      return new OpenAICompatibleProvider("DEEPSEEK", baseUrl, apiKey, model, timeoutMs);
+      return new DeepSeekProvider(baseUrl, apiKey, model, timeoutMs);
     case AiProvider.LMSTUDIO:
       return new LmStudioProvider(baseUrl, apiKey, model, timeoutMs);
   }
