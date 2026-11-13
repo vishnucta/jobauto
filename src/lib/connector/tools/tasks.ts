@@ -6,6 +6,7 @@ import { DocumentKind, JobStatus } from "@/generated/prisma/enums";
 import { agentDraftJob } from "@/lib/agent/draft";
 import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
+import { englishCopyJob } from "@/lib/jobs/english-copy";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
@@ -188,6 +189,15 @@ const KINDS: Record<string, Tell> = {
       result: resultOf(prepareCallJob, task) ? { prepared: true } : undefined,
       link: applicationId ? linkTo(`/applications/${applicationId}?tab=prep`) : undefined,
       next: "get_call_prep reads the pack.",
+    };
+  },
+  [englishCopyJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(englishCopyJob, task)?.applicationId;
+    return {
+      task: "Writing a document in English to read",
+      about: { application_id: applicationId },
+      result: resultOf(englishCopyJob, task) ?? undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}`) : undefined,
     };
   },
   [careersCheckJob.type]: (task, linkTo) => {
