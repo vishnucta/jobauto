@@ -97,8 +97,32 @@ describe("the letter's own frame (E8-11)", () => {
     expect(screen.getByText("Rotterdam, 3. Oktober 2026")).toBeInTheDocument();
     expect([...page.querySelectorAll("[data-unit='recipient'] p")].map((line) => line.textContent)).toEqual(["Ledgerly GmbH", "z. Hd. Frau Doe", "Hamburg"]);
     expect(screen.getByText("Sehr geehrte Frau Doe,")).toBeInTheDocument();
-    expect(page).toHaveTextContent(/Mit freundlichen GrüßenJane M\. Doe$/);
+    expect(page).toHaveTextContent(/Mit freundlichen GrüßenJane M\. DoeAnlagenLebenslauf$/);
     expect(page).not.toHaveTextContent(/Dear|Hiring team/);
+  });
+
+  it("lays a German letter out as DIN 5008 does: recipient, place and date, Betreff, and the Anlagen at the end (jobauto fork)", () => {
+    const units = [
+      { id: "date", label: "Date", text: "13. November 2026" },
+      { id: "recipient", label: "Recipient", text: "Nordbank AG\nPersonalabteilung\nHamburg" },
+      { id: "greeting", label: "Greeting", text: "Sehr geehrte Damen und Herren," },
+      { id: "paragraph:1", label: "Opening", text: "Mit großem Interesse habe ich Ihre Anzeige gelesen." },
+    ];
+    render(<CoverLetterDocument {...letter} units={units} language="German" role="Financial Analyst (m/w/d)" anlagen={["Arbeitszeugnis AvaTrade", "Goethe-Zertifikat A2"]} />);
+    const page = screen.getByRole("article", { name: "Cover letter" });
+    const text = page.textContent ?? "";
+    // The recipient before the date, the date with the sender's city, then the Betreff.
+    expect(text.indexOf("Nordbank AG")).toBeLessThan(text.indexOf("13. November 2026"));
+    expect(page.querySelector("[data-unit='date']")).toHaveTextContent(`${letter.basics.city}, 13. November 2026`);
+    expect(screen.getByText("Bewerbung als Financial Analyst (m/w/d)")).toBeInTheDocument();
+    expect(text.indexOf("Bewerbung als")).toBeLessThan(text.indexOf("Sehr geehrte"));
+    expect(page).toHaveTextContent(/AnlagenLebenslaufArbeitszeugnis AvaTradeGoethe-Zertifikat A2$/);
+  });
+
+  it("keeps an English letter as it was", () => {
+    render(<CoverLetterDocument {...letter} language="English" role="Analyst" anlagen={["Zeugnis"]} />);
+    const page = screen.getByRole("article", { name: "Cover letter" });
+    expect(page).not.toHaveTextContent(/Bewerbung|Anlagen/);
   });
 
   it("fills in only the parts a letter doesn't store", () => {

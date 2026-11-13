@@ -74,6 +74,7 @@ import { WriteMissingDocument } from "./write-missing-document";
 import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
 import { PrepTab, type PrepTabData } from "./prep-tab";
+import { EnglishCopy } from "./english-copy";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
 import { EmailTab, type Attachments } from "./email-tab";
@@ -208,6 +209,8 @@ export type ApplicationViewProps = {
   apply: ApplyTabData;
   /** The Call prep tab (jobauto fork). */
   prep: PrepTabData;
+  /** The Anlagen that go with it, by name, for a German letter's list. */
+  anlagen?: readonly string[];
 };
 
 /**
@@ -256,6 +259,7 @@ export function ApplicationView({
   suggestions,
   apply,
   prep,
+  anlagen = [],
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -359,6 +363,8 @@ export function ApplicationView({
     <ThemeMenu themes={themes} baseThemeId={baseThemeId} current={current} onChange={changeTheme} />
   );
   // Only where there are languages to pick from, as in a view that wasn't given them.
+  // Documents in another language get an English copy to read (jobauto fork).
+  const notEnglish = application.language.trim() !== "" && !/^english$/i.test(application.language.trim());
   const languageMenu =
     languages.length > 0 ? <LanguageMenu languages={languages} current={application.language} busy={languageJob?.language ?? null} onChoose={askLanguage} /> : null;
 
@@ -914,6 +920,7 @@ export function ApplicationView({
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="flex items-center gap-1">Tailored resume · {themeMenu(resumeTheme)}</span>
                   {languageMenu}
+                  {notEnglish && aiReady && <EnglishCopy applicationId={application.id} kind={DocumentKind.RESUME} what="resume" />}
                   {!viewed(DocumentKind.RESUME) && (
                     <SectionsMenu
                       sections={sectionsChoice}
@@ -983,6 +990,7 @@ export function ApplicationView({
                   <span>Cover letter · {aboutWords(paragraphs)}</span>
                   {themeMenu(letterTheme)}
                   {languageMenu}
+                  {notEnglish && aiReady && <EnglishCopy applicationId={application.id} kind={DocumentKind.COVER_LETTER} what="cover letter" />}
                   {historyButton(DocumentKind.COVER_LETTER)}
                 </span>
               }
@@ -1000,6 +1008,8 @@ export function ApplicationView({
                 dateFormat={dateFormat}
                 language={application.language}
                 renderUnit={viewed(DocumentKind.COVER_LETTER) ? plainUnit : unitsOf(DocumentKind.COVER_LETTER, letterUnits, letterStored)}
+                role={application.role}
+                anlagen={anlagen}
               />
             </DocumentPreview>
           ) : (

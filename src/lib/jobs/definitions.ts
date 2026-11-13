@@ -21,3 +21,4 @@ import "@/lib/careers/check";
 import "@/lib/connector/draft";
 import "./apply";
 import "./prepare-call";
+import "./english-copy";

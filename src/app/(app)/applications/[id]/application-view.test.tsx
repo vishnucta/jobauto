@@ -293,7 +293,7 @@ describe("the document tabs (E8-2)", () => {
     const menu = screen.getByRole("menu");
     expect(within(menu).getByRole("menuitemradio", { name: "Editorial" })).toHaveAttribute("aria-checked", "true");
     expect(within(menu).getByRole("menuitemradio", { name: "Modern base theme" })).toBeInTheDocument();
-    expect(within(menu).getAllByRole("menuitemradio").map((item) => item.textContent).slice(-2)).toEqual(["Atlas", "Mine"]);
+    expect(within(menu).getAllByRole("menuitemradio").map((item) => item.textContent).slice(-2)).toEqual(["Lebenslauf", "Mine"]);
     expect(within(menu).getByRole("separator")).toBeInTheDocument();
 
     // Shown in the new theme while it's saved: Modern has a sidebar, so its layout switch appears.
