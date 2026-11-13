@@ -16,6 +16,7 @@ import {
   sameAgency,
   SNOOZE_DAYS,
   SOURCE_LABEL,
+  type ContactKindName,
   type OutreachKind,
   type RecruiterFilter,
   type RecruiterView,
@@ -38,15 +39,23 @@ const FILTERS = { all: "ALL", to_contact: "TO_CONTACT", waiting: "WAITING", repl
 
 const id = z.string().min(1).max(64);
 
+/** Who a contact is, as a tool names it. */
+const KINDS = { agency: "AGENCY", hiring_manager: "HIRING_MANAGER", referral: "REFERRAL" } as const satisfies Record<string, ContactKindName>;
+const KIND_NAMES = Object.fromEntries(Object.entries(KINDS).map(([name, kind]) => [kind, name])) as Record<ContactKindName, keyof typeof KINDS>;
+const kindInput = z.enum(Object.keys(KINDS) as [keyof typeof KINDS, ...(keyof typeof KINDS)[]]);
+const relationInput = z.string().max(200).optional().describe("How the user knows them, e.g. 'We worked together at EY'");
+
 const day = (iso: string | null) => iso?.slice(0, 10) ?? undefined;
 
 /** A recruiter as Claude sees it in a list: where the conversation stands, without the address or the notes. */
 function recruiterLine(recruiter: RecruiterView, now: Date) {
   return {
     id: recruiter.id,
+    kind: KIND_NAMES[recruiter.kind],
     name: recruiter.name,
     contact_name: recruiter.contactName || undefined,
     speciality: recruiter.speciality || undefined,
+    how_you_know_them: recruiter.relation || undefined,
     website: recruiter.website || undefined,
     status: recruiter.status,
     next_step: nextStep(recruiter, now),
@@ -109,22 +118,30 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
     {
       title: "Add a recruiter",
       description:
-        "Adds an agency or recruiter the user knows to the list, as Add a recruiter does. Nothing is sent. " +
-        "One already on the list under the same name isn't added twice: update it with update_recruiter.",
+        "Adds a contact to Find jobs → Recruiters, as Add a recruiter does: an agency or recruiter (kind agency, the default), a hiring manager at an employer, " +
+        "or someone at an employer who could refer the user, such as a former colleague or an alum (referral). Nothing is sent. " +
+        "An agency already on the list under the same name, or the same person at the same employer, isn't added twice: update it with update_recruiter.",
       inputSchema: z.object({
-        name: z.string().trim().min(1).max(200).describe("The agency or recruiter, e.g. 'Robert Walters'"),
+        kind: kindInput.default("agency"),
+        name: z.string().trim().min(1).max(200).describe("The agency or recruiter, e.g. 'Robert Walters'; for a hiring manager or a referral, the employer"),
         contact_name: z.string().max(200).optional().describe("The person to write to"),
+        relation: relationInput,
         email: z.string().max(320).optional().describe("Their address, only if the user gave it"),
         website: z.string().max(2000).optional().describe("Starting with https://"),
-        speciality: z.string().max(200).optional().describe("What they place people in, e.g. 'Finance and accounting'"),
+        speciality: z.string().max(200).optional().describe("What an agency places people in, e.g. 'Finance and accounting'; a person's team or role"),
         notes: z.string().max(5_000).optional(),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ name, contact_name, email, website, speciality, notes }) => {
-      const parsed = recruiterFields.safeParse({ name, contactName: contact_name ?? "", email: email ?? "", website: website ?? "", speciality: speciality ?? "", notes: notes ?? "" });
+    async ({ kind, name, contact_name, relation, email, website, speciality, notes }) => {
+      const parsed = recruiterFields.safeParse({ kind: KINDS[kind], name, contactName: contact_name ?? "", relation: relation ?? "", email: email ?? "", website: website ?? "", speciality: speciality ?? "", notes: notes ?? "" });
       if (!parsed.success) return failure(parsed.error.issues[0]?.message ?? "Those details can't be saved.");
-      const have = (await listRecruiters()).find((recruiter) => sameAgency(recruiter.name, parsed.data.name));
+      const fields = parsed.data;
+      const have = (await listRecruiters()).find((recruiter) =>
+        fields.kind === "AGENCY"
+          ? recruiter.kind === "AGENCY" && sameAgency(recruiter.name, fields.name)
+          : recruiter.kind !== "AGENCY" && sameAgency(recruiter.name, fields.name) && recruiter.contactName.trim().toLowerCase() === fields.contactName.trim().toLowerCase(),
+      );
       if (have) return failure(`${have.name} is already on the list (id ${have.id}). Change it with update_recruiter.`);
       const added = await createRecruiter(parsed.data);
       return text({ ...recruiterDetail(added, new Date()), message: "Added.", link });
@@ -138,8 +155,10 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
       description: "Changes the details of a recruiter on the list: only what's given is changed, and an empty string clears a detail. It doesn't change where the conversation stands: that is set_recruiter_status.",
       inputSchema: z.object({
         id,
+        kind: kindInput.optional(),
         name: z.string().max(200).optional(),
         contact_name: z.string().max(200).optional(),
+        relation: relationInput,
         email: z.string().max(320).optional(),
         website: z.string().max(2000).optional().describe("Starting with https://"),
         speciality: z.string().max(200).optional(),
@@ -147,15 +166,17 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ id: recruiterId, name, contact_name, email, website, speciality, notes }) => {
-      if ([name, contact_name, email, website, speciality, notes].every((value) => value === undefined)) {
-        return failure("Say what to change: name, contact_name, email, website, speciality or notes.");
+    async ({ id: recruiterId, kind, name, contact_name, relation, email, website, speciality, notes }) => {
+      if ([kind, name, contact_name, relation, email, website, speciality, notes].every((value) => value === undefined)) {
+        return failure("Say what to change: kind, name, contact_name, relation, email, website, speciality or notes.");
       }
       const current = await getRecruiter(recruiterId);
       if (!current) return failure(GONE);
       const parsed = recruiterFields.safeParse({
+        kind: kind ? KINDS[kind] : current.kind,
         name: name ?? current.name,
         contactName: contact_name ?? current.contactName,
+        relation: relation ?? current.relation,
         email: email ?? current.email,
         website: website ?? current.website,
         speciality: speciality ?? current.speciality,

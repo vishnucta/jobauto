@@ -4,6 +4,7 @@ import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { unitsSchema } from "@/lib/application-data";
+import { germanNeed, textForGerman, type GermanNeed } from "@/lib/german-need";
 import { fullText } from "@/lib/job-search/find";
 import { foundPostingSchema, postingText, type FoundPosting, type ShownPosting } from "@/lib/job-search/search";
 import { withoutPrivateParts } from "@/lib/letter-frame";
@@ -53,8 +54,18 @@ export function postingLine(posting: ShownPosting | FoundPosting, number: number
     saved: state?.saved || undefined,
     applied: state?.applicationId ? true : undefined,
     fit: state?.score ?? undefined,
+    german: germanLine(germanNeed(textForGerman(posting))),
     snippet: posting.description.replace(/\s+/g, " ").slice(0, 280),
   };
+}
+
+/** The German a posting asks for, in a few words for Claude to weigh against the profile's; undefined when it names none. */
+function germanLine(need: GermanNeed): string | undefined {
+  if (need.englishWorkplace) return `the team works in English: “${need.evidence}”`;
+  if (need.implied) return "the ad is in German and names no level: expect about B2";
+  if (need.level) return `${need.level}: “${need.evidence}”`;
+  if (need.optional) return `only a plus: “${need.evidence}”`;
+  return undefined;
 }
 
 /** The text of a tailored document's parts, in order, without a letter's sender and signature. */

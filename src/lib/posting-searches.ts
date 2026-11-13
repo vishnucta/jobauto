@@ -122,7 +122,8 @@ export async function knownJobs(): Promise<Map<string, KnownJob>> {
 
 /**
  * Keeps postings an AI client found itself (add_found_jobs) as a search of
- * their own, from the CLIENT source and named by the client, so they stay
+ * their own, from the CLIENT source and named by the client, or new jobs on
+ * careers pages, from CAREERS and named by the employers, so they stay
  * apart from what a job source found but can be saved, scored and applied
  * from the same way. Jobs Dossier already has (knownJobs) and jobs given
  * twice are left out and returned with where they are; nothing is kept when
@@ -134,8 +135,11 @@ export async function addClientSearch({
   query,
   postings,
   addKnown = false,
+  source = "CLIENT",
 }: {
   addedBy: string;
+  /** CLIENT for an AI client's finds, CAREERS for new jobs on careers pages. */
+  source?: "CLIENT" | "CAREERS";
   query: SearchQuery;
   postings: FoundPosting[];
   addKnown?: boolean;
@@ -158,7 +162,7 @@ export async function addClientSearch({
   }
   if (added.length === 0) return { id: null, added, skipped };
   const search = await prisma.postingSearch.create({
-    data: { sources: ["CLIENT"], addedBy, query, postings: added, found: added.length },
+    data: { sources: [source], addedBy, query, postings: added, found: added.length },
     select: { id: true },
   });
   await noteAgencies(added, "search");

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { loadDocuments } from "@/lib/application-documents";
+import { listAttachments } from "@/lib/attachments";
 import { verifyPrintAccess } from "@/lib/pdf/print-access";
 import { printMetadata } from "@/lib/pdf/print-title";
 import { printCss } from "@/lib/themes";
@@ -52,6 +53,8 @@ export default async function PrintTailoredDocumentPage({ params }: PageProps<"/
           date={letterDate}
           dateFormat={settings.dateFormat}
           language={application.language}
+          role={application.role}
+          anlagen={(await listAttachments()).filter((attachment) => attachment.enabled).map((attachment) => attachment.name)}
         />
       )}
     </>

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { isAiUsable } from "@/lib/ai/config";
+import { profileGerman } from "@/lib/german-need";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -32,12 +33,13 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const from = sourceFilterFromParams(params);
   const typed = queryFromParams(params);
   const searchId = typeof params.search === "string" ? params.search : undefined;
-  const [config, timeZone, postingCounts, searches, recruiters, profile, scoreInClaude] = await Promise.all([
+  const [config, timeZone, postingCounts, searches, recruiters, employers, profile, scoreInClaude] = await Promise.all([
     loadJobSearchConfig(),
     userTimeZone(),
     countPostings(),
     countSearches(),
     prisma.recruiter.count(),
+    prisma.employer.count(),
     loadProfile(),
     isAiUsable().then(handsOffToClaude),
   ]);
@@ -59,6 +61,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       sources={sourceStates(config)}
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
+      german={profileGerman(profile.languages)}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       view={view}
@@ -70,7 +73,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       history={history}
       byScore={byScore}
       found={found}
-      counts={{ ...postingCounts, searches, recruiters }}
+      counts={{ ...postingCounts, searches, recruiters, employers }}
       today={now.toISOString()}
     />
   );

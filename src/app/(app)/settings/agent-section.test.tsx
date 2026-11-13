@@ -6,6 +6,7 @@ import { toast } from "@/components/toast";
 import type { SavedAgentSearch } from "@/lib/agent/search";
 
 import { deleteRecurringSearch, moveRecurringSearch, saveAgentSettings, saveRecurringSearch, setRecurringSearchEnabled } from "../agent/actions";
+import { saveAlertAddress, testAlert } from "./actions";
 import { AgentSection, type AgentSettings } from "./agent-section";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -13,19 +14,25 @@ vi.mock("../agent/actions", () => ({
   saveAgentSettings: vi.fn(async () => ({ ok: true, data: null })),
   saveRecurringSearch: vi.fn(), moveRecurringSearch: vi.fn(), deleteRecurringSearch: vi.fn(), setRecurringSearchEnabled: vi.fn(),
 }));
+vi.mock("./actions", () => ({
+  saveAlertAddress: vi.fn(async ({ address }: { address: string | null }) => ({ ok: true, data: { address } })),
+  testAlert: vi.fn(async () => ({ ok: true, data: null })),
+  updateSettings: vi.fn(async () => ({ ok: true, data: null })),
+}));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { ok: boolean; error?: string }) => (result.ok ? result : (toast(result.error!), result)) }));
 
 const initial: AgentSettings = { enabled: false, hour: 7, minScore: 70, maxScores: 15, maxDrafts: 3, autoDraft: false };
 const search: SavedAgentSearch = { id: "one", name: "Data roles", query: { keywords: "Data scientist", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, enabled: true, sort: 0, createdAt: new Date(), updatedAt: new Date() };
 const countries = [{ code: "de", name: "Germany" }, { code: "nl", name: "Netherlands" }];
-const open = (props: Partial<Parameters<typeof AgentSection>[0]> = {}) => render(<AgentSection initial={initial} searches={[search]} source="JSEARCH" scoring={{ scorer: "AI", ready: true }} countries={countries} timeZone="Europe/Berlin" {...props} />);
+const alerts = { address: null, minScore: 80, problem: null };
+const open = (props: Partial<Parameters<typeof AgentSection>[0]> = {}) => render(<AgentSection initial={initial} alerts={alerts} searches={[search]} source="JSEARCH" scoring={{ scorer: "AI", ready: true }} countries={countries} timeZone="Europe/Berlin" {...props} />);
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("Settings → Job agent", () => {
   it("adopts refreshed search snapshots without losing an open editor draft", async () => {
     const user = userEvent.setup();
-    const props = { initial, searches: [search], source: "JSEARCH" as const, scoring: { scorer: "AI" as const, ready: true }, countries, timeZone: "Europe/Berlin" };
+    const props = { initial, alerts, searches: [search], source: "JSEARCH" as const, scoring: { scorer: "AI" as const, ready: true }, countries, timeZone: "Europe/Berlin" };
     const { rerender } = render(<AgentSection {...props} />);
     await user.click(screen.getByRole("button", { name: "Edit Data roles" }));
     await user.type(screen.getByLabelText("What"), " unsaved");
@@ -163,5 +170,29 @@ describe("Settings → Job agent", () => {
     await user.click(screen.getByRole("switch", { name: "Run the job agent" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Run the job agent" })).toHaveAttribute("aria-checked", "false"));
     expect(toast).toHaveBeenCalledWith("Enable a search first.");
+  });
+
+  it("saves an ntfy topic for phone alerts, sends a test, and turns them off", async () => {
+    const user = userEvent.setup();
+    open();
+    expect(screen.getByText("Off. Nothing is sent until a topic is saved.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Topic address"), "not an address");
+    expect(screen.getByText("An address such as https://ntfy.sh/your-topic")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Topic address"));
+    await user.click(screen.getByRole("button", { name: "Make one up" }));
+    expect((screen.getByLabelText("Topic address") as HTMLInputElement).value).toMatch(/^https:\/\/ntfy\.sh\/jobauto-[a-z2-9]{16}$/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(saveAlertAddress).toHaveBeenCalledWith({ address: expect.stringMatching(/^https:\/\/ntfy\.sh\/jobauto-/) });
+    await user.click(await screen.findByRole("button", { name: "Send a test" }));
+    expect(testAlert).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Turn off" }));
+    expect(saveAlertAddress).toHaveBeenLastCalledWith({ address: null });
+    expect(await screen.findByText("Off. Nothing is sent until a topic is saved.")).toBeInTheDocument();
+  });
+
+  it("says why the last alert didn't go out", () => {
+    open({ alerts: { address: "https://ntfy.sh/jobauto-abc", minScore: 85, problem: "ntfy.sh couldn't be reached." } });
+    expect(screen.getByRole("note")).toHaveTextContent("The last alert didn't go out: ntfy.sh couldn't be reached.");
+    expect(screen.getByLabelText("Alert about agent matches scored at least")).toHaveValue("85");
   });
 });

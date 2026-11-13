@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DashboardFigures } from "@/lib/dashboard";
 
-import { rememberQuietDays } from "./actions";
+import { rememberQuietDays, rememberWeeklyTarget } from "./actions";
 import { Dashboard } from "./dashboard";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null, useSearchParams: () => new URLSearchParams() }));
-vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })) }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
 
 const figures: DashboardFigures = {
@@ -151,5 +151,38 @@ describe("the dashboard (E9-7)", () => {
     // A new user has the calendar too.
     rerender(<Dashboard {...props} empty calendar={calendar} />);
     expect(screen.getByRole("region", { name: "Calendar" })).toBeInTheDocument();
+  });
+});
+
+describe("This week and What's working (jobauto fork)", () => {
+  const weeks = Array.from({ length: 8 }, (_, index) => ({ start: `2026-09-${String(index + 1).padStart(2, "0")}`, sent: index, met: index >= 5 }));
+
+  it("shows this week against the target, the streak, and changes the target", async () => {
+    render(<Dashboard {...props} week={{ target: 8, sent: 5, daysLeft: 3, streak: 2, weeks }} />);
+    const card = screen.getByRole("region", { name: "This week" });
+    expect(card).toHaveTextContent("5of 8 sent · 3 to go, 3 days left");
+    expect(card).toHaveTextContent("2 weeks in a row");
+    expect(within(card).getByRole("progressbar", { name: "This week's target" })).toHaveAttribute("aria-valuenow", "5");
+    await userEvent.selectOptions(within(card).getByLabelText("Aim for"), "10");
+    await waitFor(() => expect(rememberWeeklyTarget).toHaveBeenCalledWith({ target: 10 }));
+  });
+
+  it("shows how often each kind of application moved on, once one is sent", () => {
+    const working = {
+      sent: 6,
+      replies: 2,
+      early: true,
+      groups: [{ id: "found", title: "Where you found it", rows: [{ label: "Careers pages", sent: 3, replies: 2, rejections: 0, rate: 67 }, { label: "JSearch", sent: 3, replies: 0, rejections: 1, rate: 0 }] }],
+    };
+    render(<Dashboard {...props} working={working} />);
+    const card = screen.getByRole("region", { name: "What's working" });
+    expect(card).toHaveTextContent("Of 6 sent, 2 moved on to a screening or further. With fewer than 20 sent, the differences below are hints, not answers yet.");
+    expect(within(card).getByRole("row", { name: "Careers pages 3 sent 2 moved on 67%" })).toBeInTheDocument();
+    expect(card).toHaveTextContent("Careers pages gets the most answers so far.");
+  });
+
+  it("leaves What's working out until something is sent", () => {
+    render(<Dashboard {...props} working={{ sent: 0, replies: 0, early: true, groups: [] }} />);
+    expect(screen.queryByRole("region", { name: "What's working" })).not.toBeInTheDocument();
   });
 });

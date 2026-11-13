@@ -40,6 +40,10 @@ export async function register() {
     const { startStartupsSchedule } = await import("@/lib/startups/schedule");
     startStartupsSchedule();
 
+    // The careers pages the user follows, checked once a day while any are on.
+    const { startCareersSchedule } = await import("@/lib/careers/check");
+    startCareersSchedule();
+
     // DOSSIER_JOBS_SOURCE=arbeitsagentur: the log says what that choice means (#223).
     const { arbeitsagenturStartupNotice, loadJobSearchConfig } = await import("@/lib/job-search/config");
     try {

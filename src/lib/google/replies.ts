@@ -6,6 +6,7 @@ import { ActionError } from "@/lib/action";
 import { isAiConfigured } from "@/lib/ai/config";
 import { draftReplyJob, replyJobKey } from "@/lib/jobs/draft-reply";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
+import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 import { applyStatusChange } from "@/lib/status-changes";
 
@@ -110,6 +111,7 @@ export async function takeSuggestedStatus(emailId: string, accept: boolean): Pro
   if (!accept || !email.applicationId || !email.suggestedStatus || !email.application) return null;
   if (!worthSuggesting(email.application.status, email.suggestedStatus)) return null;
   const result = await applyStatusChange(prisma, email.applicationId, email.suggestedStatus);
+  if (result.outcome === "changed") await prepareOnStatus(email.applicationId, email.suggestedStatus);
   return { status: email.suggestedStatus, eventId: result.outcome === "changed" ? result.event.id : null };
 }
 
@@ -144,7 +146,10 @@ export async function confirmInterviewTime({
   let eventId: string | null = null;
   if (moveToInterview) {
     const result = await applyStatusChange(prisma, email.applicationId, ApplicationStatus.INTERVIEW);
-    if (result.outcome === "changed") eventId = result.event.id;
+    if (result.outcome === "changed") {
+      eventId = result.event.id;
+      await prepareOnStatus(email.applicationId, ApplicationStatus.INTERVIEW);
+    }
   }
   await prisma.emailMessage.update({ where: { id: emailId }, data: { confirmedAt: null, suggestedStatus: null } });
   return { ...sync, applicationId: email.applicationId, eventId };

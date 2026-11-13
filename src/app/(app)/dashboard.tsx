@@ -7,13 +7,17 @@ import { StatusDot } from "@/components/ui/status-dot";
 import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { DASHBOARD_PERIODS, DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import type { DayPeriod } from "@/lib/greeting";
+import type { Insights } from "@/lib/insights";
 import { STATUSES } from "@/lib/status";
+import type { WeeklyProgress } from "@/lib/weekly-target";
 
 import { ActivityChart } from "./activity-chart";
 import { FunnelChart } from "./funnel-chart";
 import { Greeting } from "./greeting";
 import { PeriodFilter, PeriodScoped } from "./period-filter";
 import { QuietDays } from "./quiet-days";
+import { WeeklyTarget } from "./weekly-target";
+import { WhatsWorking } from "./whats-working";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -27,6 +31,8 @@ export function Dashboard({
   quietDays = DEFAULT_QUIET_DAYS,
   empty,
   calendar,
+  week,
+  working,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -39,6 +45,10 @@ export function Dashboard({
   empty: boolean;
   /** The calendar (E15-6), which the time filter doesn't scope. */
   calendar?: ReactNode;
+  /** This week against the weekly target; the time filter doesn't scope it either. */
+  week?: WeeklyProgress;
+  /** What's working, from every sent application; left out until one is sent. */
+  working?: Insights;
 }) {
   const { sent, heardBack } = figures;
   // The summary follows the time filter, so it says which period it covers.
@@ -70,9 +80,11 @@ export function Dashboard({
           <Columns calendar={calendar}>
             <PeriodScoped className="grid max-w-[1200px] grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] items-start gap-5">
               <Funnel figures={figures} />
+              {week && <WeeklyTarget progress={week} />}
               <ActivityChart weeks={figures.weeks} />
               <WhereThingsStand byStatus={figures.byStatus} />
               <WorthALook items={figures.attention} quietDays={quietDays} />
+              {working && working.sent > 0 && <WhatsWorking insights={working} />}
             </PeriodScoped>
           </Columns>
         </PeriodFilter>

@@ -16,3 +16,9 @@ export const rememberQuietDays = action(z.object({ days: z.number().int().min(1)
   await saveSettings({ quietDays: days });
   return null;
 });
+
+/** Applications to send each week (weekly-target.ts); 0 turns the target off. */
+export const rememberWeeklyTarget = action(z.object({ target: z.number().int().min(0).max(50) }), async ({ target }) => {
+  await saveSettings({ weeklyTarget: target });
+  return null;
+});

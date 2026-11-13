@@ -79,6 +79,11 @@ describe("stored settings", () => {
       agentMaxDrafts: 3,
       agentAutoDraft: false,
       agentRuns: [],
+      alertAddress: null,
+      alertProblem: null,
+      alertMinScore: 80,
+      careersCheckedOn: null,
+      weeklyTarget: 0,
       applyAnswers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
       applyBrowserAddress: null,
       startupsViewedAt: null,
@@ -130,7 +135,7 @@ describe("stored settings", () => {
 
   it("reads values that don't fit as the default, and ignores unknown keys", () => {
     const settings = settingsFromRows([
-      { key: "provider", value: "GEMINI" },
+      { key: "provider", value: "CHATGPT" },
       { key: "paper", value: "A5" },
       { key: "strict", value: "maybe" },
       { key: "customLanguages", value: "Farsi, Hebrew" },

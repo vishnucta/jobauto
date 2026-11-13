@@ -27,6 +27,7 @@ export const PROVIDER_DEFAULTS: Record<AiProvider, { baseUrl: string; model: str
   [AiProvider.MISTRAL]: { baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-2603", timeoutSeconds: DEFAULT_TIMEOUT_SECONDS.hosted },
   [AiProvider.GROQ]: { baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b", timeoutSeconds: DEFAULT_TIMEOUT_SECONDS.hosted },
   [AiProvider.DEEPSEEK]: { baseUrl: "https://api.deepseek.com", model: "deepseek-flash", timeoutSeconds: DEFAULT_TIMEOUT_SECONDS.hosted },
+  [AiProvider.GEMINI]: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", timeoutSeconds: DEFAULT_TIMEOUT_SECONDS.hosted },
   [AiProvider.LMSTUDIO]: { baseUrl: "http://host.docker.internal:1234", model: null, timeoutSeconds: DEFAULT_TIMEOUT_SECONDS.local },
 };
 
@@ -37,6 +38,7 @@ const FROM_ENV: Record<NonNullable<Env["DOSSIER_AI_PROVIDER"]>, AiProvider> = {
   mistral: AiProvider.MISTRAL,
   groq: AiProvider.GROQ,
   deepseek: AiProvider.DEEPSEEK,
+  gemini: AiProvider.GEMINI,
   lmstudio: AiProvider.LMSTUDIO,
 };
 
@@ -150,6 +152,8 @@ export async function isAiUsable(): Promise<boolean> {
   const config = await loadAiConfig();
   if (!config.model || config.apiKeyProblem) return false;
   const needsKey =
-    config.provider === AiProvider.ANTHROPIC || config.provider === AiProvider.MISTRAL || config.provider === AiProvider.GROQ || config.provider === AiProvider.DEEPSEEK;
+    config.provider === AiProvider.ANTHROPIC || config.provider === AiProvider.MISTRAL || config.provider === AiProvider.GROQ ||
+    config.provider === AiProvider.DEEPSEEK ||
+    config.provider === AiProvider.GEMINI;
   return !needsKey || Boolean(config.apiKey);
 }

@@ -17,5 +17,8 @@ import "@/lib/agent/jobs";
 import "@/lib/agent/draft";
 import "./score-posting";
 import "@/lib/startups/refresh";
+import "@/lib/careers/check";
 import "@/lib/connector/draft";
 import "./apply";
+import "./prepare-call";
+import "./english-copy";

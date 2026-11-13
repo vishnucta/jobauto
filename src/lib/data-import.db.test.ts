@@ -56,7 +56,7 @@ describe("importExport (E10-6)", () => {
     await importExport(prisma(), file);
     expect(await snapshot()).toBe(before);
     expect(await prisma().documentVersion.count()).toBe(1);
-    expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(12);
+    expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(13);
     expect(await prisma().projectSkill.count()).toBe(3);
     expect(await prisma().fact.count()).toBe(3);
   });

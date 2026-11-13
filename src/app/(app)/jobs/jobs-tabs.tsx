@@ -3,15 +3,16 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { type JobsView, viewHref } from "@/lib/job-search/search";
 
-/** How many each tab holds: searches kept, postings saved and dismissed, recruiters on the list. */
-export type JobsCounts = { searches: number; saved: number; dismissed: number; recruiters: number };
+/** How many each tab holds: searches kept, postings saved and dismissed, recruiters on the list, careers pages followed. */
+export type JobsCounts = { searches: number; saved: number; dismissed: number; recruiters: number; employers?: number };
 
 /**
  * Find jobs' tabs: the search, past searches, the postings kept from them
- * (E14-7), and the recruiters to write to. The Recruiters tab is its own
- * screen (/recruiters), which shows these tabs too, so the two stay together.
+ * (E14-7), the recruiters to write to, and the careers pages followed. The
+ * Recruiters and Careers pages tabs are screens of their own (/recruiters,
+ * /careers), which show these tabs too, so they stay together.
  */
-export function JobsTabs({ view, counts }: { view: JobsView | "recruiters"; counts: JobsCounts }) {
+export function JobsTabs({ view, counts }: { view: JobsView | "recruiters" | "careers"; counts: JobsCounts }) {
   const tabs = [
     // The latest search, as it was kept.
     { view: "search", label: "Search", href: "/jobs", count: null },
@@ -19,6 +20,7 @@ export function JobsTabs({ view, counts }: { view: JobsView | "recruiters"; coun
     { view: "saved", label: "Saved", href: viewHref("saved"), count: counts.saved },
     { view: "dismissed", label: "Dismissed", href: viewHref("dismissed"), count: counts.dismissed },
     { view: "recruiters", label: "Recruiters", href: "/recruiters", count: counts.recruiters },
+    { view: "careers", label: "Careers pages", href: "/careers", count: counts.employers ?? null },
   ] as const;
   return (
     <nav aria-label="Find jobs views" className="flex flex-wrap gap-1.5 px-10 pb-[18px]">

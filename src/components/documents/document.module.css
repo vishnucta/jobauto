@@ -366,6 +366,45 @@
   color: var(--doc-ink);
 }
 
+/*
+ * A letter in German, as DIN 5008 lays it out (jobauto fork): the sender
+ * small above the recipient's address, place and date on the right, the
+ * Betreff in bold, room to sign above the name, and the Anlagen after it.
+ */
+.din5008 .sender {
+  margin-bottom: calc(var(--u) * 26);
+}
+
+.din5008 .recipient {
+  margin-bottom: calc(var(--u) * 26);
+}
+
+.dinDate {
+  margin-bottom: calc(var(--u) * 20);
+  text-align: end;
+}
+
+.betreff {
+  margin-bottom: calc(var(--u) * 18);
+  font-weight: 700;
+  color: var(--doc-ink);
+}
+
+.din5008 .signOff > :last-child {
+  margin-top: calc(var(--u) * 30);
+}
+
+.anlagen {
+  margin-top: calc(var(--u) * 26);
+  font-size: 0.92em;
+  break-inside: avoid;
+}
+
+.anlagenTitle {
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
 /* ─── Theme structures ─────────────────────────────────────────────────── */
 
 /*
