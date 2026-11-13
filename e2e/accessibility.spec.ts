@@ -1,7 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { resetData, sql } from "./support";
+import { contrastRatio } from "../src/lib/themes";
+
+import { drawnColor, resetData, sql } from "./support";
 
 // Accessibility (E11-3, PRD §11: WCAG 2.2 AA). axe finds no serious or
 // critical violations on any main screen or in its open states, and focus
@@ -277,4 +279,17 @@ test("keyboard: a dialog starts on Cancel and gives focus back", async ({ page }
   await page.keyboard.press("Escape");
   await expect(page.getByRole("alertdialog")).toBeHidden();
   await expect(page.getByRole("button", { name: "More actions" })).toBeFocused();
+});
+
+test("contrast: a segmented control's selected option is marked at 3:1 in both schemes (WCAG 1.4.11)", async ({ page, context, baseURL }) => {
+  for (const scheme of ["light", "dark"]) {
+    await context.addCookies([{ name: "dossier_theme", value: scheme, url: baseURL! }]);
+    await page.goto("/applications");
+    const view = page.getByRole("radiogroup", { name: "View" });
+    const selected = view.getByRole("radio", { checked: true });
+    expect(await selected.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe("1px");
+    const border = await drawnColor(selected, "border-top-color");
+    expect(contrastRatio(border, await drawnColor(view, "background-color"))).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(border, await drawnColor(selected, "background-color"))).toBeGreaterThanOrEqual(3);
+  }
 });

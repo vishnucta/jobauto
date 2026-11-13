@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { UsageSink } from "@/lib/usage";
 
 import { BaseProvider, withJsonSchema, type ChatAnswer, type ChatCall } from "../provider";
+import { timedFetch } from "./timed-fetch";
 
 /**
  * Ollama wants the whole prompt to fit its context window and silently drops
@@ -29,9 +30,10 @@ export class OllamaProvider extends BaseProvider {
 
   /** A client whose requests end when `signal` does. */
   private client(signal: AbortSignal): Ollama {
+    const timed = timedFetch(this.timeoutMs);
     return new Ollama({
       host: this.host,
-      fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }),
+      fetch: (input, init) => timed(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }),
     });
   }
 

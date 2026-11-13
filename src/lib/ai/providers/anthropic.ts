@@ -8,6 +8,7 @@ import type { TokenCount, UsageSink } from "@/lib/usage";
 import { AiError } from "../errors";
 import { BaseProvider, SCHEMA_REFUSED, withJsonSchema, type ChatAnswer, type ChatCall, type Effort } from "../provider";
 import { keyGuardedFetch } from "./guarded-fetch";
+import { timedFetch } from "./timed-fetch";
 
 /** Offered when the model list can't be fetched, e.g. before a key is saved. */
 export const ANTHROPIC_FALLBACK_MODELS = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
@@ -56,7 +57,7 @@ export class AnthropicProvider extends BaseProvider {
     // read X-Api-Key, as every request before did.
     const keyHeader = { "X-Api-Key": apiKey, Authorization: null };
     this.client = apiKey
-      ? new Anthropic({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 1, fetch: keyGuardedFetch(), defaultHeaders: keyHeader })
+      ? new Anthropic({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 1, fetch: keyGuardedFetch(timedFetch(timeoutMs)), defaultHeaders: keyHeader })
       : null;
   }
 

@@ -4,6 +4,7 @@ import type { AiProvider as AiProviderKind, Creativity } from "@/generated/prism
 
 import { logServerWarning } from "@/lib/log";
 import type { TokenCount, UsageSink, UsageTask } from "@/lib/usage";
+import { withoutNul } from "@/lib/without-nul";
 
 import { AiError, toAiError } from "./errors";
 
@@ -129,7 +130,8 @@ export abstract class BaseProvider implements AIProvider {
       );
 
     const answer = await call(request.messages);
-    if (!schema) return answer.text;
+    // A NUL character in an answer can't be saved (public issue 127), wherever the answer goes.
+    if (!schema) return withoutNul(answer.text);
     // Half a JSON answer can't be valid, and asking again only gets cut off again.
     if (answer.cutOff) throw AiError.of("cut-off");
 
@@ -255,18 +257,18 @@ export function withJsonSchema(system: string, schema: z.ZodType): string {
 const MAX_PROBLEM_LENGTH = 1_000;
 
 /**
- * Parses and validates an answer; `problem` says what's wrong, in words a
- * model can fix, and `where` which parts of the schema, without any of the
- * answer, for the server log.
+ * Parses and validates an answer, without NUL characters in its strings;
+ * `problem` says what's wrong, in words a model can fix, and `where` which
+ * parts of the schema, without any of the answer, for the server log.
  */
 export function validateJson<T>(text: string, schema: z.ZodType<T>): { ok: true; data: T } | { ok: false; problem: string; where: string } {
   let value: unknown;
   try {
-    value = extractJson(text);
+    value = extractJson(withoutNul(text));
   } catch {
     return { ok: false, problem: "The answer wasn't valid JSON.", where: "not JSON" };
   }
-  const result = schema.safeParse(value);
+  const result = schema.safeParse(withoutNul(value));
   if (result.success) return { ok: true, data: result.data };
   const where = result.error.issues
     .slice(0, 5)

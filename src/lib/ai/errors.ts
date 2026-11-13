@@ -63,8 +63,11 @@ export class AiError extends Error {
 
 const CONNECTION_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET"]);
 
+/** undici's own limits on waiting for an answer, past the provider's timeout (timed-fetch.ts). */
+const TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
+
 /** Whether a message from a provider says the input didn't fit the model's context. */
-const TOO_LONG = /context|too long|too many tokens|maximum.*tokens|token limit|exceeds/i;
+export const TOO_LONG = /context|too long|too many tokens|maximum.*tokens|token limit|exceeds/i;
 
 /** Whether a message says the account can't pay: DeepSeek's "Insufficient Balance", OpenAI's quota, Anthropic's credit balance. */
 const OUT_OF_CREDIT = /insufficient[ _]?(?:balance|quota|credits?)|credit balance|exceeded your current quota/i;
@@ -72,18 +75,23 @@ const OUT_OF_CREDIT = /insufficient[ _]?(?:balance|quota|credits?)|credit balanc
 /** Whether a message says the model isn't there: DeepSeek's 400 "Model Not Exist", or Ollama's plain error with any status. */
 const UNKNOWN_MODEL = /model .*not (?:found|exist)|pull the model/i;
 
-/** The Node.js network error behind a failed fetch, if any. */
-function networkCode(error: unknown): string | undefined {
+/** The Node.js network error behind a failed fetch, if it's one of `codes`. */
+function networkCode(error: unknown, codes: ReadonlySet<string> = CONNECTION_CODES): string | undefined {
   let current: unknown = error;
   for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
     const code = (current as { code?: unknown }).code;
-    if (typeof code === "string" && CONNECTION_CODES.has(code)) return code;
+    if (typeof code === "string" && codes.has(code)) return code;
     current = current.cause;
   }
   return undefined;
 }
 
-type HttpLike = { status?: unknown; status_code?: unknown; name?: unknown; message?: unknown };
+type HttpLike = { status?: unknown; status_code?: unknown; name?: unknown; message?: unknown; type?: unknown; code?: unknown };
+
+/** An error's type or code as the server named it, such as Groq's json_validate_failed; never free text. */
+function errorName(value: unknown): string | undefined {
+  return typeof value === "string" && /^[\w.-]{1,64}$/.test(value) ? value : undefined;
+}
 
 /**
  * Turns whatever a provider SDK or fetch threw into an AiError. `cancelled`
@@ -103,9 +111,11 @@ export function toAiError(
   const name = typeof e.name === "string" ? e.name : "Error";
   const message = typeof e.message === "string" ? e.message : "";
   const status = typeof e.status === "number" ? e.status : typeof e.status_code === "number" ? e.status_code : undefined;
-  const detail = [name, status].filter(Boolean).join(" ");
+  const detail = [name, status, errorName(e.type), errorName(e.code)].filter(Boolean).join(" ");
 
   if (name === "TimeoutError" || name === "APIConnectionTimeoutError") return AiError.of("timeout", detail);
+  const waited = networkCode(error, TIMEOUT_CODES);
+  if (waited) return AiError.of("timeout", waited);
   if (name === "AbortError" || name === "APIUserAbortError") return AiError.of("cancelled", detail);
   const code = networkCode(error);
   if (code || name === "APIConnectionError") return AiError.of("unreachable", code ?? detail);

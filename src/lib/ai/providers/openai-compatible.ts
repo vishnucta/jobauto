@@ -6,9 +6,10 @@ import type { ReasoningEffort } from "openai/resources/shared";
 
 import type { UsageSink } from "@/lib/usage";
 
-import { AiError } from "../errors";
+import { AiError, TOO_LONG } from "../errors";
 import { BaseProvider, SCHEMA_REFUSED, withJsonSchema, type ChatAnswer, type ChatCall } from "../provider";
 import { keyGuardedFetch } from "./guarded-fetch";
+import { timedFetch } from "./timed-fetch";
 import { apiAddress, ignoresSchemas, serverAt, type Server } from "./servers";
 
 /** How to ask for JSON, strongest first (E6-4). */
@@ -100,7 +101,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
       maxRetries: 1,
       defaultHeaders: { ...(apiKey ? {} : { Authorization: null }), ...this.server?.headers?.() },
       // With a key attached, no redirects to other hosts (E11-5).
-      ...(apiKey ? { fetch: keyGuardedFetch() } : {}),
+      fetch: apiKey ? keyGuardedFetch(timedFetch(timeoutMs)) : timedFetch(timeoutMs),
     });
   }
 
@@ -115,11 +116,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
       // A server that ignores a schema silently never says so: start where the model can see it.
       json: ignoresSchemas(this.baseURL, call.model) ? "prompt" : "schema",
     };
+    // Another way of asking for JSON, tried for this call only (see below).
+    let guessed: JsonMode | undefined;
     // A 400 or 422 naming a parameter this model doesn't take, or a gateway's
     // 404 for one: adapt and remember, once per parameter.
     for (;;) {
+      const json: JsonMode = promptSchemas.has(schemaKey) ? "prompt" : (guessed ?? known.json);
       try {
-        const { answer, reasoned } = await this.send(call, promptSchemas.has(schemaKey) ? { ...known, json: "prompt" } : known);
+        const { answer, reasoned } = await this.send(call, { ...known, json });
         // The thinking used up the room for the answer: ask again with room
         // for both, and leave it from now on.
         if (!answer.cutOff || !reasoned || known.thinks || this.thinkingRoom() === 0) return answer;
@@ -145,7 +149,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
           maxCompletionTokens: known.maxCompletionTokens || /max_tokens/.test(message),
           noEffort: known.noEffort || (this.reasoningEffort(call) !== undefined && /reasoning_effort/i.test(message)),
           thinks: known.thinks,
-          json: jsonRefused ? (JSON_MODES[JSON_MODES.indexOf(known.json) + 1] ?? known.json) : known.json,
+          json: jsonRefused ? (JSON_MODES[JSON_MODES.indexOf(json) + 1] ?? known.json) : known.json,
         };
         if (
           adapted.noTemperature === known.noTemperature &&
@@ -153,8 +157,20 @@ export class OpenAICompatibleProvider extends BaseProvider {
           adapted.noEffort === known.noEffort &&
           adapted.json === known.json
         ) {
+          // Any other 400 or 422 to a call that asked for JSON may still be
+          // about that, in words we don't know, or about the model's answer
+          // to it: Groq checks the JSON itself and answers 400
+          // json_validate_failed when the model gets it wrong (public issue
+          // 128). Ask the next simpler way, but only for this call, since
+          // the same error can come from something else.
+          if (call.json && (status === 400 || status === 422) && json !== "prompt" && !TOO_LONG.test(message)) {
+            guessed = JSON_MODES[JSON_MODES.indexOf(json) + 1];
+            continue;
+          }
           throw error;
         }
+        // A refusal we know overrides a guess.
+        if (adapted.json !== known.json) guessed = undefined;
         known = adapted;
         quirks.set(key, known);
       }

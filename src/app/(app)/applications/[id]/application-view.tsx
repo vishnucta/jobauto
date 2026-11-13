@@ -25,7 +25,8 @@ import type { ResumeFit } from "@/lib/resume-fit";
 import { type Match, type Requirement, type Unit } from "@/lib/application-data";
 import { EMAIL_UNITS, WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
 import { documentLabels } from "@/lib/document-labels";
-import { defaultFrame, isFrameUnit, isParagraph, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
+import { copyText } from "@/lib/copy-text";
+import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
 import type { ApplyTabData } from "@/lib/apply/view";
@@ -42,6 +43,7 @@ import { resumeContent, sectionsWithContent } from "@/lib/resume-content";
 import { inSidebar, sectionName, type SectionLayout } from "@/lib/resume-sections";
 import { skillLine, skillNamesIn } from "@/lib/skill-groups";
 import { hasSidebar, type ThemeData } from "@/lib/themes";
+import { TONES } from "@/lib/tones";
 import { cleanUnitText, isVerbatimUnit, unitName } from "@/lib/unit-text";
 
 import {
@@ -767,19 +769,15 @@ export function ApplicationView({
 
   const resumeUnits = resume && shown(DocumentKind.RESUME, resume.units);
   // Every part of the letter, those it doesn't store yet as they've always been drawn (E8-11).
-  const letterUnits =
-    letter &&
-    withFrame(
-      shown(DocumentKind.COVER_LETTER, letter.units),
-      defaultFrame({
-        basics: profile.basics,
-        company: application.company,
-        location: application.location,
-        date: letterDate,
-        dateFormat,
-        labels: documentLabels(application.language),
-      }),
-    );
+  const letterFrame = defaultFrame({
+    basics: profile.basics,
+    company: application.company,
+    location: application.location,
+    date: letterDate,
+    dateFormat,
+    labels: documentLabels(application.language),
+  });
+  const letterUnits = letter && withFrame(shown(DocumentKind.COVER_LETTER, letter.units), letterFrame);
   const letterStored = new Set(letter?.units.map((unit) => unit.id));
   const emailUnits = email && shown(DocumentKind.EMAIL, email);
   const paragraphs = letterUnits?.filter(isParagraph).map((unit) => unit.text) ?? [];
@@ -795,6 +793,12 @@ export function ApplicationView({
   };
 
   /** "History" next to a document's label, and the banner over an earlier version. */
+  // The letter on screen as text, for a job site that wants it in a box (public issue 101).
+  const copyLetter = async () => {
+    const units = viewed(DocumentKind.COVER_LETTER)?.units ?? letterUnits ?? [];
+    const text = letterText(withFrame(units, letterFrame), TONES[application.tone].signOff);
+    toast((await copyText(text)) ? "Copied the letter, from the greeting to your name." : "That didn't copy. Select the text and copy it yourself.");
+  };
   const historyButton = (document: DocumentKind) => (
     <Button variant="text" size="sm" onClick={() => setHistoryOf(document)}>
       History
@@ -992,6 +996,9 @@ export function ApplicationView({
                   {languageMenu}
                   {notEnglish && aiReady && <EnglishCopy applicationId={application.id} kind={DocumentKind.COVER_LETTER} what="cover letter" />}
                   {historyButton(DocumentKind.COVER_LETTER)}
+                  <Button variant="text" size="sm" onClick={() => void copyLetter()}>
+                    Copy text
+                  </Button>
                 </span>
               }
               meta={viewed(DocumentKind.COVER_LETTER) ? undefined : hint}

@@ -104,6 +104,18 @@ export function withFrame(units: Unit[], frame: Partial<Frame>): Unit[] {
   ];
 }
 
+/**
+ * The letter from its greeting to the name under the sign-off, as plain text,
+ * for a job site that takes the letter in a text box (public issue 101). The
+ * parts are withFrame's; `signOff` is the tone's, for a letter without its own.
+ */
+export function letterText(parts: Unit[], signOff: string): string {
+  const text = (id: string) => parts.find((unit) => unit.id === id)?.text.trim() ?? "";
+  const paragraphs = parts.filter((unit) => !isFrameUnit(unit.id) && unit.id !== SIGN_OFF_UNIT).map((unit) => unit.text.trim());
+  const closing = parts.find((unit) => unit.id === SIGN_OFF_UNIT)?.text.trim() ?? signOff;
+  return [text("greeting"), ...paragraphs, [closing, text("signature")].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
+}
+
 /** The units without the parts that hold contact details, for AI prompts. */
 export function withoutPrivateParts(units: Unit[]): Unit[] {
   return units.filter((unit) => !PRIVATE_FRAME_UNITS.has(unit.id));

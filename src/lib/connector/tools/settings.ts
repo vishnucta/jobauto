@@ -444,7 +444,7 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
           return failure("The Bundesagentur für Arbeit is only searched once the user ticks “I understand” under its note in Settings → Job search. Only the user can do that.");
         }
       }
-      if (ai) await saveAiChoice(ai);
+      const keyRemoved = ai ? (await saveAiChoice(ai)).keyRemoved : false;
       if (input.jsearch_host !== undefined || input.adzuna_app_id !== undefined) {
         await saveJobSourceDetails({ jsearchHost: input.jsearch_host, adzunaAppId: input.adzuna_app_id });
       }
@@ -474,7 +474,11 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       return text({
         saved: changed,
         ...Object.fromEntries(sections.map((section) => [section.name, view[section.name]])),
-        next: aiNotReady ? "Dossier's own AI isn't ready yet. If the provider needs an API key, the user enters it in Settings → AI provider; test_connection checks it." : undefined,
+        next: keyRemoved
+          ? "The saved API key was removed: a key only goes to the server it was saved for. The user enters one for the new address in Settings → AI provider."
+          : aiNotReady
+            ? "Dossier's own AI isn't ready yet. If the provider needs an API key, the user enters it in Settings → AI provider; test_connection checks it."
+            : undefined,
         link: linkTo(`/settings?section=${sections[0].id}`),
       });
     },

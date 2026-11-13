@@ -14,6 +14,7 @@ import { AlertError, sendAlert } from "@/lib/alerts";
 import { deleteAllAttachments, removeAttachment as deleteAttachment, updateAttachment } from "@/lib/attachments";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
+import { AI_TIMEOUT_LIMITS } from "@/lib/ai/provider-options";
 import { deleteAllBackups } from "@/lib/backups";
 import { cancelJob } from "@/lib/jobs/runner";
 import { checkForUpdate } from "@/lib/update-check";
@@ -50,8 +51,11 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 // or a model list always reflects what's saved. What the actions save and
 // test is in src/lib/settings-changes.ts, which the Claude connector uses too.
 
-/** Saves the provider, server address and model (SET-1); switching provider removes the key. */
-export const saveAiProvider = action(aiChoiceSchema, async (choice) => ({ keyState: await saveAiChoice(choice) }));
+/** Saves the provider, server address and model (SET-1); another provider, or an address on another host (public PR 107), removes the key. */
+export const saveAiProvider = action(aiChoiceSchema, async (choice) => {
+  const { keyState, keyRemoved } = await saveAiChoice(choice);
+  return { keyState, ...(keyRemoved ? { keyRemoved } : {}) };
+});
 
 /** Saves a new API key, encrypted (E6-2), or removes it. The key never comes back to the browser. */
 export const saveApiKey = action(
@@ -70,6 +74,19 @@ export const saveApiKey = action(
       ...(current.provider ? {} : { provider }),
     });
     return { keyState: await aiKeyState() };
+  },
+);
+
+/**
+ * How long one AI request may take, in seconds (public issue 118); null goes
+ * back to DOSSIER_AI_TIMEOUT_SECONDS, or the provider's own. A task started
+ * after the change has it.
+ */
+export const saveAiTimeout = action(
+  z.object({ seconds: z.number().int().min(AI_TIMEOUT_LIMITS.min).max(AI_TIMEOUT_LIMITS.max).nullable() }),
+  async ({ seconds }) => {
+    await saveSettings({ aiTimeoutSeconds: seconds });
+    return { seconds };
   },
 );
 

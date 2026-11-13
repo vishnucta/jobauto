@@ -19,6 +19,7 @@ import {
   removeConnectorRedirect,
   listAiModels,
   saveAiProvider,
+  saveAiTimeout,
   saveApiKey,
   saveJobSearchDetails,
   saveJobSource,
@@ -76,6 +77,37 @@ describe("saveAiProvider", () => {
     expect((await settings()).apiKeyEnc).not.toBeNull();
     expect(await saveAiProvider({ provider: "OPENAI", baseUrl: "https://llm.example/v1", model: "" })).toMatchObject({ data: { keyState: "none" } });
     expect(await settings()).toMatchObject({ provider: "OPENAI", model: null, apiKeyEnc: null });
+  });
+
+  it("keeps the key for another path or model on its server, and removes it for another host (public PR 107)", async () => {
+    await saveAiProvider({ provider: "OPENAI", baseUrl: "https://openrouter.ai/v1", model: "" });
+    await saveApiKey({ provider: "OPENAI", change: { action: "set", value: "sk-or-secret" } });
+    expect(await saveAiProvider({ provider: "OPENAI", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6.1-terra" })).toEqual({
+      ok: true,
+      data: { keyState: "set" },
+    });
+    expect(decryptApiKey((await settings()).apiKeyEnc!)).toBe("sk-or-secret");
+
+    expect(await saveAiProvider({ provider: "OPENAI", baseUrl: "https://api.deepseek.com", model: "" })).toEqual({
+      ok: true,
+      data: { keyState: "none", keyRemoved: true },
+    });
+    expect((await settings()).apiKeyEnc).toBeNull();
+    // Back on the first server, it stays gone.
+    expect(await saveAiProvider({ provider: "OPENAI", baseUrl: "https://openrouter.ai/api/v1", model: "" })).toEqual({ ok: true, data: { keyState: "none" } });
+  });
+});
+
+describe("saveAiTimeout (public issue 118)", () => {
+  it("saves whole seconds within the limits, and empty goes back to the default", async () => {
+    expect(await saveAiTimeout({ seconds: 900 })).toEqual({ ok: true, data: { seconds: 900 } });
+    expect((await loadSettings()).aiTimeoutSeconds).toBe(900);
+    expect((await saveAiTimeout({ seconds: 4 })).ok).toBe(false);
+    expect((await saveAiTimeout({ seconds: 3_601 })).ok).toBe(false);
+    expect((await saveAiTimeout({ seconds: 12.5 })).ok).toBe(false);
+    expect((await loadSettings()).aiTimeoutSeconds).toBe(900);
+    await saveAiTimeout({ seconds: null });
+    expect((await loadSettings()).aiTimeoutSeconds).toBeNull();
   });
 });
 

@@ -202,6 +202,16 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     const { city } = demoProfile().basics;
     expect(searches.ran.at(-1)).toMatchObject({ keywords: "product designer", place: city, radiusKm: 25, remoteOnly: false, postedWithin: "month" });
     expect(JSON.parse(text)).toMatchObject({ search_id: "s1", searched: `product designer in ${city}`, link: "https://dossier.example/jobs?search=s1" });
+    // Any level, as Find jobs leaves it: no experience at all, not "any".
+    expect(searches.ran.at(-1)).not.toHaveProperty("experience");
+  });
+
+  it("searches for an experience level, as Find jobs' Level does (public issue 100)", async () => {
+    const { isError, text } = await tool("search_jobs", { keywords: "data analyst", experience: "junior", remote_only: true });
+    expect(isError).toBe(false);
+    expect(searches.ran.at(-1)).toMatchObject({ keywords: "data analyst", experience: "junior" });
+    expect(JSON.parse(text)).toMatchObject({ searched: "data analyst in Netherlands (remote only, entry level)" });
+    expect((await tool("search_jobs", { keywords: "data analyst", experience: "principal" })).isError).toBe(true);
   });
 
   it("asks Claude to write the application itself when Dossier has no AI model", async () => {

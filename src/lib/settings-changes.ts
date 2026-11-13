@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated/prisma/enums";
 import { AiError, createProvider } from "@/lib/ai";
-import { keyStateOf, loadAiConfig, resolveAiConfig } from "@/lib/ai/config";
+import { keyStateOf, loadAiConfig, resolveAiConfig, sameServer } from "@/lib/ai/config";
 import type { KeyState } from "@/lib/ai/provider-options";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { env } from "@/lib/env";
@@ -41,18 +41,20 @@ export type AiChoice = z.output<typeof aiChoiceSchema>;
 
 /**
  * Saves the provider, server address and model (SET-1). A key belongs to
- * its provider: switching provider removes it, so it's never sent to
- * another company's server. Answers with the key's state after.
+ * its provider and server: another provider, or an address on another host
+ * (public PR 107), removes it, so it's never sent to a server it wasn't
+ * made for. Answers with the key's state after, and whether a new address took it.
  */
-export async function saveAiChoice({ provider, baseUrl, model }: AiChoice): Promise<KeyState> {
+export async function saveAiChoice({ provider, baseUrl, model }: AiChoice): Promise<{ keyState: KeyState; keyRemoved: boolean }> {
   const current = await loadSettings();
+  const keepsKey = current.provider === provider && sameServer(provider, current.baseUrl, baseUrl);
   await saveSettings({
     provider,
     baseUrl: baseUrl || null,
     model: model || null,
-    ...(current.provider !== provider ? { apiKeyEnc: null } : {}),
+    ...(keepsKey ? {} : { apiKeyEnc: null }),
   });
-  return aiKeyState();
+  return { keyState: await aiKeyState(), keyRemoved: current.provider === provider && !keepsKey && current.apiKeyEnc !== null };
 }
 
 /** The models the saved server offers, for the model select, or why they can't be listed. */
