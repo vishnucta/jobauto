@@ -136,7 +136,7 @@ describe("the Recruiters tools", () => {
     expect(manager.json).toMatchObject({ kind: "hiring_manager", name: "Nordbank", contact_name: "Anna Weber" });
     expect((await tool("add_recruiter", { kind: "referral", name: "Nordbank", contact_name: "Sam", relation: "We worked together at EY" })).json).toMatchObject({ kind: "referral", how_you_know_them: "We worked together at EY" });
     expect(await tool("add_recruiter", { kind: "hiring_manager", name: "nordbank", contact_name: "anna weber" })).toMatchObject({ isError: true, text: expect.stringContaining("already on the list") });
-    const id = (manager.json as { id: string }).id;
+    const id = (manager.json as unknown as { id: string }).id;
     expect((await tool("update_recruiter", { id, notes: "Met in Frankfurt" })).json).toMatchObject({ kind: "hiring_manager" });
   });
 

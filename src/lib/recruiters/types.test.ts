@@ -189,7 +189,7 @@ describe("the message to write", () => {
         "Kind regards,\nErika Mustermann",
       ].join("\n\n"),
     );
-    expect(outreachDraft({ ...manager, status: "CONTACTED" }, "follow-up", facts).body).toContain("I wanted to follow up on my message about your regulatory reporting team.");
+    expect(outreachDraft(manager, "follow-up", facts).body).toContain("I wanted to follow up on my message about your regulatory reporting team.");
   });
 
   it("asks someone she knows for a referral, or a name", () => {
