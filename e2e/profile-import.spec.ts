@@ -59,6 +59,12 @@ test("reads a resume, shows what it found and merges it into the profile", async
   await page.getByRole("button", { name: "Merge into my profile" }).click();
   await expect(page).toHaveURL("/profile");
   await expect(page.getByText(/^Added to your profile: 1 role, 0 projects, 0 degrees, 2 skills, 1 language, 0 references\./)).toBeVisible();
+  // The reading went when it was used: Back says so and offers a new file, instead of waiting for it.
+  await page.goBack();
+  await expect(page.getByText("This is no longer kept: it was used or deleted.")).toBeVisible();
+  await page.getByRole("button", { name: "← Choose another file" }).click();
+  await expect(page.getByLabel("Your resume, as PDF, Word (.docx) or Markdown (.md)")).toBeVisible();
+  await page.goto("/profile");
   // What the resume says wins; the demo profile's other roles stay.
   await expect(page.getByLabel("Full name")).toHaveValue("John Doe");
   await page.goto("/profile?section=experience");

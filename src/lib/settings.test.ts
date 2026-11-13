@@ -36,6 +36,7 @@ describe("stored settings", () => {
       baseUrl: null,
       model: null,
       apiKeyEnc: null,
+      aiTimeoutSeconds: null,
       creativity: "BALANCED",
       strict: true,
       showDiff: true,

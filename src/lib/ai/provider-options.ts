@@ -114,6 +114,20 @@ export function providerOption(provider: AiProvider) {
   return PROVIDER_OPTIONS.find((option) => option.value === provider)!;
 }
 
+/** What one AI request may take, in seconds, unless Settings or DOSSIER_AI_TIMEOUT_SECONDS says otherwise. */
+export const DEFAULT_TIMEOUT_SECONDS = {
+  // Generous: a local model on a laptop can take minutes for a cover letter, and loading one a while too.
+  local: 300,
+  hosted: 120,
+} as const;
+
+/** The timeout Settings → AI provider takes (public issue 118): from 5 seconds to an hour. */
+export const AI_TIMEOUT_LIMITS = { min: 5, max: 3_600 } as const;
+
+/** The provider's own timeout, in seconds. */
+export const defaultTimeoutSeconds = (provider: AiProvider): number =>
+  providerOption(provider).local ? DEFAULT_TIMEOUT_SECONDS.local : DEFAULT_TIMEOUT_SECONDS.hosted;
+
 /** What people see when a saved key can't be decrypted, e.g. after DOSSIER_SECRET changed. */
 export const API_KEY_UNREADABLE = "Your saved API key can't be read. Please enter it again.";
 
@@ -126,4 +140,8 @@ export type AiSettingsView = {
   baseUrl: string;
   model: string;
   keyState: KeyState;
+  /** Saved in Settings; null for DOSSIER_AI_TIMEOUT_SECONDS's, or the provider's own. */
+  timeoutSeconds: number | null;
+  /** DOSSIER_AI_TIMEOUT_SECONDS, if it's set. */
+  envTimeoutSeconds: number | null;
 };

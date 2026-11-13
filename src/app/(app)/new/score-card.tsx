@@ -13,12 +13,12 @@ import type { PostingFit } from "@/lib/fit";
 export function ScoreCard({ fit, scoring, step, onScore }: { fit: PostingFit | null; scoring: boolean; step: string | null; onScore: () => void }) {
   return (
     <Card padding="none" className="flex flex-col gap-3 px-7 py-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
           <h3 className="text-field font-medium">How well it fits</h3>
           <p className="text-meta text-muted">A score from 0 to 100 with the reasons, as Find jobs gives, from the scorer in Settings → Scoring.</p>
         </div>
-        <Button variant="secondary" size="sm" aria-disabled={scoring || undefined} onClick={() => !scoring && onScore()}>
+        <Button variant="secondary" size="sm" className="shrink-0" aria-disabled={scoring || undefined} onClick={() => !scoring && onScore()}>
           {scoring ? "Scoring…" : fit ? "Score it again" : "Score it"}
         </Button>
       </div>

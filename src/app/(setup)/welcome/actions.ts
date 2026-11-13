@@ -5,7 +5,7 @@ import { z } from "zod";
 import { action, ActionError } from "@/lib/action";
 import { AiError, createProvider } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
-import { loadAiConfig } from "@/lib/ai/config";
+import { loadAiConfig, sameServer } from "@/lib/ai/config";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { AI_CHOICES, aiChoice, LOCAL_ADDRESSES, pickModel, type AiChoiceId } from "@/lib/setup/ai-choices";
 import { SETUP_STEPS } from "@/lib/setup-guide";
@@ -77,7 +77,8 @@ export const findLocalAi = action(z.object({ choice: z.enum(["lmstudio", "ollama
     }
     const same = saved.provider === choice.provider;
     const model = same && saved.model && models.includes(saved.model) ? saved.model : (models[0] ?? null);
-    await saveSettings({ provider: choice.provider, baseUrl, model, apiKeyEnc: same ? saved.apiKeyEnc : null });
+    // LM Studio's token stays with the server it was saved for.
+    await saveSettings({ provider: choice.provider, baseUrl, model, apiKeyEnc: same && sameServer(choice.provider, saved.baseUrl, baseUrl) ? saved.apiKeyEnc : null });
     return { found: true as const, baseUrl, models, model };
   }
   return { found: false as const };

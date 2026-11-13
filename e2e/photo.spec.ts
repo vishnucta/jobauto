@@ -46,6 +46,18 @@ test("adds a photo, cropped from the keyboard, and shows it on the base resume a
   expect(await pdfHasImage(page, "/api/pdf?doc=base")).toBe(true);
 });
 
+test("moves the photo with a click, without dragging (WCAG 2.5.7)", async ({ page }) => {
+  await page.goto("/profile");
+  await page.getByLabel("Photo file").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: portraitPng() });
+  const crop = page.getByRole("dialog", { name: "Crop your photo" }).getByRole("group", { name: /Photo crop/ });
+  const left = () => crop.locator("img").evaluate((image) => Number(/translate\((-?[\d.]+)px/.exec(image.style.transform)![1]));
+  const before = await left();
+  // Wider than the frame, so there's room to bring its left side in.
+  await crop.click({ position: { x: 20, y: 160 } });
+  expect(await left()).toBeGreaterThan(before);
+  await page.getByRole("button", { name: "Cancel" }).click();
+});
+
 test("takes the theme builder's shape and position", async ({ page }) => {
   await page.goto("/resume");
   await page.getByRole("tab", { name: "Customize" }).click();

@@ -2,13 +2,14 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { toast } from "@/components/toast";
+import { toast, toastResult } from "@/components/toast";
 import {
   applySuggestedStatus,
   confirmInterview,
   loadFreeSlots,
   markHandled,
   rereadEmail,
+  saveReplyDraft,
   sendReplyEmail,
   startDraftingReply,
 } from "@/lib/google/actions";
@@ -28,7 +29,7 @@ vi.mock("@/lib/google/actions", () => ({
 }));
 const router = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
-vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
+vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: vi.fn((result: unknown) => result) }));
 vi.mock("@/components/change-status", () => ({ toastWithUndo: vi.fn() }));
 const jobs = vi.hoisted(() => ({ listener: undefined as ((job: unknown) => void) | undefined }));
 vi.mock("@/hooks/use-job", () => ({
@@ -98,6 +99,17 @@ describe("Conversation (E15-3, E15-4)", () => {
     await user.click(screen.getByRole("button", { name: "Review and send" }));
     await user.click(screen.getByRole("button", { name: "Send now" }));
     expect(sendReplyEmail).toHaveBeenCalledWith({ emailId: "e1", body: "Hi Anna, Tuesday works." });
+  });
+
+  it("says so when the answer couldn't be saved", async () => {
+    const user = userEvent.setup();
+    const failed = { ok: false as const, error: "That email is no longer in Dossier." };
+    vi.mocked(saveReplyDraft).mockResolvedValueOnce(failed);
+    render(<Conversation emails={[email({ replyDraft: "Hi Anna," })]} aiReady timeZone="Europe/Berlin" />);
+    await user.type(screen.getByRole("textbox", { name: "Your answer" }), " Tuesday works.");
+    await user.tab();
+    expect(saveReplyDraft).toHaveBeenCalledWith({ emailId: "e1", body: "Hi Anna, Tuesday works." });
+    await waitFor(() => expect(toastResult).toHaveBeenCalledWith(failed));
   });
 
   it("offers to add an agreed interview", async () => {

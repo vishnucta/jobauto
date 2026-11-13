@@ -13,7 +13,18 @@ import { fitBand } from "@/lib/fit";
 import { GoogleError } from "@/lib/google/errors";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
 import { JobSearchError } from "@/lib/job-search/errors";
-import { DEFAULT_RADIUS_KM, foundPostingSchema, POSTED_WITHIN, RADII_KM, type JobSource, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
+import {
+  DEFAULT_RADIUS_KM,
+  EXPERIENCE_LEVELS,
+  experienceAskedFor,
+  foundPostingSchema,
+  POSTED_WITHIN,
+  RADII_KM,
+  type ExperienceLevel,
+  type JobSource,
+  type PostedWithin,
+  type SearchQuery,
+} from "@/lib/job-search/search";
 import { describeSourceProblem } from "@/lib/job-search/sources";
 import { getJob, startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
@@ -52,9 +63,17 @@ import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writte
 // Claude reads; private notes only through list_notes, when the user asks.
 
 const POSTED = POSTED_WITHIN.map((option) => option.value) as [PostedWithin, ...PostedWithin[]];
+const LEVELS = EXPERIENCE_LEVELS.map((option) => option.value) as [ExperienceLevel, ...ExperienceLevel[]];
 
 /** Failures whose messages are written for the user, so Claude may pass them on as they are. */
 const FOR_THE_USER = [ActionError, AiError, GoogleError, JobSearchError];
+
+/** "product designer in Berlin (remote only, entry level)": what search_jobs searched. */
+function searchedLine(query: SearchQuery, country: string): string {
+  const level = EXPERIENCE_LEVELS.find((option) => option.value === experienceAskedFor(query));
+  const notes = [query.remoteOnly ? "remote only" : "", level ? level.label.toLowerCase() : ""].filter(Boolean);
+  return `${query.keywords} in ${query.place || country}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`;
+}
 
 /**
  * Makes every tool registered on `server` answer an unexpected error with a
@@ -132,6 +151,13 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           .min(1)
           .optional()
           .describe("Which sources to search, together, with the same job listed once: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur. Defaults to the one chosen in Settings. A source that can't answer is reported, and a ready one stands in for it."),
+        experience: z
+          .enum(LEVELS)
+          .optional()
+          .describe(
+            "The experience level, as Find jobs' Level: any, intern, junior (entry level), mid, senior or lead. Defaults to any. " +
+              "Postings for another level are left out, so a page can come back short: more_jobs has the next.",
+          ),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
@@ -147,6 +173,8 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         radiusKm: input.radius_km ?? DEFAULT_RADIUS_KM,
         remoteOnly,
         postedWithin: input.posted_within ?? "month",
+        // Left out rather than "any", as Find jobs does (public issue 100).
+        ...(input.experience ? { experience: input.experience } : {}),
       };
       const ran = await runSearch(query, input.sources?.map((name) => name.toUpperCase() as JobSource));
       if (!ran.ok) return failure(ran.message);
@@ -154,7 +182,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       if (!search) return failure("The search ran, but couldn't be read back. Try again.");
       return text({
         search_id: search.id,
-        searched: `${query.keywords} in ${query.place || countryName(country)}${query.remoteOnly ? " (remote only)" : ""}`,
+        searched: searchedLine(query, countryName(country)),
         sources: search.sources.map((source) => source.toLowerCase()),
         problems: search.problems.length > 0 ? search.problems.map(describeSourceProblem) : undefined,
         found: search.postings.length,

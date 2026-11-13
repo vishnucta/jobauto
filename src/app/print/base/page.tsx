@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
 
 import { ResumeDocument } from "@/components/documents/resume-document";
+import { DocumentKind } from "@/generated/prisma/enums";
 import { printBasePath } from "@/lib/pdf/pages";
 import { verifyPrintAccess } from "@/lib/pdf/print-access";
+import { printMetadata } from "@/lib/pdf/print-title";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { loadTheme } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, FIT_LEVELS, printCss } from "@/lib/themes";
 
-export const metadata: Metadata = { title: "Base resume", robots: { index: false } };
+export async function generateMetadata({ searchParams }: PageProps<"/print/base">): Promise<Metadata> {
+  await verifyPrintAccess(printBasePath(fitLevel((await searchParams).fit)));
+  return printMetadata(DocumentKind.RESUME);
+}
 
 /**
  * The base resume on its own, for the PDF renderer (E5-5) to print.

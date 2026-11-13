@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,7 @@ type Status =
   | { state: "missing" };
 
 /** What to try next after a failed check, in plain words. */
-function hint(kind: AiErrorKind, choice: AiChoice): string | null {
+function hint(kind: AiErrorKind, choice: AiChoice): ReactNode {
   switch (kind) {
     case "auth":
       return `Check that you copied the whole key, with nothing before or after it. If it still fails, make a new key and paste that.${choice.id === "anthropic" ? " Claude's key needs a workspace: the default one is fine." : ""}`;
@@ -38,7 +38,16 @@ function hint(kind: AiErrorKind, choice: AiChoice): string | null {
     case "unreachable":
       return `Dossier couldn't reach ${choice.name}. Check that this server is online, then try again.`;
     case "model":
-      return "Your account may not have access to them yet. New accounts sometimes wait a little: try again later, or pick another company.";
+      // The key is saved before the models are checked, so Settings lists what the account has (public PR 108).
+      return (
+        <>
+          Your account may not have access to them yet: new accounts sometimes wait a little, so try again later. Or choose a model your account has in{" "}
+          <Link href="/settings?section=ai" className="font-medium underline underline-offset-2">
+            Settings → AI provider
+          </Link>
+          , where your key is already saved.
+        </>
+      );
     default:
       return null;
   }

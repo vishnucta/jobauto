@@ -11,17 +11,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-const NODE_VERSION = "24.22.2";
+const NODE_VERSION = "24.22.3";
 const NODE_ABI = "137";
 const BETTER_SQLITE3_VERSION = "12.11.1";
 
 const DOWNLOADS = {
   linux: {
-    node: { url: `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz`, sha256: "361718c444e49af2ca5a110c83ba6a8901143f23ab285ebbef0341f391f482a9" },
+    node: { url: `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz`, sha256: "061ec3e3062115705b56b51fa9cc330ab50d34b6969387d4e4b1a50c6809acc2" },
     sqlite: { sha256: "99c43785639d5d3690c396ba245ee680ac8b469a46b19233a3546f0eb7f8e312" },
   },
   win32: {
-    node: { url: `https://nodejs.org/dist/v${NODE_VERSION}/win-x64/node.exe`, sha256: "1c331340fa6cac5e4294725959070a143fa0507195a78ad77eed7943f719aac9" },
+    node: { url: `https://nodejs.org/dist/v${NODE_VERSION}/win-x64/node.exe`, sha256: "86fc4785327db5f5c7558dc6156c543b433c313e813a222e088086222ab4afa6" },
     sqlite: { sha256: "4ee5e653174d6ddd301605d351798cdae2613da06c4f37ecdce263021fcf1255" },
   },
 };

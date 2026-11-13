@@ -9,6 +9,7 @@ import { setupGuideSchema } from "@/lib/setup-guide";
 import { SCORERS } from "@/lib/scoring/scorers";
 import { startupsRefreshSchema } from "@/lib/startups/types";
 import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
+import { AI_TIMEOUT_LIMITS } from "@/lib/ai/provider-options";
 
 /** Date styles for documents (SET-6), labelled with an example as in the prototype. */
 export const DATE_FORMATS: readonly { value: DateFormat; label: string }[] = [
@@ -114,6 +115,8 @@ export const settingsSchema = z.object({
   model: z.string().nullable().catch(null),
   /** Encrypted with a key derived from DOSSIER_SECRET (E6-2); never sent to the client. */
   apiKeyEnc: z.string().nullable().catch(null),
+  /** How long one AI request may take, in seconds (public issue 118); null for DOSSIER_AI_TIMEOUT_SECONDS's, or the provider's own. */
+  aiTimeoutSeconds: z.coerce.number().int().min(AI_TIMEOUT_LIMITS.min).max(AI_TIMEOUT_LIMITS.max).nullable().catch(null),
   creativity: z.enum(Creativity).catch(Creativity.BALANCED),
   /** "Never invent experience" (SET-4). */
   strict: flag(true),

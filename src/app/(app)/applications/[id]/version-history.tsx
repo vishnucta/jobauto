@@ -61,7 +61,8 @@ export function VersionHistory({
   onOpenChange: (open: boolean) => void;
   onView: (version: ViewedVersion) => void;
 }) {
-  const [versions, setVersions] = useState<Version[] | null>(null);
+  // The versions, or why they couldn't be read.
+  const [versions, setVersions] = useState<Version[] | string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export function VersionHistory({
     let current = true;
     void listVersions({ id: applicationId, document }).then((result) => {
       if (!current) return;
-      setVersions(toastResult(result).ok && result.ok ? result.data : []);
+      setVersions(result.ok ? result.data : result.error);
     });
     return () => {
       current = false;
@@ -103,6 +104,10 @@ export function VersionHistory({
           {versions === null ? (
             <p role="status" className="text-sm text-muted">
               Loading the history…
+            </p>
+          ) : typeof versions === "string" ? (
+            <p role="alert" className="text-sm text-error">
+              {versions}
             </p>
           ) : versions.length === 0 ? (
             <p className="text-sm text-muted">No versions yet. The next AI change saves the first one.</p>

@@ -2,11 +2,18 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
+import { DocumentKind } from "@/generated/prisma/enums";
 import { loadDocuments } from "@/lib/application-documents";
 import { verifyPrintAccess } from "@/lib/pdf/print-access";
+import { printMetadata } from "@/lib/pdf/print-title";
 import { printCss } from "@/lib/themes";
 
-export const metadata: Metadata = { title: "Tailored document", robots: { index: false } };
+export async function generateMetadata({ params }: PageProps<"/print/[doc]/[id]">): Promise<Metadata> {
+  const { doc, id } = await params;
+  if (doc !== "resume" && doc !== "letter") notFound();
+  await verifyPrintAccess(`/print/${doc}/${id}`);
+  return printMetadata(doc === "resume" ? DocumentKind.RESUME : DocumentKind.COVER_LETTER);
+}
 
 /**
  * An application's tailored resume (/print/resume/{id}) or cover letter

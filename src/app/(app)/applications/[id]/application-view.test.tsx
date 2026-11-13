@@ -336,6 +336,18 @@ describe("the document tabs (E8-2)", () => {
     expect(screen.getByText(/^Cover letter · about \d+0 words$/)).toBeInTheDocument();
   });
 
+  it("copies the cover letter as text, from the greeting to the name (public issue 101)", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(screen.getByRole("tab", { name: "Cover letter" }));
+    await user.click(screen.getByRole("button", { name: "Copy text" }));
+    const text = vi.mocked(copyText).mock.lastCall?.[0] ?? "";
+    expect(text.startsWith(`Dear Ledgerly team,\n\n${demoLetterUnits()[0].text.trim()}\n\n`)).toBe(true);
+    expect(text.endsWith("\n\nWarm regards,\nJane Doe")).toBe(true);
+    expect(text).not.toContain("28 September 2026");
+    expect(toast).toHaveBeenLastCalledWith("Copied the letter, from the greeting to your name.");
+  });
+
   it("scores the tailored resume on request, and shows the score with its reasons (#370)", async () => {
     const user = userEvent.setup();
     const view = render(<ApplicationView {...props} />);
@@ -1094,6 +1106,15 @@ describe("version history (E8-10)", () => {
     expect(items[0]).not.toHaveTextContent("Changed from the chat");
     expect(items[1]).toHaveTextContent("Before rewriting in German");
     expect(items[1]).not.toHaveTextContent("Changed from the chat");
+  });
+
+  it("says the history didn't load, rather than that there are no versions", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listVersions).mockResolvedValueOnce({ ok: false, error: "Something went wrong on the server. Please try again." });
+    render(<ApplicationView {...props} />);
+    await user.click(screen.getAllByRole("button", { name: "History" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong on the server. Please try again.");
+    expect(screen.queryByText(/No versions yet/)).not.toBeInTheDocument();
   });
 
   it("shows an earlier version in place, restores it, or goes back", async () => {

@@ -7,8 +7,9 @@ import { JobStatus } from "@/generated/prisma/enums";
 import { loadAiConfig } from "@/lib/ai/config";
 import { AiError } from "@/lib/ai/errors";
 import { providerOption } from "@/lib/ai/provider-options";
-import { logServerError } from "@/lib/log";
+import { logServerError, logServerWarning } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
+import { withoutNul } from "@/lib/without-nul";
 
 // Long AI tasks run as background jobs (E6-7): the request that starts one
 // returns at once with its id, the work goes on in this process, and the
@@ -221,12 +222,14 @@ async function pump(): Promise<void> {
 }
 
 async function execute(id: string, controller: AbortController): Promise<void> {
+  let type: string | undefined;
   try {
     const job = await prisma.job.update({
       where: { id },
       data: { status: JobStatus.RUNNING, startedAt: new Date() },
       select: { type: true, input: true },
     });
+    type = job.type;
     await notify(id);
     // Job types register when their module loads; make sure they all have.
     await import("./definitions");
@@ -243,7 +246,8 @@ async function execute(id: string, controller: AbortController): Promise<void> {
         else await notify(id);
       },
     });
-    await finish(id, { status: JobStatus.DONE, result: definition.result.parse(result) as Prisma.InputJsonValue });
+    // A NUL character can't be saved; the schema checks the result without them, as it will be saved.
+    await finish(id, { status: JobStatus.DONE, result: definition.result.parse(withoutNul(result)) as Prisma.InputJsonValue });
   } catch (error) {
     // AI failures already say what to do; anything else is logged and kept vague.
     const message = controller.signal.aborted
@@ -252,6 +256,10 @@ async function execute(id: string, controller: AbortController): Promise<void> {
         ? error.message
         : JOB_MESSAGES.failed;
     if (!(error instanceof AiError) && !controller.signal.aborted) logServerError(`job ${id}`, error);
+    // What kind of AI failure, and the server's status and error type, never its message (public issue 128).
+    if (error instanceof AiError && !controller.signal.aborted) {
+      logServerWarning(`job ${id}`, `${type ?? "job"} failed: AI ${error.kind}${error.detail ? ` (${error.detail})` : ""}`);
+    }
     await finish(id, { status: JobStatus.FAILED, error: message }).catch((cause: unknown) => logServerError(`job ${id}`, cause));
   }
 }

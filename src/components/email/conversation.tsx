@@ -325,7 +325,7 @@ function ReplyDraft({ email, aiReady }: { email: EmailView; aiReady: boolean }) 
           value={body}
           rows={Math.min(18, Math.max(6, body.split("\n").length + 1))}
           onChange={(event) => setBody(event.target.value)}
-          onBlur={() => body !== email.replyDraft && void saveReplyDraft({ emailId: email.id, body })}
+          onBlur={() => body !== email.replyDraft && void saveReplyDraft({ emailId: email.id, body }).then(toastResult)}
           className={cn(
             "w-full resize-y rounded-control border border-line-input bg-input px-3 py-2.5 text-field leading-[1.6] focus-visible:border-primary focus-visible:outline-offset-0",
             job && "opacity-50",

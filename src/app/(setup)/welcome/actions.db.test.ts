@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { decryptApiKey } from "@/lib/ai/api-key";
+import { decryptApiKey, encryptApiKey } from "@/lib/ai/api-key";
 import type { AiConfig } from "@/lib/ai/config";
 import { AiError } from "@/lib/ai/errors";
 import { MockProvider } from "@/lib/ai/providers/mock";
@@ -86,6 +86,22 @@ describe("the setup guide's AI step (E21-2)", () => {
 
     await prisma().setting.update({ where: { key: "model" }, data: { value: "llama-3.1-8b" } });
     expect(await findLocalAi({ choice: "lmstudio" })).toMatchObject({ ok: true, data: { model: "llama-3.1-8b" } });
+  });
+
+  it("keeps LM Studio's token only on the server it was saved for", async () => {
+    ai.make = (config) => {
+      if (config.baseUrl !== "http://localhost:1234") throw AiError.of("unreachable", "ECONNREFUSED");
+      return new MockProvider({ model: null, models: ["qwen2.5-7b-instruct"] });
+    };
+    await prisma().setting.createMany({
+      data: [
+        { key: "provider", value: "LMSTUDIO" },
+        { key: "baseUrl", value: "http://192.168.1.20:1234" },
+        { key: "apiKeyEnc", value: encryptApiKey("lm-token") },
+      ],
+    });
+    await findLocalAi({ choice: "lmstudio" });
+    expect(await loadSettings()).toMatchObject({ provider: "LMSTUDIO", baseUrl: "http://localhost:1234", apiKeyEnc: null });
   });
 
   it("says when it can't find one", async () => {

@@ -56,6 +56,13 @@ describe("NavLinks", () => {
     expect(currentItem("/new")).toEqual(["Applications"]);
   });
 
+  it("sets the current section apart from a hovered one, by more than colour", () => {
+    pathname = "/profile";
+    render(<NavLinks />);
+    expect(screen.getByRole("link", { name: "Profile" })).toHaveClass("bg-selected", "font-medium");
+    expect(screen.getByRole("link", { name: "Settings" })).not.toHaveClass("font-medium");
+  });
+
   it("doesn't treat a path that only starts with the same letters as a match", () => {
     expect(currentItem("/profiles")).toEqual([]);
     expect(currentItem("/newsletter")).toEqual([]);
