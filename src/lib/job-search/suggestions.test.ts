@@ -32,15 +32,15 @@ const entry = (role: string, start: [number, number], end: [number, number] | nu
 
 const basics = (patch: Partial<Fixture["basics"]> = {}) =>
   ({
-    name: "Prearna Janardhanan",
+    name: "Erika Mustermann",
     headline: "Financial Analyst — Regulatory Reporting (EMIR Refit, MiFIR, COREP) & Reconciliation",
     city: "Hamburg",
     country: "Germany",
     ...patch,
   }) as Fixture["basics"];
 
-/** Her profile, as it is. */
-const prearna: Fixture = {
+/** A financial analyst's profile, in Hamburg. */
+const analyst: Fixture = {
   basics: basics(),
   skills,
   experience: [
@@ -56,7 +56,7 @@ const texts = (result: ReturnType<typeof searchWords>, title: string, language?:
 
 describe("search words from the profile", () => {
   it("suggests, for her profile, her titles, what her headline names and the skills she used most, with the German for Hamburg", () => {
-    const result = searchWords(prearna, TODAY);
+    const result = searchWords(analyst, TODAY);
     expect(result.german).toBe(true);
     expect(result.seniorYears).toBe(11);
     expect(texts(result, "Job titles")).toEqual([
@@ -77,7 +77,7 @@ describe("search words from the profile", () => {
   });
 
   it("says where each word comes from", () => {
-    const words = searchWords(prearna, TODAY).groups.flatMap((group) => group.words);
+    const words = searchWords(analyst, TODAY).groups.flatMap((group) => group.words);
     const why = (text: string) => words.find((word) => word.text === text)?.why;
     expect(why("Financial Analyst")).toBe("Your latest role");
     expect(why("Senior Financial Analyst")).toBe("11 years of experience");
@@ -90,7 +90,7 @@ describe("search words from the profile", () => {
   });
 
   it("never suggests more than three words, nor a whole headline, nor an entry-level role", () => {
-    const everything = searchWords(prearna, TODAY).groups.flatMap((group) => group.words.map((word) => word.text));
+    const everything = searchWords(analyst, TODAY).groups.flatMap((group) => group.words.map((word) => word.text));
     for (const text of everything) expect(text.split(/\s+/).length, text).toBeLessThanOrEqual(MAX_WORDS);
     expect(everything).not.toContain("Article Assistant");
     expect(everything.some((text) => text.includes("—") || text.includes("("))).toBe(false);
@@ -107,23 +107,23 @@ describe("search words from the profile", () => {
   });
 
   it("adds Senior only with years behind it, and not to a title that has a level", () => {
-    const young: Fixture = { ...prearna, experience: [entry("Financial Analyst", [2023, 1], null, [])] };
+    const young: Fixture = { ...analyst, experience: [entry("Financial Analyst", [2023, 1], null, [])] };
     expect(texts(searchWords(young, TODAY), "Job titles")).not.toContain("Senior Financial Analyst");
     expect(searchWords(young, TODAY).seniorYears).toBeNull();
-    const lead: Fixture = { ...prearna, basics: basics({ headline: "" }), experience: [entry("Lead Developer", [2010, 1], null, [])] };
+    const lead: Fixture = { ...analyst, basics: basics({ headline: "" }), experience: [entry("Lead Developer", [2010, 1], null, [])] };
     expect(texts(searchWords(lead, TODAY), "Job titles")).toEqual(["Lead Developer"]);
     expect(searchWords(lead, TODAY).seniorYears).toBeNull();
   });
 
   it("leaves Senior out when asked to, and says it still could be offered", () => {
-    const result = searchWords(prearna, TODAY, { senior: false });
+    const result = searchWords(analyst, TODAY, { senior: false });
     expect(texts(result, "Job titles")).not.toContain("Senior Financial Analyst");
     expect(result.seniorYears).toBe(11);
   });
 
   it("offers German words only to a profile in Germany, Austria or Switzerland", () => {
-    for (const country of ["Austria", "Deutschland", "Switzerland"]) expect(searchWords({ ...prearna, basics: basics({ country }) }, TODAY).german, country).toBe(true);
-    const abroad = searchWords({ ...prearna, basics: basics({ country: "United Kingdom" }) }, TODAY);
+    for (const country of ["Austria", "Deutschland", "Switzerland"]) expect(searchWords({ ...analyst, basics: basics({ country }) }, TODAY).german, country).toBe(true);
+    const abroad = searchWords({ ...analyst, basics: basics({ country: "United Kingdom" }) }, TODAY);
     expect(abroad.german).toBe(false);
     expect(abroad.groups.flatMap((group) => group.words).every((word) => word.language === "en")).toBe(true);
     expect(texts(abroad, "Job titles")).toContain("Financial Analyst");
@@ -142,12 +142,12 @@ describe("search words from the profile", () => {
   });
 
   it("follows the profile: a new skill or role changes the words", () => {
-    const before = searchWords(prearna, TODAY);
+    const before = searchWords(analyst, TODAY);
     // Used in three roles, so it is among the skills she used most.
-    const added = searchWords({ ...prearna, skills: [...skills, { id: "new", name: "Treasury" }], experience: prearna.experience.map((role, index) => (index < 3 ? { ...role, skillIds: [...role.skillIds, "new"] } : role)) }, TODAY);
+    const added = searchWords({ ...analyst, skills: [...skills, { id: "new", name: "Treasury" }], experience: analyst.experience.map((role, index) => (index < 3 ? { ...role, skillIds: [...role.skillIds, "new"] } : role)) }, TODAY);
     expect(texts(before, "From your skills")).not.toContain("Treasury");
     expect(texts(added, "From your skills")).toContain("Treasury");
-    expect(texts(searchWords({ ...prearna, experience: [entry("Controller", [2026, 5], null, []), ...prearna.experience] }, TODAY), "Job titles")?.[0]).toBe("Controller");
+    expect(texts(searchWords({ ...analyst, experience: [entry("Controller", [2026, 5], null, []), ...analyst.experience] }, TODAY), "Job titles")?.[0]).toBe("Controller");
   });
 
   it("has nothing to say about an empty profile", () => {
@@ -157,12 +157,12 @@ describe("search words from the profile", () => {
 
 describe("the words for Find jobs' own row", () => {
   it("are the best titles and specialties, and the German for each, six at most", () => {
-    expect(searchChips(searchWords(prearna, TODAY))).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting", "EMIR Refit", "Meldewesen", "Finanzanalyst"]);
-    expect(searchChips(searchWords(prearna, TODAY), 3)).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting"]);
+    expect(searchChips(searchWords(analyst, TODAY))).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting", "EMIR Refit", "Meldewesen", "Finanzanalyst"]);
+    expect(searchChips(searchWords(analyst, TODAY), 3)).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting"]);
   });
 
   it("stay English for a profile elsewhere, filling up from the skills", () => {
-    const chips = searchChips(searchWords({ ...prearna, basics: basics({ country: "Ireland" }) }, TODAY));
+    const chips = searchChips(searchWords({ ...analyst, basics: basics({ country: "Ireland" }) }, TODAY));
     expect(chips).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting", "EMIR Refit", "Audit Support", "Taxation"]);
   });
 });
