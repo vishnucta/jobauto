@@ -37,6 +37,8 @@ export function createProvider(config: AiConfig): AIProvider {
       return new OpenAICompatibleProvider("GROQ", baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.DEEPSEEK:
       return new DeepSeekProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
+    case AiProvider.GEMINI:
+      return new OpenAICompatibleProvider("GEMINI", baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.LMSTUDIO:
       return new LmStudioProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
   }

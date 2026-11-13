@@ -129,7 +129,7 @@ describe("stored settings", () => {
 
   it("reads values that don't fit as the default, and ignores unknown keys", () => {
     const settings = settingsFromRows([
-      { key: "provider", value: "GEMINI" },
+      { key: "provider", value: "CHATGPT" },
       { key: "paper", value: "A5" },
       { key: "strict", value: "maybe" },
       { key: "customLanguages", value: "Farsi, Hebrew" },

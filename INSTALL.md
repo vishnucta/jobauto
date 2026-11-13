@@ -15,7 +15,7 @@ The Apply tab opens the employer's form in a browser window on the machine the a
 - Windows 10 or 11. macOS and Linux work with section 1 too, but are less tested.
 - About 2 GB of free memory and 3 GB of free disk, and an internet connection for the install.
 - Microsoft Edge or Google Chrome. The app prints PDFs and fills in application forms with one of them. Edge comes with Windows.
-- Later, in the app: an API key for an AI provider (Groq is free, DeepSeek and Anthropic are pay per use), or a local model through Ollama or LM Studio.
+- Later, in the app: an API key for an AI provider (Groq is free, DeepSeek, Gemini and Anthropic are pay per use), or a local model through Ollama or LM Studio.
 
 ## 1. Clone with Git
 
@@ -186,7 +186,7 @@ Before publishing, test the zip on a clean Windows: **Windows Sandbox** (turn it
 
 ## 3. Docker
 
-Docker Desktop on macOS or Windows, or Docker Engine on Linux: follow **Run it on your computer** in the [README](README.md#run-it-on-your-computer), and upstream's [installation guide](https://github.com/AienTech/dossier/wiki) for servers. The image there is upstream Dossier's: the fork's additions (Groq and DeepSeek, the Apply tab, the Edge and Chrome fallbacks) need the fork's source, so build it yourself with `docker compose build` from a clone instead of pulling the image. The Apply tab needs a screen, which a container doesn't have: prefer section 1 on the computer you apply from, or let it use the Chrome on your laptop, as in the next section.
+Docker Desktop on macOS or Windows, or Docker Engine on Linux: follow **Run it on your computer** in the [README](README.md#run-it-on-your-computer), and upstream's [installation guide](https://github.com/AienTech/dossier/wiki) for servers. The image there is upstream Dossier's: the fork's additions (Groq, DeepSeek and Gemini, the Apply tab, the Edge and Chrome fallbacks) need the fork's source, so build it yourself with `docker compose build` from a clone instead of pulling the image. The Apply tab needs a screen, which a container doesn't have: prefer section 1 on the computer you apply from, or let it use the Chrome on your laptop, as in the next section.
 
 ## Apply from a laptop
 
@@ -211,7 +211,7 @@ While **Chrome for Apply** is open, any device in your Tailscale network can con
 
 ## First steps in the app
 
-1. **Settings → AI provider**: choose **Groq** and paste a free API key from [console.groq.com](https://console.groq.com), **DeepSeek** with a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys) (pay per use, a few euros go a long way), or **Anthropic** with a key from [platform.claude.com](https://platform.claude.com). Press **Test connection**.
+1. **Settings → AI provider**: choose **Groq** and paste a free API key from [console.groq.com](https://console.groq.com), **DeepSeek** with a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys) (pay per use, a few euros go a long way), **Gemini** with a key from [Google AI Studio](https://aistudio.google.com/api-keys) (set up billing there first, so Google doesn't use what it's sent), or **Anthropic** with a key from [platform.claude.com](https://platform.claude.com). Press **Test connection**.
 2. **Settings → Job search**: choose **Bundesagentur für Arbeit**, which is free and needs no key, and tick **I understand, and choose this source myself**.
 3. **Profile → Import from a resume**: upload your CV and check what it read. Moving over from another computer instead? There, use **Settings → Your data → Export everything** with **Include my API keys** ticked. Here, use **Import** in **Settings → Your data** and choose that file. Delete the file afterwards: it holds your profile and your keys in plain text.
 4. **Find jobs**, open a posting and create an application. On its **Apply** tab, **Open and fill it in** opens the employer's form in a browser window and fills it in. Check everything in that window, and press Send yourself.

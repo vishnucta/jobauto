@@ -108,6 +108,21 @@ export const PROVIDER_OPTIONS: readonly {
     defaultModel: "deepseek-flash",
     apiKey: { label: "API key", hint: "From platform.deepseek.com → API keys, after topping up a few euros. What Dossier writes from goes to DeepSeek's servers in China." },
   },
+  {
+    value: AiProvider.GEMINI,
+    name: "Gemini",
+    vendor: "Google",
+    description: "Google's Gemini models through your own Google AI Studio API key.",
+    tag: "Hosted · low cost · pay per use",
+    local: false,
+    defaultUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    urlPlaceholder: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: "gemini-3.8-flash",
+    apiKey: {
+      label: "API key",
+      hint: "From aistudio.google.com/api-keys. Set up billing there first: without it, Google may use what Dossier sends to improve its products, and people may read it.",
+    },
+  },
 ];
 
 export function providerOption(provider: AiProvider) {

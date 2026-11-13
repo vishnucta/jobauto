@@ -89,6 +89,7 @@ describe("createProvider", () => {
     expect(createProvider({ ...base, provider: "LMSTUDIO" }).kind).toBe("LMSTUDIO");
     expect(createProvider({ ...base, provider: "GROQ" }).kind).toBe("GROQ");
     expect(createProvider({ ...base, provider: "DEEPSEEK" }).kind).toBe("DEEPSEEK");
+    expect(createProvider({ ...base, provider: "GEMINI" }).kind).toBe("GEMINI");
   });
 });
 

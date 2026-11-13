@@ -381,6 +381,8 @@ enum AiProvider {
   GROQ
   /// DeepSeek's hosted API: OpenAI-compatible, pay per use (bewerbung fork).
   DEEPSEEK
+  /// Google's Gemini through AI Studio's OpenAI-compatible API, pay per use (bewerbung fork).
+  GEMINI
 }
 
 enum Creativity {

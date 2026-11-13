@@ -323,6 +323,9 @@ describe("get_settings and update_settings", () => {
     expect((await tool("update_settings", { ai_provider: "DEEPSEEK" })).json).toMatchObject({
       ai: { ai_provider: "DEEPSEEK", ai_address: "https://api.deepseek.com", ai_model: "deepseek-flash", api_key: "none", ready: false },
     });
+    expect((await tool("update_settings", { ai_provider: "GEMINI" })).json).toMatchObject({
+      ai: { ai_provider: "GEMINI", ai_address: "https://generativelanguage.googleapis.com/v1beta/openai", ai_model: "gemini-3.8-flash", api_key: "none", ready: false },
+    });
 
     // At the card's address: another server is the user's to set.
     const local = await tool("update_settings", { ai_provider: "LOCAL", ai_model: "qwen2.5:3b" });
