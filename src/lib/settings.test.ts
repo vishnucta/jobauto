@@ -82,6 +82,7 @@ describe("stored settings", () => {
       alertProblem: null,
       alertMinScore: 80,
       careersCheckedOn: null,
+      weeklyTarget: 0,
       applyAnswers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
       applyBrowserAddress: null,
       startupsViewedAt: null,

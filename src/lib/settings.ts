@@ -143,6 +143,8 @@ export const settingsSchema = z.object({
   applicationsSort: z.string().catch("updated"),
   /** The dashboard's period as last left (E9-8). */
   dashboardPeriod: z.enum(["30d", "90d", "all"]).catch("all"),
+  /** Applications to send each week, Monday to Sunday (weekly-target.ts); 0 is no target. */
+  weeklyTarget: z.coerce.number().int().min(0).max(50).catch(0),
   /** Days without news before "Worth a look" suggests a follow-up (E9-9). */
   quietDays: z.coerce.number().int().min(1).max(60).catch(7),
   /** Experience, projects and education: newest first by date, or the order set by hand (E4-9). */
