@@ -283,6 +283,16 @@ describe("runAgentScan (E16-3)", () => {
     expect((await loadSettings()).agentRuns).toEqual([{ at: now.toISOString(), manual: false, message: "2 new postings are waiting for a look.", sourceRequests: 1, sourceRequestAts: [expect.any(String)], searches: [expect.objectContaining({ searchName: "My search", found: 3, fresh: 3, error: null })] }]);
   });
 
+  it("doesn't score postings that need far more German than the profile has (B1)", async () => {
+    fake.postings = [...page, posting("d", "Buchhalter", "2026-10-19T00:00:00Z", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." })];
+    const scored: string[] = [];
+    fake.onScore = (title) => void scored.push(title);
+    const result = await runAgentScan({ manual: false }, context(), now);
+    expect(scored).not.toContain("Buchhalter");
+    expect(result).toMatchObject({ found: 4, fresh: 4, scored: 3, message: "2 new postings are waiting for a look. 1 more needs more German than your profile has, so it wasn't scored." });
+    expect(await prisma().agentCandidate.count({ where: { externalId: "d" } })).toBe(0);
+  });
+
   it("scores with Jev when Settings → Scoring chose it, without an AI provider (#274)", async () => {
     fake.ai = false;
     await saveSettings({ scorer: "JEV" });

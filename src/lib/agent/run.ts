@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { AiError } from "@/lib/ai/errors";
+import { germanFit, textForGerman, profileGerman } from "@/lib/german-need";
 import { dayOf } from "@/lib/calendar-view";
 import { searchPostings } from "@/lib/job-search";
 import { noteAgencies } from "@/lib/recruiters/store";
@@ -213,9 +214,17 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
   const counts = { found: postings.length, fresh: fresh.length, skipped: postings.length - fresh.length, drafted: 0 };
   if (fresh.length === 0) return { ...counts, scored: 0, message: postings.length === 0 ? "The search found no postings this time." : "No new postings this time." };
 
-  const toScore = fresh.slice(0, settings.agentMaxScores);
+  // Postings that need far more German than the profile has aren't scored: no AI is spent on them.
+  const profile = await loadProfile();
+  const german = profileGerman(profile.languages);
+  const reachable = fresh.filter((posting) => germanFit(textForGerman(posting), german).verdict !== "out");
+  const gated = fresh.length - reachable.length;
+  const tooMuchGerman = gated ? ` ${gated} more ${gated === 1 ? "needs" : "need"} more German than your profile has, so ${gated === 1 ? "it wasn't" : "they weren't"} scored.` : "";
+  if (reachable.length === 0) return { ...counts, scored: 0, message: `No new postings within reach this time.${tooMuchGerman}` };
+
+  const toScore = reachable.slice(0, settings.agentMaxScores);
   await context.step(`Scoring ${toScore.length} ${toScore.length === 1 ? "posting" : "postings"}`);
-  const [score, profile] = await Promise.all([loadPostingScorer(), loadProfile()]);
+  const score = await loadPostingScorer();
   let scored = 0;
   let queued = 0;
   const kept: string[] = [];
@@ -265,5 +274,5 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
         : drafted > 0
           ? `${waiting} Preparing ${drafted === 1 ? "a draft for the best one" : `drafts for the best ${drafted}`}.`
           : waiting;
-  return { ...counts, scored, drafted, message };
+  return { ...counts, scored, drafted, message: message + tooMuchGerman };
 }

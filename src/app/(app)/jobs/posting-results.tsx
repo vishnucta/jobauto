@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { FitDetails } from "@/components/fit-details";
+import { GermanBadge, GermanNote } from "@/components/german-badge";
 import { ScoreBadge } from "@/components/score-badge";
 import { linksAttribution, SourceAttribution } from "@/components/source-attribution";
 import { toast, toastResult } from "@/components/toast";
@@ -12,6 +13,7 @@ import { useJob } from "@/hooks/use-job";
 import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import type { PostingFit } from "@/lib/fit";
+import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
 import type { JobView } from "@/lib/jobs/runner";
 import { byScore, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 import { arbeitsagenturPage, describeSourceProblem, searchesWithin, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
@@ -26,6 +28,8 @@ export type PostingResultsProps = {
   today: string;
   /** Score opens a Claude chat, which scores through the connector: it's on, and Dossier has no AI model of its own (#221). */
   scoreInClaude?: boolean;
+  /** The profile's German, which each posting's is read against; postings that need far more are hidden until shown. */
+  german?: ProfileGerman;
 } & (
   | {
       mode: "search";
@@ -67,9 +71,22 @@ export function PostingResults(props: PostingResultsProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const [sorted, setSorted] = useState(mode === "found");
-  const inView = ({ state }: ShownPosting) => (mode === "saved" ? state.saved : mode === "dismissed" ? state.dismissed : showDismissed || !state.dismissed);
+  const [showOut, setShowOut] = useState(false);
+  const german = props.german ?? "NONE";
+  // What German each posting asks for, by postingKey: read from its text, no AI.
+  const germanFits = useMemo(() => new Map(postings.map((posting) => [postingKey(posting), germanFit(textForGerman(posting), german)])), [postings, german]);
+  // Search results hide what needs far more German than the profile has; Saved and Dismissed are the user's own choices.
+  const gates = mode === "search" || mode === "found";
+  const outOfReach = (posting: ShownPosting) => gates && germanFits.get(postingKey(posting))?.verdict === "out";
+  const inView = (posting: ShownPosting) => {
+    const { state } = posting;
+    if (mode === "saved") return state.saved;
+    if (mode === "dismissed") return state.dismissed;
+    return (showDismissed || !state.dismissed) && (showOut || !outOfReach(posting) || state.saved || Boolean(state.applicationId));
+  };
   const visible = (sorted ? byScore(postings) : postings).filter(inView);
-  const hidden = mode === "search" || mode === "found" ? postings.filter((posting) => posting.state.dismissed).length : 0;
+  const hidden = gates ? postings.filter((posting) => posting.state.dismissed).length : 0;
+  const tooMuchGerman = gates ? postings.filter((posting) => !posting.state.dismissed && !posting.state.saved && !posting.state.applicationId && outOfReach(posting)).length : 0;
   const [selectedKey, setSelectedKey] = useState(visible[0] ? postingKey(visible[0]) : null);
   const selected = visible.find((posting) => postingKey(posting) === selectedKey) ?? visible[0] ?? null;
   const detail = useRef<HTMLElement>(null);
@@ -238,6 +255,17 @@ export function PostingResults(props: PostingResultsProps) {
               Search again
             </button>
           )}
+          {tooMuchGerman > 0 && (
+            <button
+              type="button"
+              aria-pressed={showOut}
+              onClick={() => setShowOut(!showOut)}
+              title="Read from each posting's text: the German it asks for against the German in your profile."
+              className="underline-offset-3 hover:text-ink aria-pressed:text-ink aria-pressed:underline"
+            >
+              {tooMuchGerman === 1 ? "1 needs more German than you have" : `${tooMuchGerman} need more German than you have`} · {showOut ? "Hide" : "Show"}
+            </button>
+          )}
           {hidden > 0 && (
             <button
               type="button"
@@ -258,6 +286,7 @@ export function PostingResults(props: PostingResultsProps) {
             selectedKey={selected ? postingKey(selected) : null}
             now={now}
             onSelect={select}
+            germanFits={germanFits}
             scoring={scoring}
             onScore={(posting) => void score(posting)}
           />
@@ -275,6 +304,7 @@ export function PostingResults(props: PostingResultsProps) {
           key={postingKey(selected)}
           ref={detail}
           posting={selected}
+          german={german}
           now={now}
           onSave={() => void save(selected)}
           onUnsave={() => void unsave(selected)}
@@ -329,6 +359,7 @@ function PostingList({
   selectedKey,
   now,
   onSelect,
+  germanFits,
   scoring,
   onScore,
 }: {
@@ -336,6 +367,8 @@ function PostingList({
   selectedKey: string | null;
   now: Date;
   onSelect: (key: string, options?: { reveal?: boolean }) => void;
+  /** What German each posting asks for, by postingKey. */
+  germanFits: Map<string, GermanFit>;
   /** Postings being scored, by postingKey. */
   scoring: Record<string, unknown>;
   onScore: (posting: ShownPosting) => void;
@@ -375,6 +408,7 @@ function PostingList({
               <span className="flex items-start justify-between gap-3">
                 <span className="text-field font-medium text-pretty">{title}</span>
                 <span className="flex shrink-0 items-center gap-1.5">
+                  <GermanBadge fit={germanFits.get(key)} />
                   <StateBadges state={posting.state} />
                   {posting.state.score ? (
                     <ScoreBadge score={posting.state.score.score} size="sm" />
@@ -444,6 +478,7 @@ type Text = { status: "ready"; text: string } | { status: "loading" } | { status
 function PostingDetail({
   ref,
   posting,
+  german,
   now,
   onSave,
   onUnsave,
@@ -455,6 +490,7 @@ function PostingDetail({
 }: {
   ref: Ref<HTMLElement>;
   posting: ShownPosting;
+  german: ProfileGerman;
   now: Date;
   onSave: () => void;
   onUnsave: () => void;
@@ -488,6 +524,8 @@ function PostingDetail({
 
   const { state } = posting;
   const ago = postedAgo(posting.postedAt, now);
+  // Read again from the whole text, once it's here.
+  const fullGerman = germanFit(textForGerman({ title: posting.title, description: text.status === "loading" ? posting.description : text.text }), german);
 
   return (
     <section
@@ -547,6 +585,8 @@ function PostingDetail({
           </Button>
         )}
       </div>
+
+      <GermanNote fit={fullGerman} />
 
       {scoring ? (
         <p role="status" className="text-meta text-muted">

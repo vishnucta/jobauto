@@ -208,6 +208,20 @@ describe("the results", () => {
     expect(screen.getByRole("link", { name: /Open posting/ })).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it("hides postings that need far more German than the profile has, until shown, and badges the rest", async () => {
+    const fluent = posting("a", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." });
+    const english = posting("b", { description: "Our working language is English." });
+    renderScreen({ german: "A2", search: stored([fluent, english]) });
+    const list = screen.getByRole("list", { name: "Postings" });
+    expect(within(list).getAllByRole("button", { name: /^Designer/ })).toHaveLength(1);
+    expect(within(list).getByRole("button", { name: /^Designer b/ })).toHaveTextContent("English team");
+    await userEvent.click(screen.getByRole("button", { name: "1 needs more German than you have · Show" }));
+    const shown = within(list).getByRole("button", { name: /^Designer a/ });
+    expect(shown).toHaveTextContent("German C1");
+    await userEvent.click(shown);
+    expect(screen.getByText("Needs more German than your profile has: “Verhandlungssichere Deutschkenntnisse in Wort und Schrift.”")).toBeInTheDocument();
+  });
+
   it("shows another posting when it's picked, and moves with the arrow keys", async () => {
     renderScreen({ search: stored([posting("a"), posting("b"), posting("c")]) });
     await userEvent.click(screen.getByRole("button", { name: /^Designer b/ }));

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { isAiUsable } from "@/lib/ai/config";
+import { profileGerman } from "@/lib/german-need";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -59,6 +60,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       sources={sourceStates(config)}
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
+      german={profileGerman(profile.languages)}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       view={view}
