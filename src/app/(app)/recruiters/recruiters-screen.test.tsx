@@ -41,7 +41,7 @@ const recruiter = (patch: Partial<RecruiterView>): RecruiterView => ({
   ...patch,
 });
 
-const facts: OutreachFacts = { name: "Prearna Janardhanan", headline: "Financial Analyst", city: "Hamburg", languages: [{ name: "English", level: "Fluent (C2)" }] };
+const facts: OutreachFacts = { name: "Erika Mustermann", headline: "Financial Analyst", city: "Hamburg", languages: [{ name: "English", level: "Fluent (C2)" }] };
 
 const due = recruiter({ id: "due", name: "Arkwright", status: "CONTACTED", contactedAt: days(-9), followUpAt: days(-2), email: "jobs@arkwright.example" });
 const fresh = recruiter({ id: "fresh", name: "Hays", speciality: "All fields", source: "found in search" });

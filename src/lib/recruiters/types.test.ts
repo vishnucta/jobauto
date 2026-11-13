@@ -38,7 +38,7 @@ const recruiter = (patch: Partial<RecruiterView> = {}): RecruiterView => ({
 });
 
 const facts: OutreachFacts = {
-  name: "Prearna Janardhanan",
+  name: "Erika Mustermann",
   headline: "Financial Analyst, regulatory reporting",
   city: "Hamburg",
   languages: [
@@ -147,10 +147,10 @@ describe("the message to write", () => {
     expect(body).toBe(
       [
         "Hello Alex Kuhn,",
-        "I am Prearna Janardhanan, Financial Analyst, regulatory reporting, based in Hamburg. I am looking for my next role and saw that you place people in financial services, incl. regulatory reporting.",
+        "I am Erika Mustermann, Financial Analyst, regulatory reporting, based in Hamburg. I am looking for my next role and saw that you place people in financial services, incl. regulatory reporting.",
         "My languages: English (Fluent (C2)), German (Elementary (A2)).",
         "My resume is attached. I would be glad to hear whether a short call fits.",
-        "Kind regards,\nPrearna Janardhanan",
+        "Kind regards,\nErika Mustermann",
       ].join("\n\n"),
     );
   });

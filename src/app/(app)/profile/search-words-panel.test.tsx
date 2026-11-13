@@ -16,7 +16,7 @@ type Fixture = Pick<ProfileData, "basics" | "skills" | "experience">;
 const role = (patch: Partial<Fixture["experience"][number]> = {}): Fixture["experience"][number] => ({
   id: "e1",
   role: "Financial Analyst",
-  company: "AvaTrade",
+  company: "Nordbank Trading",
   location: "",
   descriptor: "",
   volunteering: false,
@@ -31,7 +31,7 @@ const role = (patch: Partial<Fixture["experience"][number]> = {}): Fixture["expe
 });
 
 const profile = (patch: Partial<Fixture> = {}): Fixture => ({
-  basics: { name: "Prearna", headline: "Financial Analyst — Regulatory Reporting & Reconciliation", city: "Hamburg", country: "Germany" } as Fixture["basics"],
+  basics: { name: "Erika", headline: "Financial Analyst — Regulatory Reporting & Reconciliation", city: "Hamburg", country: "Germany" } as Fixture["basics"],
   skills: [
     { id: "s1", name: "Audit Support", group: "" },
     { id: "s2", name: "Data Analysis", group: "" },
