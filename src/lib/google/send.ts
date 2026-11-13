@@ -7,6 +7,7 @@ import { unitsSchema } from "@/lib/application-data";
 import { emailAddresses, emailParts } from "@/lib/application-email";
 import { resolveFileName } from "@/lib/file-name";
 import { renderPdf } from "@/lib/pdf/render";
+import { AttachmentError, enabledAttachments } from "@/lib/attachments";
 import { prisma } from "@/lib/prisma";
 import { loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
@@ -61,7 +62,15 @@ async function applicationEmail(applicationId: string) {
     fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date() }),
     page: `/print/${path}/${applicationId}`,
   }));
-  return { application, name, to, subject, body, printed };
+  // The Anlagen that are on go along after the documents (jobauto fork).
+  let anlagen: Awaited<ReturnType<typeof enabledAttachments>>;
+  try {
+    anlagen = await enabledAttachments();
+  } catch (error) {
+    if (error instanceof AttachmentError) throw new GoogleError("unavailable", error.message);
+    throw error;
+  }
+  return { application, name, to, subject, body, printed, anlagen };
 }
 
 type ApplicationEmail = Awaited<ReturnType<typeof applicationEmail>>;
@@ -71,9 +80,9 @@ type ApplicationEmail = Awaited<ReturnType<typeof applicationEmail>>;
  * it, for Claude to send only what it showed (#221): it stops matching once
  * the email changes or goes out.
  */
-async function fingerprint({ application, to, subject, body, printed }: ApplicationEmail): Promise<string> {
+async function fingerprint({ application, to, subject, body, printed, anlagen }: ApplicationEmail): Promise<string> {
   const sends = await prisma.emailMessage.count({ where: { applicationId: application.id, direction: EmailDirection.OUTGOING } });
-  const parts = [to, subject, body, printed.map((file) => file.fileName), application.emailThreadId, sends];
+  const parts = [to, subject, body, [...printed, ...anlagen].map((file) => file.fileName), application.emailThreadId, sends];
   return createHash("sha256").update(JSON.stringify(parts)).digest("base64url").slice(0, 16);
 }
 
@@ -91,12 +100,12 @@ export type ApplicationEmailPreview = {
 /** What sendApplicationEmail would send, for Claude to show before it goes (#221). */
 export async function previewApplicationEmail(applicationId: string): Promise<ApplicationEmailPreview> {
   const email = await applicationEmail(applicationId);
-  const { application, to, subject, body, printed } = email;
+  const { application, to, subject, body, printed, anlagen } = email;
   return {
     to,
     subject,
     body,
-    attachments: printed.map((file) => file.fileName),
+    attachments: [...printed, ...anlagen].map((file) => file.fileName),
     status: application.status,
     sentBefore: application.emailThreadId !== null,
     token: await fingerprint(email),
@@ -119,9 +128,10 @@ export async function sendApplicationEmail(applicationId: string, { expected }: 
   try {
     const email = await applicationEmail(applicationId);
     if (expected !== undefined && (await fingerprint(email)) !== expected) throw new GoogleError("unavailable", EMAIL_CHANGED);
-    const { application, name, to, subject, body, printed } = email;
+    const { application, name, to, subject, body, printed, anlagen } = email;
     const attachments: Attachment[] = [];
     for (const { fileName, page } of printed) attachments.push({ fileName, contentType: "application/pdf", data: await renderPdf(page) });
+    for (const { fileName, data } of anlagen) attachments.push({ fileName, contentType: "application/pdf", data });
 
     const from = await sender(account.email);
     const sent = await sendMail({ from, to, subject, body, attachments });

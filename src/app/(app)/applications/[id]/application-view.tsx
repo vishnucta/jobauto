@@ -871,6 +871,12 @@ export function ApplicationView({
                 Download PDF
               </DownloadPdfButton>
             )}
+            {(resume || letter) && (
+              // The letter, the resume and the Anlagen in one PDF, for job portals that take a single file (jobauto fork).
+              <DownloadPdfButton variant="secondary" href={`/api/pdf?doc=mappe&application=${application.id}`} progress="Putting your letter, resume and Anlagen into one PDF…">
+                Bewerbungsmappe
+              </DownloadPdfButton>
+            )}
             <ApplicationMenu id={application.id} archived={application.archived} />
           </>
         }

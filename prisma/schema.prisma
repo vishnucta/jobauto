@@ -1001,6 +1001,28 @@ model Employer {
   @@index([name])
 }
 
+// ─── Anlagen (jobauto fork) ──────────────────────────────────────────────────
+
+/// A certificate or reference letter (Zeugnis, Zertifikat) kept once and sent
+/// with applications: attached to the application email, and put after the
+/// letter and resume in the one-PDF Bewerbungsmappe. The PDF itself lives in
+/// DOSSIER_DATA_DIR/attachments/<id>.pdf.
+model Attachment {
+  id        String   @id @default(cuid())
+  /// What it is, as the letter's Anlagen line names it, e.g. "Arbeitszeugnis AvaTrade".
+  name      String
+  /// The file's name as uploaded.
+  fileName  String
+  /// In bytes.
+  size      Int
+  /// Sent with every application; off keeps it on file without sending it.
+  enabled   Boolean  @default(true)
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([sort, createdAt])
+}
+
 // ─── Google: Gmail and Calendar (E15) ────────────────────────────────────────
 
 /// The connected Google account; at most one row, with id "google". It
