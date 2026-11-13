@@ -3,6 +3,8 @@ import "server-only";
 import { Ollama } from "ollama";
 import { z } from "zod";
 
+import type { UsageSink } from "@/lib/usage";
+
 import { BaseProvider, withJsonSchema, type ChatAnswer, type ChatCall } from "../provider";
 
 /**
@@ -20,8 +22,9 @@ export class OllamaProvider extends BaseProvider {
     private readonly host: string,
     model: string | null,
     timeoutMs: number,
+    onUsage?: UsageSink,
   ) {
-    super(model, timeoutMs);
+    super(model, timeoutMs, onUsage);
   }
 
   /** A client whose requests end when `signal` does. */
@@ -45,11 +48,13 @@ export class OllamaProvider extends BaseProvider {
       format: call.json ? z.toJSONSchema(call.json.schema) : undefined,
       options: { temperature: call.temperature, num_predict: call.maxTokens, num_ctx: CONTEXT_TOKENS },
     });
+    // A prompt Ollama still has in its cache may come back without a count.
+    call.used({ input: response.prompt_eval_count ?? null, output: response.eval_count ?? null });
     return { text: response.message.content, cutOff: response.done_reason === "length" };
   }
 
   protected async fetchModels(signal: AbortSignal): Promise<string[]> {
     const { models } = await this.client(signal).list();
-    return models.map((model) => model.name).sort();
+    return models.map((model) => model.name).sort((a, b) => a.localeCompare(b));
   }
 }

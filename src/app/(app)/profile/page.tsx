@@ -14,8 +14,9 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
   return (
     <ProfileEditor
       initial={profile}
-      section={sectionFromParam(section)}
-      order={{ experience: settings.experienceOrder, projects: settings.projectOrder, education: settings.educationOrder }}
+      section={sectionFromParam(section, profile.customSections)}
+      order={{ experience: settings.experienceOrder, projects: settings.projectOrder, education: settings.educationOrder, skills: settings.skillOrder }}
+      sections={settings.resumeSections}
     />
   );
 }

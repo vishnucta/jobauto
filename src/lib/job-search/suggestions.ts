@@ -1,4 +1,4 @@
-import { experienceMonths, type ProfileData } from "@/lib/profile";
+import { experienceMonths, paidRoles, type ProfileData } from "@/lib/profile";
 import { DACH } from "@/lib/startups/place";
 
 import { countryCodeFor } from "./countries";
@@ -122,8 +122,9 @@ export function searchWords(profile: Pick<ProfileData, "basics" | "skills" | "ex
 
   // Titles: her roles, newest first, with "Senior" when she has the years, and
   // what her headline names a person does with the latest role's noun.
+  // Volunteering (#294) is no job title to search for.
   const roles = unique(
-    newestFirst(profile.experience)
+    newestFirst(paidRoles(profile.experience))
       .filter((entry) => !ENTRY_LEVEL.test(entry.role) && short(entry.role))
       .map((entry, index) => ({ text: entry.role.trim(), language: "en" as const, why: index === 0 ? "Your latest role" : "A past role" })),
   ).slice(0, 3);

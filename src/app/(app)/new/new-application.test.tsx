@@ -9,11 +9,12 @@ import { addSkill } from "../profile/actions";
 
 import { cancel } from "@/lib/jobs/actions";
 
-import { createApplication, fetchPostingText, handOffToClaude, startReadingPosting, startWritingDocuments } from "./actions";
+import { createApplication, fetchPostingText, handOffToClaude, startReadingPosting, startScoringPosting, startWritingDocuments } from "./actions";
 import { NewApplication } from "./new-application";
 
 vi.mock("./actions", () => ({
   startReadingPosting: vi.fn(),
+  startScoringPosting: vi.fn(),
   startWritingDocuments: vi.fn(),
   createApplication: vi.fn(),
   fetchPostingText: vi.fn(),
@@ -240,6 +241,27 @@ describe("how you match (E7-4)", () => {
     emit({ status: "DONE", result: read });
   }
 
+  it("scores the posting on request, before anything is written (public issue 66)", async () => {
+    vi.mocked(startScoringPosting).mockResolvedValue({ ok: true, data: "score-1" });
+    await review();
+    await userEvent.click(screen.getByRole("button", { name: "Score it" }));
+    expect(startScoringPosting).toHaveBeenCalledWith({ posting: "Ledgerly is hiring.", details: { title: "Designer · Ledgerly", company: "Ledgerly", location: "", mode: "", salary: "" } });
+    expect(screen.getByRole("button", { name: "Scoring…" })).toBeInTheDocument();
+    emit({ id: "score-1", type: "pasted-score", status: "RUNNING", step: "Scoring it against your profile" });
+    expect(screen.getByText("Scoring it against your profile")).toBeInTheDocument();
+    emit({ id: "score-1", type: "pasted-score", status: "DONE", result: { score: 78, reasons: ["Built a design system."], redFlags: ["Dutch is required."] } });
+    expect(screen.getByText("Good fit · 78 of 100")).toBeInTheDocument();
+    expect(screen.getByText("Dutch is required.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Score it again" })).toBeInTheDocument();
+    // Reading another posting starts without a score.
+    await userEvent.click(screen.getByRole("button", { name: "← Back to the posting" }));
+    await userEvent.type(screen.getByLabelText("Job posting"), " Now bigger.");
+    await userEvent.click(screen.getByRole("button", { name: "Read the posting →" }));
+    emit({ status: "DONE", result: read });
+    expect(screen.queryByText("Good fit · 78 of 100")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Score it" })).toBeInTheDocument();
+  });
+
   it("shows each requirement honestly, not by colour or symbol alone (NEW-4)", async () => {
     await review();
     expect(screen.getByRole("heading", { name: "How you match" })).toBeInTheDocument();
@@ -372,6 +394,7 @@ describe("creating the application (E7-6)", () => {
       match: { items: [] },
       tone: "WARM",
       note: "Lean on research.",
+      write: "both",
       language: null,
     });
     expect(screen.getByRole("heading", { name: "Putting your application together…" })).toBeInTheDocument();

@@ -16,7 +16,7 @@ export default async function PrintTailoredDocumentPage({ params }: PageProps<"/
   const { doc, id } = await params;
   if (doc !== "resume" && doc !== "letter") notFound();
   await verifyPrintAccess(`/print/${doc}/${id}`);
-  const { application, profile, settings, resume, letter, includeReferences, letterDate } = await loadDocuments(id);
+  const { application, profile, settings, resume, letter, includeReferences, sections, letterDate } = await loadDocuments(id);
   const document = doc === "resume" ? resume : letter;
   if (!document) notFound();
 
@@ -32,6 +32,7 @@ export default async function PrintTailoredDocumentPage({ params }: PageProps<"/
           showPhoto={application.showPhoto}
           language={application.language}
           includeReferences={includeReferences}
+          sections={sections}
         />
       ) : (
         <TailoredLetter

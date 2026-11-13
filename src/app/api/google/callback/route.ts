@@ -10,12 +10,14 @@ import { logServerError } from "@/lib/log";
 /**
  * Where Google sends the browser back after consent (E15-1). It comes from
  * Google's site, so route()'s same-origin check can't apply: the signed
- * state proves Dossier started it, and the session that it's the user.
+ * state proves Dossier started it, and the session that it's the user. It
+ * goes back where the state says: Settings, or the setup guide (E21-5).
  */
 export async function GET(request: NextRequest): Promise<Response> {
   const origin = publicOrigin(request);
+  let returnTo = "/settings?section=google";
   const back = (outcome: string) => {
-    const url = new URL("/settings?section=google", origin);
+    const url = new URL(returnTo, origin);
     url.searchParams.set("google", outcome);
     const response = NextResponse.redirect(url);
     response.headers.set("cache-control", "private, no-store");
@@ -24,7 +26,9 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   if (!(await getSession())) return NextResponse.redirect(new URL("/login", origin));
   const params = request.nextUrl.searchParams;
-  if (!(await verifyState(params.get("state")))) return back("expired");
+  const verified = await verifyState(params.get("state"));
+  if (!verified) return back("expired");
+  returnTo = verified;
   if (params.get("error")) return back(params.get("error") === "access_denied" ? "denied" : "failed");
   const code = params.get("code");
   if (!code) return back("failed");

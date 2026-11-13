@@ -10,7 +10,8 @@ import { extractedOf, unitsSchema, type Unit, type UnitEdit } from "@/lib/applic
 import { updateDocuments } from "@/lib/document-units";
 import { withoutPrivateParts } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
-import { loadFactTexts, loadProfile } from "@/lib/profile-data";
+import { profileOfApplication } from "@/lib/frozen-copy";
+import { loadFactTexts } from "@/lib/profile-data";
 import { unitName } from "@/lib/unit-text";
 
 import { defineJob } from "./runner";
@@ -70,7 +71,7 @@ export const refineJob = defineJob({
     );
     const targetUnit = target && unitsOf(target.document).find((unit) => unit.id === target.unitId);
 
-    const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(), loadFactTexts(applicationId)]);
+    const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), profileOfApplication(application.frozen), loadFactTexts(applicationId)]);
     const { data, promptVersion } = await refineChat(
       provider,
       {

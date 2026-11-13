@@ -7,23 +7,31 @@ import { route } from "@/lib/route";
 
 const GROUPS: readonly ScopeGroup[] = ["send", "read", "calendar"];
 
+/** Where to come back to: Settings → Google, or the setup guide (E21-5) when it asks. */
+function returnTo(request: Request): string {
+  const asked = new URL(request.url).searchParams.get("return");
+  return asked && /^\/welcome(\?|$)/.test(asked) ? asked : "/settings?section=google";
+}
+
 /**
  * Starts connecting Google (E15-1): `?scopes=send,read,calendar` picks the
- * features, added to what was granted before. Sends the browser to Google's
- * consent page, which comes back to /api/google/callback.
+ * features, added to what was granted before; `?return=` the setup guide, to
+ * come back to it. Sends the browser to Google's consent page, which comes
+ * back to /api/google/callback.
  */
 export const GET = route(async (request) => {
   const client = await googleClient();
-  const settings = new URL("/settings?section=google", publicOrigin(request));
+  const back = returnTo(request);
   if (!client) {
-    settings.searchParams.set("google", "not-configured");
-    return NextResponse.redirect(settings);
+    const url = new URL(back, publicOrigin(request));
+    url.searchParams.set("google", "not-configured");
+    return NextResponse.redirect(url);
   }
   const asked = (request.nextUrl.searchParams.get("scopes") ?? GROUPS.join(","))
     .split(",")
     .filter((group): group is ScopeGroup => (GROUPS as readonly string[]).includes(group));
   const account = await loadGoogleAccount();
   const scopes = [...SCOPES.identity, ...(account?.scopes.split(/\s+/) ?? []), ...asked.flatMap((group) => SCOPES[group])].filter(Boolean);
-  const state = await signState("/settings?section=google");
+  const state = await signState(back);
   return NextResponse.redirect(authorizeUrl({ clientId: client.id, redirect: redirectUri(publicOrigin(request)), state, scopes }));
 });

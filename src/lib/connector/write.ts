@@ -10,6 +10,7 @@ import { SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } fro
 import { documentLabels } from "@/lib/document-labels";
 import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
 import { loadProfile } from "@/lib/profile-data";
+import { withoutSectionsOff } from "@/lib/resume-sections";
 import { loadSettings } from "@/lib/settings-data";
 import { TONES } from "@/lib/tones";
 import { plainText } from "@/lib/unit-text";
@@ -19,8 +20,8 @@ import { plainText } from "@/lib/unit-text";
 // the tailored resume and cover letter itself, and Dossier keeps them as a
 // Draft application, as if it had written them. So Dossier needs no AI model
 // of its own for this. The parts are checked like the AI's: roles, projects
-// and degrees must be the profile's, skills its own skills, publications come
-// from the profile word for word, and with "Never invent experience" on,
+// and degrees must be the profile's, skills its own skills, certifications,
+// publications and custom sections come from the profile word for word, and with "Never invent experience" on,
 // names and numbers the profile and posting don't back are marked "check this".
 
 /** Shown as what wrote the documents, where Dossier would show a prompt version. */
@@ -96,7 +97,9 @@ export function letterUnits(letter: z.output<typeof writtenLetterSchema>, signOf
 
 /** Saves an application Claude wrote; returns its id and the parts marked "check this". */
 export async function saveWrittenApplication(input: WrittenApplication): Promise<{ applicationId: string; unverified: { part: string; items: string[] }[] }> {
-  const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+  const [fullProfile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+  // A section that's off on the base resume isn't on it (#297).
+  const profile = withoutSectionsOff(fullProfile, settings.resumeSections);
   const { details } = input;
   const extracted: Extracted = {
     title: details.title?.trim() || null,

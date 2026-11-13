@@ -47,6 +47,7 @@ import {
 } from "@/lib/profile-edits";
 import { findOrCreateSkill } from "@/lib/profile-entries";
 import { importCounts, type ImportedProfile } from "@/lib/profile-import";
+import { sectionName } from "@/lib/resume-sections";
 import { RESUME_MESSAGES, resumeText } from "@/lib/resume-text";
 import { loadSettings } from "@/lib/settings-data";
 
@@ -162,6 +163,9 @@ function profileView(profile: ProfileData) {
       role: entry.role,
       company: entry.company,
       location: entry.location,
+      // One line about the company or the role, as written (#257); volunteering is unpaid (#294).
+      about: entry.descriptor.trim() || undefined,
+      volunteering: entry.volunteering || undefined,
       ...datesOf(entry),
       bullets: points(entry.bullets),
       skills: skillsOf(entry.skillIds),
@@ -175,7 +179,30 @@ function profileView(profile: ProfileData) {
       skills: skillsOf(entry.skillIds),
     })),
     education: profile.education.map((entry) => ({ id: entry.id, degree: entry.degree, school: entry.school, ...datesOf(entry), notes: entry.notes })),
+    // Without their credential IDs and links (#293).
+    certifications: profile.certifications.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      issuer: entry.issuer,
+      obtained: monthYear(entry.year, entry.month),
+      valid_until: monthYear(entry.expiryYear, entry.expiryMonth),
+      has_link: filled(entry.link),
+      on_resumes: entry.onResumes,
+    })),
     publications: profile.publications.map((entry) => ({ id: entry.id, citation: entry.citation, has_link: filled(entry.link), on_resumes: entry.onResumes })),
+    // Sections the user made (#298), such as Awards; only an Entries section's items have more than a title.
+    other_sections: profile.customSections.map((section) => ({
+      id: section.id,
+      title: section.title,
+      format: section.format.toLowerCase(),
+      items: section.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        ...(section.format === "ENTRIES" ? { subtitle: item.subtitle, ...datesOf(item), details: points(item.details) } : {}),
+        has_link: filled(item.link),
+        on_resumes: item.onResumes,
+      })),
+    })),
     references: profile.references.map((entry) => ({
       id: entry.id,
       name: entry.name,
@@ -228,6 +255,8 @@ function importView({ basics, ...profile }: ImportedProfile) {
       role: entry.role,
       company: entry.company,
       location: entry.location,
+      about: entry.descriptor.trim() || undefined,
+      volunteering: entry.volunteering || undefined,
       ...datesOf(entry),
       bullets: points(entry.bullets),
       skills: entry.skills,
@@ -242,6 +271,14 @@ function importView({ basics, ...profile }: ImportedProfile) {
       check: check(entry.unverified),
     })),
     education: profile.education.map((entry) => ({ degree: entry.degree, school: entry.school, ...datesOf(entry), notes: entry.notes, check: check(entry.unverified) })),
+    certifications: profile.certifications.map((entry) => ({
+      name: entry.name,
+      issuer: entry.issuer,
+      obtained: monthYear(entry.year, entry.month),
+      valid_until: monthYear(entry.expiryYear, entry.expiryMonth),
+      has_link: filled(entry.link),
+      check: check(entry.unverified),
+    })),
     publications: profile.publications.map((entry) => ({ citation: entry.citation, has_link: filled(entry.link), check: check(entry.unverified) })),
     references: profile.references.map((entry) => ({
       name: entry.name,
@@ -251,6 +288,8 @@ function importView({ basics, ...profile }: ImportedProfile) {
       has_phone: filled(entry.phone),
       check: check(entry.unverified),
     })),
+    // What the reading didn't keep, and why (#371), as the Import screen lists it.
+    left_out: profile.leftOut.length > 0 ? profile.leftOut : undefined,
   };
 }
 
@@ -381,15 +420,18 @@ async function setSkillsUsed(kind: "experience" | "project", id: string, names: 
   const found = [];
   for (const name of names) found.push(await findOrCreateSkill(name));
   const skillIds = [...new Set(found.map(({ skill }) => skill.id))];
+  // Only the links it doesn't have yet are made: SQLite can't skip duplicates.
   if (kind === "experience") {
+    const linked = new Set((await prisma.experienceSkill.findMany({ where: { experienceId: id }, select: { skillId: true } })).map((link) => link.skillId));
     await prisma.$transaction([
       prisma.experienceSkill.deleteMany({ where: { experienceId: id, skillId: { notIn: skillIds } } }),
-      prisma.experienceSkill.createMany({ data: skillIds.map((skillId) => ({ experienceId: id, skillId })), skipDuplicates: true }),
+      prisma.experienceSkill.createMany({ data: skillIds.filter((skillId) => !linked.has(skillId)).map((skillId) => ({ experienceId: id, skillId })) }),
     ]);
   } else {
+    const linked = new Set((await prisma.projectSkill.findMany({ where: { projectId: id }, select: { skillId: true } })).map((link) => link.skillId));
     await prisma.$transaction([
       prisma.projectSkill.deleteMany({ where: { projectId: id, skillId: { notIn: skillIds } } }),
-      prisma.projectSkill.createMany({ data: skillIds.map((skillId) => ({ projectId: id, skillId })), skipDuplicates: true }),
+      prisma.projectSkill.createMany({ data: skillIds.filter((skillId) => !linked.has(skillId)).map((skillId) => ({ projectId: id, skillId })) }),
     ]);
   }
   return found.filter(({ added }) => added).map(({ skill }) => skill.name);
@@ -461,11 +503,17 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
     {
       title: "Read the profile",
       description:
-        "The user's profile in Dossier, with the ids save_application and the profile tools use: headline, summary, facts about them, skills, languages, experience, projects, education, publications and references. " +
-        "Contact details, links and references' email and phone are left out; contact_details says which of the user's own are filled in.",
+        "The user's profile in Dossier, with the ids save_application and the profile tools use: headline, summary, facts about them, skills, languages, experience and volunteering, projects, education, certifications, publications, sections they made and references. " +
+        "Contact details, links and references' email and phone are left out; contact_details says which of the user's own are filled in. " +
+        "sections_off_resumes names the sections turned off on the base resume: leave them out of what you write, as save_application does.",
       annotations: { readOnlyHint: true },
     },
-    async () => text({ ...profileView(await loadProfile()), link: linkTo("/profile") }),
+    async () => {
+      const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+      // All of it, for the profile tools' ids; what's off on the base resume (#297) is named, for writing.
+      const off = settings.resumeSections.off.map((key) => sectionName(key, profile.customSections));
+      return text({ ...profileView(profile), sections_off_resumes: off.length > 0 ? off : undefined, link: linkTo("/profile") });
+    },
   );
 
   server.registerTool(
@@ -774,7 +822,7 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       title: "Finish importing a resume",
       description:
         "Shows what a resume reading found (choice show), then does what the user chose: merge adds it to the profile, and the resume wins where both say something; " +
-        "replace clears the basics, skills, languages, roles, projects, education, publications and references first; discard sets it aside. Only merge or replace once the user has seen it and said so.",
+        "replace clears the basics, skills, languages, roles, projects, education, certifications, publications and references first; discard sets it aside. Only merge or replace once the user has seen it and said so.",
       inputSchema: z.object({
         task_id: z.string().min(1).max(100).optional().describe("From import_profile_from_resume; leave it out for the latest reading, also one from the Import screen"),
         choice: z.enum(["show", "merge", "replace", "discard"]).default("show"),

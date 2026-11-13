@@ -6,7 +6,6 @@ import { loadApplicationRows } from "@/lib/applications-data";
 import { DEFAULT_SORT } from "@/lib/applications-list";
 import { loadDashboard } from "@/lib/dashboard-data";
 import { postingStates } from "@/lib/postings";
-import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
@@ -15,6 +14,7 @@ import { MockProvider } from "../ai/providers/mock";
 import { candidateData } from "./candidates";
 import { approveCandidate, dismissCandidate, draftCandidate, restoreCandidate } from "./draft";
 import { resetInterruptedDrafts } from "./schedule";
+import { attributeAgentCandidates } from "./attribution";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -50,7 +50,7 @@ vi.mock("@/lib/ai", async (importOriginal) => ({
               language: "English",
             };
           case "requirement_matches":
-            return { matches: [{ requirement: 1, skill: "Figma", language: null }] };
+            return { matches: [{ requirement: 1, skill: "Figma", language: null, certification: null }] };
           case "tailored_resume":
             if (source.failWriting > 0) {
               source.failWriting -= 1;
@@ -89,7 +89,6 @@ beforeEach(async () => {
   await seedBuiltIns(prisma());
   Object.assign(source, { text: null, failWriting: 0 });
   // Trimming renders PDFs: not what these tests are about.
-  await saveSettings({ pageLimit: "none" });
 });
 afterAll(() => prisma().$disconnect());
 
@@ -170,10 +169,36 @@ describe("drafts waiting for review (#195)", () => {
 });
 
 describe("dismissing (E16-5)", () => {
+  it("does not leave attribution when dismissal races a scan", async () => {
+    const { id } = await candidate();
+    const search = await prisma().agentSearch.create({ data: { name: "Design", query: { keywords: "Designer", country: "nl" } } });
+    await Promise.all([attributeAgentCandidates(search, [posting]), dismissCandidate(id)]);
+    expect(await prisma().agentCandidateSearch.count()).toBe(0);
+    expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "DISMISSED" });
+  });
+
+  it("removes all search attribution, including deleted-search labels, and does not recreate it on rediscovery or Undo", async () => {
+    const { id } = await candidate();
+    const search = await prisma().agentSearch.create({ data: { name: "Design", query: { keywords: "Designer", country: "nl" } } });
+    await attributeAgentCandidates(search, [posting]);
+    await prisma().agentCandidateSearch.create({ data: { candidateId: id, searchName: "Deleted search" } });
+    expect(await prisma().agentCandidateSearch.count()).toBe(2);
+
+    const { undo } = await dismissCandidate(id);
+    expect(await prisma().agentCandidateSearch.count()).toBe(0);
+    await attributeAgentCandidates(search, [posting]);
+    expect(await prisma().agentCandidateSearch.count()).toBe(0);
+    await restoreCandidate(undo!);
+    expect(await prisma().agentCandidateSearch.count()).toBe(0);
+    expect(await prisma().agentSearch.count()).toBe(1);
+  });
+
   it("deletes a draft with its documents and chat, marks the posting dismissed, and keeps only what dedupe needs", async () => {
     const { id, dedupeKey } = await candidate();
     const applicationId = await draftCandidate(id, context());
+    await prisma().agentCandidateSearch.create({ data: { candidateId: id, searchName: "Design" } });
     expect(await dismissCandidate(id)).toEqual({ undo: null });
+    expect(await prisma().agentCandidateSearch.count()).toBe(0);
     expect(await prisma().application.count()).toBe(0);
     expect(await prisma().document.count()).toBe(0);
     expect(await prisma().chatMessage.count()).toBe(0);

@@ -13,8 +13,10 @@ import { Stepper } from "@/components/ui/stepper";
 import { Textarea } from "@/components/ui/textarea";
 import type { Tone } from "@/generated/prisma/enums";
 import { useJob } from "@/hooks/use-job";
+import type { DocumentsToWrite } from "@/lib/settings";
 import { withSkillAdded, type Extracted } from "@/lib/application-data";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
+import type { PostingFit } from "@/lib/fit";
 import { cancel, retry } from "@/lib/jobs/actions";
 import { READ_POSTING_STEPS, WRITE_DOCUMENTS_STEPS } from "@/lib/jobs/application-steps";
 import type { ReadPostingResult } from "@/lib/jobs/read-posting";
@@ -24,10 +26,11 @@ import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 
 import { addSkill } from "../profile/actions";
 
-import { createApplication, fetchPostingText, handOffToClaude, startReadingPosting, startWritingDocuments } from "./actions";
+import { createApplication, fetchPostingText, handOffToClaude, startReadingPosting, startScoringPosting, startWritingDocuments } from "./actions";
 import { DetailsCard } from "./details-card";
 import { createDraftStore } from "./draft-store";
 import { MatchCard } from "./match-card";
+import { ScoreCard } from "./score-card";
 import { TailoringCard } from "./tailoring-card";
 import { JobProgress, jobStep } from "./job-progress";
 
@@ -57,6 +60,8 @@ export type Draft = {
   details: Details;
   tone: Tone;
   note: string;
+  /** Which documents to write (#367); missing in drafts from before, which wrote both. */
+  write?: DocumentsToWrite;
   /** This application's language; null is the posting's. Missing in drafts from before: Settings decides. */
   language?: string | null;
   writeJobId: string | null;
@@ -64,6 +69,9 @@ export type Draft = {
   postingId?: string | null;
   /** The startup it was started from with "Write to them" (#222). */
   startupId?: string | null;
+  /** "Score it" (public issue 66): the job scoring the posting, and its score; missing in drafts from before. */
+  scoreJobId?: string | null;
+  score?: PostingFit | null;
 };
 
 /** A posting handed over by "Start application" on Find jobs (E14-8), or by "Write to them" on Startups (#222). */
@@ -144,6 +152,8 @@ export type NewApplicationProps = {
   samplePosting: string | null;
   /** Settings → default cover letter tone (SET-6). */
   defaultTone: Tone;
+  /** Settings → Documents to write (#367). */
+  defaultWrite?: DocumentsToWrite;
   /** Settings → Write documents in (SET-7); null follows the posting's language. */
   defaultLanguage?: string | null;
   /** The languages documents can be written in: the built-in ones and those added in Settings. */
@@ -155,7 +165,17 @@ export type NewApplicationProps = {
 };
 
 /** The new application flow (E7): paste → read → review → create. */
-export function NewApplication({ aiReady, writeInClaude = false, samplePosting, defaultTone, defaultLanguage = null, languages = BUILT_IN_LANGUAGES, fresh = false, fromPosting = null }: NewApplicationProps) {
+export function NewApplication({
+  aiReady,
+  writeInClaude = false,
+  samplePosting,
+  defaultTone,
+  defaultWrite = "both",
+  defaultLanguage = null,
+  languages = BUILT_IN_LANGUAGES,
+  fresh = false,
+  fromPosting = null,
+}: NewApplicationProps) {
   const [initial] = useState<Draft>(() => ({
     step: "paste",
     posting: "",
@@ -166,6 +186,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     details: EMPTY_DETAILS,
     tone: defaultTone,
     note: "",
+    write: defaultWrite,
     writeJobId: null,
     postingId: null,
   }));
@@ -241,7 +262,21 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     setStarting(true);
     const result = toastResult(await startReadingPosting({ posting: draft.posting }));
     setStarting(false);
-    if (result.ok) update({ step: "reading", readJobId: result.data, readFor: draft.posting.trim(), read: null });
+    if (result.ok) update({ step: "reading", readJobId: result.data, readFor: draft.posting.trim(), read: null, scoreJobId: null, score: null });
+  };
+
+  // Public issue 66: the posting's score, with its reasons, before anything is written.
+  const scoreJob = useJob<PostingFit>(draft.scoreJobId ?? null, 0, (job) => {
+    if (job.status !== "DONE" && job.status !== "FAILED") return;
+    if (job.status === "FAILED") toast(job.error ?? "The posting couldn't be scored.");
+    update({ scoreJobId: null, ...(job.status === "DONE" && job.result ? { score: job.result } : {}) });
+  });
+  const scoring = Boolean(draft.scoreJobId) && (!scoreJob || scoreJob.status === "QUEUED" || scoreJob.status === "RUNNING");
+  const scoreIt = async () => {
+    if (scoring) return;
+    const { title, company, location, mode, salary } = draft.details;
+    const result = toastResult(await startScoringPosting({ posting: draft.posting, details: { title, company, location, mode, salary } }));
+    if (result.ok) update({ scoreJobId: result.data });
   };
 
   // #221: Claude chat writes it on the user's own Claude plan, through the
@@ -321,7 +356,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     if (!draft.read || !draft.readJobId || starting) return;
     setStarting(true);
     const result = toastResult(
-      await startWritingDocuments({ readJobId: draft.readJobId, details: draft.details, match: draft.read.match, tone: draft.tone, note: draft.note, language }),
+      await startWritingDocuments({ readJobId: draft.readJobId, details: draft.details, match: draft.read.match, tone: draft.tone, note: draft.note, write: draft.write ?? "both", language }),
     );
     setStarting(false);
     if (!result.ok) return;
@@ -453,12 +488,15 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
             <>
               <DetailsCard details={draft.details} onChange={(details) => update({ details })} />
               <MatchCard match={draft.read.match} requirements={draft.read.extracted.requirements} onAddSkill={(index, skill) => void addToProfile(index, skill)} />
+              <ScoreCard fit={draft.score ?? null} scoring={scoring} step={scoreJob?.step ?? null} onScore={() => void scoreIt()} />
               <TailoringCard
+                write={draft.write ?? "both"}
                 tone={draft.tone}
                 note={draft.note}
                 language={language}
                 languages={languages}
                 postingLanguage={draft.read.extracted.language}
+                onWrite={(write) => update({ write })}
                 onTone={(tone) => update({ tone })}
                 onNote={(note) => update({ note })}
                 onLanguage={(chosen) => update({ language: chosen })}

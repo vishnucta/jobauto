@@ -116,7 +116,7 @@ export const matchItemSchema = z.object({
   skill: z.string().nullable(),
   /** The roles where that skill was used. */
   experienceIds: z.array(z.string()),
-  /** A short explanation, e.g. "Nothing in your profile, so I'll address it honestly in the letter". */
+  /** A short explanation, e.g. "Nothing in your profile for this yet". Older matches may promise the letter addresses it. */
   note: z.string().nullable(),
 });
 

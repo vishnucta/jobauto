@@ -27,7 +27,9 @@ export function emailUnits(parts: EmailParts): Unit[] {
   return EMAIL_UNITS.map((id) => ({ id, label: EMAIL_LABELS[id], text: parts[id] }));
 }
 
-const ADDRESS = /[^\s<>()[\],;:"']+@[^\s<>()[\],;:"']+\.[^\s<>()[\],;:"'.]+/g;
+// At most 64 characters before the @ and 253 after (RFC 5321), and no second @,
+// which also keeps a long posting quick to search.
+const ADDRESS = /[^\s<>()[\],;:"'@]{1,64}@[^\s<>()[\],;:"'@]{1,253}\.[^\s<>()[\],;:"'.@]{1,63}/g;
 
 /** Whether `text` is one email address and nothing else. */
 export function isEmailAddress(text: string): boolean {

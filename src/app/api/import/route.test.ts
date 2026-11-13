@@ -15,6 +15,7 @@ vi.mock("@/lib/backups", () => ({ writeBackup: vi.fn(async () => "dossier-backup
 const forgotten = vi.hoisted(() => ({ calls: [] as string[] }));
 vi.mock("@/lib/connector/removed-entries", () => ({ forgetRemovedProfileEntries: () => void forgotten.calls.push("forget") }));
 const summary = { applications: 2, roles: 3, skills: 7, themes: 0, notes: 1 };
+vi.mock("@/lib/frozen-copy", () => ({ freezeSentApplications: vi.fn() }));
 vi.mock("@/lib/data-import", () => ({
   parseExport: vi.fn(() => ({ ok: true, data: { exportedAt: new Date("2026-09-27T10:00:00Z") } })),
   summarizeExport: vi.fn(() => summary),

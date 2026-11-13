@@ -1,13 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { applyStatusChange } from "@/lib/status-changes";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import {
+  addApplicationSection,
   addMatchSkill,
   addNote,
   checkResumeAts,
   cleanUpDocument,
   deleteNote,
+  followBaseSections,
   leaveOutUnit,
   listVersions,
   loadVersion,
@@ -18,6 +21,7 @@ import {
   rewriteInLanguage,
   saveUnit,
   sendMessage,
+  setApplicationSections,
   setApplicationTheme,
   setDocumentLanguage,
   setFollowThemeLayout,
@@ -27,6 +31,8 @@ import {
   startWritingEmail,
   undoEmailRewrite,
   undoMessage,
+  undoUpdateFromProfile,
+  updateFromProfile,
   updateNote,
 } from "./actions";
 
@@ -96,6 +102,136 @@ describe("setFollowThemeLayout (E8-2)", () => {
   });
 });
 
+describe("an application's sections (#297)", () => {
+  const sectionsOf = async () => (await prisma().application.findUniqueOrThrow({ where: { id: "app-1" }, select: { sections: true } })).sections;
+  const unitsOf = async () =>
+    (await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: "app-1", kind: "RESUME" } }, select: { units: true } })).units as { id: string; text: string }[];
+
+  it("follows the base resume until it has its own order, and can go back", async () => {
+    expect(await sectionsOf()).toBeNull();
+    const order = ["skills", "summary"];
+    expect(await setApplicationSections({ id: "app-1", order, off: ["projects"] })).toEqual({ ok: true, data: null });
+    expect(await sectionsOf()).toEqual({ order, off: ["projects"] });
+    await followBaseSections({ id: "app-1" });
+    expect(await sectionsOf()).toBeNull();
+  });
+
+  it("keeps the headings it renamed (#339)", async () => {
+    await setApplicationSections({ id: "app-1", order: ["summary"], off: [], titles: { experience: "Relevant experience" } });
+    expect(await sectionsOf()).toEqual({ order: ["summary"], off: [], titles: { experience: "Relevant experience" } });
+  });
+
+  it("adds a section in the profile's own words, keeping what's there", async () => {
+    await prisma().certification.create({ data: { id: "c1", name: "Accessibility Specialist" } });
+    expect(await addApplicationSection({ id: "app-1", key: "certifications" })).toEqual({ ok: true, data: null });
+    const units = await unitsOf();
+    expect(units.find((unit) => unit.id === "certification:c1")?.text).toBe("Accessibility Specialist");
+    expect(units.find((unit) => unit.id === "summary")?.text).toBe("Calm tools for complex work.");
+    // It didn't need an order of its own for that.
+    expect(await sectionsOf()).toBeNull();
+  });
+
+  it("adds a section the resume removed, by turning it back on", async () => {
+    await setApplicationSections({ id: "app-1", order: [], off: ["summary", "skills"] });
+    await addApplicationSection({ id: "app-1", key: "summary" });
+    expect(await sectionsOf()).toEqual({ order: [], off: ["skills"] });
+    expect((await unitsOf()).find((unit) => unit.id === "summary")?.text).toBe("Calm tools for complex work.");
+  });
+
+  it("adds references by hand, whatever the setting says", async () => {
+    await addApplicationSection({ id: "app-1", key: "references" });
+    expect(await sectionsOf()).toMatchObject({ withReferences: true });
+  });
+
+  describe("on a sent resume (#299)", () => {
+    const frozenProfile = async () => {
+      const { frozen } = await prisma().application.findUniqueOrThrow({ where: { id: "app-1" }, select: { frozen: true } });
+      return (frozen as { profile: { certifications: { id: string }[]; basics: { name: string } } }).profile;
+    };
+    beforeEach(async () => {
+      await prisma().profileField.create({ data: { key: "name", value: "Jane" } });
+      await applyStatusChange(prisma(), "app-1", "SENT");
+      await prisma().certification.create({ data: { id: "c1", name: "Specialist" } });
+      await prisma().profileField.update({ where: { key: "name" }, data: { value: "Changed" } });
+    });
+
+    it("gets a section only by Add, and only that section", async () => {
+      expect((await frozenProfile()).certifications).toEqual([]);
+      await addApplicationSection({ id: "app-1", key: "certifications" });
+      expect((await frozenProfile()).certifications.map((entry) => entry.id)).toEqual(["c1"]);
+      expect((await frozenProfile()).basics.name).toBe("Jane");
+      expect((await unitsOf()).map((unit) => unit.id)).toContain("certification:c1");
+    });
+
+    it("takes a removed section back on without touching its copy", async () => {
+      await setApplicationSections({ id: "app-1", order: [], off: ["summary"] });
+      await addApplicationSection({ id: "app-1", key: "summary" });
+      expect(await sectionsOf()).toEqual({ order: [], off: [] });
+    });
+
+    it("takes the base resume's order once, rather than following it", async () => {
+      await prisma().setting.create({ data: { key: "resumeSections", value: JSON.stringify({ order: ["skills"], off: [] }) } });
+      await followBaseSections({ id: "app-1" });
+      expect(await sectionsOf()).toEqual({ order: ["skills"], off: [] });
+    });
+  });
+
+  describe("Update from profile (#301)", () => {
+    const copyName = async () => {
+      const { frozen } = await prisma().application.findUniqueOrThrow({ where: { id: "app-1" }, select: { frozen: true } });
+      return (frozen as { profile: { basics: { name: string } } } | null)?.profile.basics.name;
+    };
+    beforeEach(async () => {
+      await prisma().profileField.create({ data: { key: "name", value: "Jane" } });
+    });
+
+    it("brings the profile in on request, and Undo puts it back", async () => {
+      await applyStatusChange(prisma(), "app-1", "SENT");
+      await prisma().profileField.update({ where: { key: "name" }, data: { value: "Janet" } });
+      expect(await copyName()).toBe("Jane");
+
+      const result = await updateFromProfile({ id: "app-1" });
+      expect(await copyName()).toBe("Janet");
+      if (!result.ok || !result.data) throw new Error("not updated");
+      expect((await unitsOf()).find((unit) => unit.id === "summary")?.text).toBe("Calm tools for complex work.");
+
+      await undoUpdateFromProfile({ id: "app-1", ...result.data });
+      expect(await copyName()).toBe("Jane");
+    });
+
+    it("says when there's nothing to update", async () => {
+      await applyStatusChange(prisma(), "app-1", "SENT");
+      expect(await updateFromProfile({ id: "app-1" })).toEqual({ ok: true, data: null });
+    });
+
+    it("adds new items to a draft, which has no copy", async () => {
+      await prisma().experience.create({ data: { id: "e1", role: "Designer", company: "Northwind", startYear: 2020 } });
+      await prisma().experience.create({ data: { id: "e2", role: "Lead", company: "Acme", startYear: 2024, bullets: "Built the team" } });
+      const result = await updateFromProfile({ id: "app-1" });
+      if (!result.ok || !result.data) throw new Error("not updated");
+      expect(result.data.profile).toBeNull();
+      expect((await unitsOf()).find((unit) => unit.id === "experience:e2")?.text).toBe("Built the team");
+      await undoUpdateFromProfile({ id: "app-1", ...result.data });
+      expect((await unitsOf()).map((unit) => unit.id)).not.toContain("experience:e2");
+    });
+
+    it("refuses an application that's gone", async () => {
+      expect(await updateFromProfile({ id: "gone" })).toMatchObject({ ok: false });
+    });
+  });
+
+  it("takes an added part off the list of what was left out", async () => {
+    await prisma().certification.create({ data: { id: "c1", name: "Specialist" } });
+    await prisma().document.update({
+      where: { applicationId_kind: { applicationId: "app-1", kind: "RESUME" } },
+      data: { trimmed: [{ kind: "unit", unit: { id: "certification:c1", label: "Specialist", text: "Specialist" }, index: 2 }] },
+    });
+    await addApplicationSection({ id: "app-1", key: "certifications" });
+    const row = await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: "app-1", kind: "RESUME" } }, select: { trimmed: true } });
+    expect(row.trimmed).toBeNull();
+  });
+});
+
 describe("setApplicationTheme (#226)", () => {
   const themeOf = async () =>
     Object.fromEntries(
@@ -127,6 +263,17 @@ describe("setApplicationTheme (#226)", () => {
     });
     expect(await setApplicationTheme({ id: "gone", themeId: "classic" })).toEqual({ ok: false, error: "That application no longer exists." });
     expect(await themeOf()).toEqual({ RESUME: "editorial", COVER_LETTER: null, EMAIL: null });
+  });
+});
+
+describe("setApplicationTheme on a sent resume (#299)", () => {
+  it("changes the theme it's drawn in, which editing the theme doesn't", async () => {
+    const font = { headFont: "GARAMOND", bodyFont: "GARAMOND", accent: "#1d1c1a" } as const;
+    await prisma().theme.createMany({ data: [{ id: "editorial", name: "Editorial", ...font }, { id: "classic", name: "Classic", ...font }] });
+    await applyStatusChange(prisma(), "app-1", "SENT");
+    await setApplicationTheme({ id: "app-1", themeId: "classic" });
+    const { frozen } = await prisma().application.findUniqueOrThrow({ where: { id: "app-1" }, select: { frozen: true } });
+    expect(frozen).toMatchObject({ themes: { RESUME: { id: "classic" }, COVER_LETTER: { id: "classic" } } });
   });
 });
 
@@ -316,6 +463,11 @@ describe("startRegenerating (E8-4)", () => {
     for (const unitId of ["sender", "date", "signature"]) {
       expect(await startRegenerating({ id: "app-1", document: "COVER_LETTER", unitId })).toEqual({ ok: false, error: "This part isn't written by the AI. Edit it instead." });
     }
+  });
+
+  it("leaves a resume's certifications and publications as written (#293, #218)", async () => {
+    expect(await startRegenerating({ id: "app-1", document: "RESUME", unitId: "certification:c1" })).toEqual({ ok: false, error: "A certification stays as you wrote it. Edit it instead." });
+    expect(await startRegenerating({ id: "app-1", document: "RESUME", unitId: "publication:u1" })).toEqual({ ok: false, error: "A publication stays as you wrote it. Edit it instead." });
   });
 
   it("leaves the email's recipient to editing", async () => {

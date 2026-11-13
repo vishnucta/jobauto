@@ -5,6 +5,7 @@ import { JobStatus } from "@/generated/prisma/enums";
 import { writeBackup } from "@/lib/backups";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
 import { currentSummary, importExport, parseExport, summarizeExport } from "@/lib/data-import";
+import { freezeSentApplications } from "@/lib/frozen-copy";
 import { IMPORT_MAX_BYTES, IMPORT_TOO_BIG } from "@/lib/import-limits";
 import { cancelJob } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +37,8 @@ export const POST = route(async (request) => {
 
   const backup = await writeBackup("before-import");
   await importExport(prisma, parsed.data);
+  // A file from before 1.12 has no copies of what its sent applications were sent with (#299).
+  await freezeSentApplications();
   // Profile entries Claude removed belonged to the profile the import replaced.
   forgetRemovedProfileEntries();
   revalidatePath("/", "layout");

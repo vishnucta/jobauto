@@ -89,11 +89,11 @@ export const PROVIDER_OPTIONS: readonly {
     name: "Mistral",
     vendor: "Mistral",
     description: "Mistral's models through your own API key.",
-    tag: "Hosted · free tier to start",
+    tag: "Hosted · pay per use",
     local: false,
     defaultUrl: "https://api.mistral.ai/v1",
     urlPlaceholder: "https://api.mistral.ai/v1",
-    defaultModel: "mistral-medium-latest",
+    defaultModel: "mistral-small-2603",
     apiKey: { label: "API key" },
   },
   {

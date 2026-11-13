@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { UsageSink } from "@/lib/usage";
+
 import { toAiError } from "../errors";
 import type { AIProvider, CompletionRequest, JsonCompletionRequest } from "../provider";
 
@@ -26,6 +28,7 @@ export class LocalProvider implements AIProvider {
     host: string,
     readonly model: string | null,
     private readonly timeoutMs: number,
+    private readonly onUsage?: UsageSink,
   ) {
     this.host = host.replace(/\/+$/, "").replace(/\/v1$/, "");
   }
@@ -44,14 +47,15 @@ export class LocalProvider implements AIProvider {
       flavours.set(this.host, flavour);
     }
     return flavour === "ollama"
-      ? new OllamaProvider(this.host, this.model, this.timeoutMs)
-      : new OpenAICompatibleProvider("LOCAL", `${this.host}/v1`, null, this.model, this.timeoutMs);
+      ? new OllamaProvider(this.host, this.model, this.timeoutMs, this.onUsage)
+      : new OpenAICompatibleProvider("LOCAL", `${this.host}/v1`, null, this.model, this.timeoutMs, this.onUsage);
   }
 
   complete(request: CompletionRequest): Promise<string>;
   complete<T>(request: JsonCompletionRequest<T>): Promise<T>;
   async complete<T>(request: CompletionRequest | JsonCompletionRequest<T>): Promise<string | T> {
     const provider = await this.delegate(request.signal);
+    // The same call either way: the check tells TypeScript which overload it is.
     return "schema" in request ? provider.complete(request) : provider.complete(request);
   }
 

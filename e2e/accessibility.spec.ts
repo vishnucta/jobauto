@@ -32,6 +32,7 @@ const SCREENS = [
   "/profile?section=experience",
   "/profile?section=projects",
   "/profile?section=education",
+  "/profile?section=certifications",
   "/profile?section=publications",
   "/profile?section=references",
   "/profile?section=facts",
@@ -44,10 +45,12 @@ const SCREENS = [
   "/startups",
   "/agent",
   "/inbox",
+  "/usage",
   // The dashboard's calendar on another month.
   "/?date=2026-11-01",
   "/settings?section=ai",
   "/settings?section=jobs",
+  "/settings?section=scoring",
   "/settings?section=agent",
   "/settings?section=documents",
   "/settings?section=google",
@@ -173,6 +176,30 @@ test("axe: open menus and dialogs", async ({ page }) => {
 
   await page.goto("/settings?section=data");
   await page.getByRole("button", { name: "Delete everything…" }).click();
+  await expectAccessible(page);
+});
+
+test("axe: a resume's sections (#297, #298)", async ({ page }) => {
+  await page.goto("/resume?panel=sections");
+  await expect(page.getByRole("button", { name: "Remove Experience" })).toBeVisible();
+  await expectAccessible(page);
+
+  await page.goto("/profile?section=new");
+  await expect(page.getByRole("textbox", { name: "Section name" })).toBeFocused();
+  await expectAccessible(page);
+
+  await page.goto(application);
+  await page.getByRole("button", { name: /^Sections/ }).click();
+  await expect(page.getByRole("button", { name: "Remove Experience" })).toBeVisible();
+  await expectAccessible(page);
+  await page.keyboard.press("Escape");
+
+  // A section's page under Profile.
+  await page.goto("/profile?section=new");
+  await page.getByRole("button", { name: "Interests" }).click();
+  await page.getByRole("button", { name: "Add section" }).click();
+  await expect(page).toHaveURL(/section=custom/);
+  await page.getByRole("button", { name: "+ Add an item" }).click();
   await expectAccessible(page);
 });
 

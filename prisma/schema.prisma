@@ -35,6 +35,8 @@ model Skill {
   /// Unique ignoring case ("Figma" and "figma" are the same skill).
   name        String            @unique @db.Citext
   sort        Int               @default(0)
+  /// The group it's printed under on resumes ("Technical SEO"); empty for none (#280).
+  group       String            @default("")
   experiences ExperienceSkill[]
   projects    ProjectSkill[]
   createdAt   DateTime          @default(now())
@@ -61,22 +63,26 @@ model Language {
 
 /// A role. Dates are month and year; `current` means "Present" (no end date).
 model Experience {
-  id         String            @id @default(cuid())
-  role       String            @default("")
-  company    String            @default("")
-  location   String            @default("")
-  startYear  Int?
+  id           String            @id @default(cuid())
+  role         String            @default("")
+  company      String            @default("")
+  location     String            @default("")
+  /// One line about the company or the role, under its title on resumes as written (#257).
+  descriptor   String            @default("")
+  /// Volunteering (#294): under its own heading on resumes, and not counted as years of paid experience.
+  volunteering Boolean           @default(false)
+  startYear    Int?
   /// 1–12, or null when only the year is known.
-  startMonth Int?
-  endYear    Int?
-  endMonth   Int?
-  current    Boolean           @default(false)
+  startMonth   Int?
+  endYear      Int?
+  endMonth     Int?
+  current      Boolean           @default(false)
   /// One point per line.
-  bullets    String            @default("")
-  sort       Int               @default(0)
-  skills     ExperienceSkill[]
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  bullets      String            @default("")
+  sort         Int               @default(0)
+  skills       ExperienceSkill[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 }
 
 /// A skill used in a role (PRO-6). Deleting either side removes the link (PRO-3).
@@ -137,6 +143,27 @@ model Education {
 }
 
 /// Private unless included in a document (PRO-8).
+/// A certification (#293): what it is, who issued it, when, and how to check it.
+model Certification {
+  id           String   @id @default(cuid())
+  name         String   @default("")
+  issuer       String   @default("")
+  /// When it was obtained; the month 1–12, or null when only the year is known.
+  year         Int?
+  month        Int?
+  /// When it runs out, or null when it doesn't.
+  expiryYear   Int?
+  expiryMonth  Int?
+  credentialId String   @default("")
+  /// Where to verify it.
+  link         String   @default("")
+  /// "Show on resumes": off keeps it in the profile but off every resume.
+  onResumes    Boolean  @default(true)
+  sort         Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 /// A publication (#218), cited the way its author wants: no citation style is enforced.
 model Publication {
   id        String   @id @default(cuid())
@@ -161,6 +188,50 @@ model Reference {
   sort      Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// How a custom section's items are drawn (#298). They all have the same fields, so switching loses nothing.
+enum CustomSectionFormat {
+  /// Like a role: title, subtitle, dates, bullets and a link.
+  ENTRIES
+  /// Like a publication: free text with **bold** and *italic*, and a link.
+  LINES
+  /// Like skills: "Climbing · Chess · Film photography".
+  INLINE
+}
+
+/// A section the user made on the Base resume (#298), such as Awards or Interests.
+model CustomSection {
+  id        String              @id @default(cuid())
+  title     String              @default("")
+  format    CustomSectionFormat @default(ENTRIES)
+  items     CustomItem[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+}
+
+/// One item of a custom section. The section's format decides which fields show.
+model CustomItem {
+  id         String        @id @default(cuid())
+  sectionId  String
+  section    CustomSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  title      String        @default("")
+  subtitle   String        @default("")
+  startYear  Int?
+  startMonth Int?
+  endYear    Int?
+  endMonth   Int?
+  current    Boolean       @default(false)
+  /// Bullets, one per line.
+  details    String        @default("")
+  link       String        @default("")
+  /// "Show on resumes": off keeps it in the profile but off every resume.
+  onResumes  Boolean       @default(true)
+  sort       Int           @default(0)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([sectionId])
 }
 
 /// Something the user tells the AI about themselves: one of the profile's
@@ -397,6 +468,8 @@ model Application {
   origin              ApplicationOrigin @default(MANUAL)
   /// The agent's score for the posting, when the agent prepared it.
   agentScore          Int?
+  /// How well the tailored resume fits the posting, scored on request (#370): resumeFitSchema.
+  resumeFit           Json?
   /// An agent draft not approved yet: only the Agent screen shows it (#195).
   awaitingReview      Boolean           @default(false)
   title               String            @default("")
@@ -419,6 +492,8 @@ model Application {
   /// The prompt version that wrote `match`.
   matchedWith         String?
   status              ApplicationStatus @default(DRAFT)
+  /// Its place in its board column; null until reordered, and again after a status change. Null comes first, newest first.
+  boardSort           Int?
   /// The furthest stage ever reached; null while never sent. Only the status module changes it.
   furthestStage       FunnelStage?
   sentAt              DateTime?
@@ -433,6 +508,10 @@ model Application {
   /// Whether the tailored resume shows the profile photo; null follows the
   /// profile's "Show on resumes" (#224).
   showPhoto           Boolean?
+  /// This resume's own sections, their order and which are off (sectionLayoutSchema, #297); null follows the base resume.
+  sections            Json?
+  /// What it was sent with, kept from its first send on (frozenCopySchema, #299): it's drawn from this, not the profile.
+  frozen              Json?
   archivedAt          DateTime?
   /// The Gmail thread the application was sent in, when it went out through Gmail (E15-2).
   emailThreadId       String?
@@ -522,6 +601,8 @@ model StatusEvent {
   at                    DateTime          @default(now())
   previousFurthestStage FunnelStage?
   previousSentAt        DateTime?
+  /// Its place on the board before the change, for Undo.
+  previousBoardSort     Int?
 
   @@index([applicationId, at])
 }
@@ -636,6 +717,7 @@ enum PostingSource {
   ADZUNA
   JOOBLE
   ARBEITSAGENTUR
+  FREEHIRE
   CLIENT
 }
 
@@ -692,11 +774,41 @@ model ClaudePaste {
 
 // ─── Job agent (E16) ─────────────────────────────────────────────────────────
 
+/// Recurring queries; provider and credentials remain global settings.
+model AgentSearch {
+  id         String                 @id @default(cuid())
+  name       String
+  query      Json
+  enabled    Boolean                @default(true)
+  sort       Int                    @default(0)
+  candidates AgentCandidateSearch[]
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  @@index([sort, createdAt])
+}
+
+/// Only scored candidates get attribution, never raw source results.
+/// The original name remains when a search is renamed or deleted.
+model AgentCandidateSearch {
+  id          String         @id @default(cuid())
+  candidateId String
+  candidate   AgentCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  searchId    String?
+  search      AgentSearch?   @relation(fields: [searchId], references: [id], onDelete: SetNull)
+  searchName  String
+  createdAt   DateTime       @default(now())
+
+  @@unique([candidateId, searchId])
+  @@index([searchId])
+}
+
 /// A posting the job agent found and scored, and the draft it prepared from
 /// it. Kept after it's dismissed, trimmed to what dedupe needs, so the same
 /// posting never comes back.
 model AgentCandidate {
   id            String               @id @default(cuid())
+  searches      AgentCandidateSearch[]
   source        PostingSource
   /// The source's own id for it.
   externalId    String
@@ -741,12 +853,12 @@ model AgentCandidate {
 model PostingScore {
   source     PostingSource
   externalId String
-  /// 0–100 (score-posting).
+  /// 0–100 (score-posting, or Jev).
   score      Int
   /// JSON lists of strings.
   reasons    Json
   redFlags   Json
-  /// The prompt version that scored it, e.g. "score-posting@1".
+  /// What scored it: the prompt version, e.g. "score-posting@1", or Jev's, e.g. "score-posting-jev@1 (jev-1.14.0)".
   scoredWith String
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
@@ -991,6 +1103,25 @@ model Job {
   @@index([key, createdAt])
   @@index([status])
   @@index([applicationId])
+}
+
+// ─── AI usage (#290) ─────────────────────────────────────────────────────────
+
+/// One answered request to the AI model or to Jev, with the tokens its server
+/// said it used. Nothing of the prompt or the answer is kept.
+model AiUsage {
+  id           String   @id @default(cuid())
+  /// What asked, e.g. "extract-posting" (USAGE_TASKS in src/lib/usage.ts).
+  task         String
+  /// The provider then in use, e.g. "ANTHROPIC", or "JEV".
+  provider     String
+  model        String
+  /// Null when the server didn't say.
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // ─── Recruiters ──────────────────────────────────────────────────────────────

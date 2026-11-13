@@ -46,6 +46,25 @@ docker compose restart app
 
 The restart regenerates the Prisma Client and picks it up; since Prisma 7, `migrate dev` no longer runs `prisma generate` on its own.
 
+### SQLite
+
+Dossier also runs on an SQLite file, when `DATABASE_URL` is one (`file:/data/dossier.db`), for a single container without a database server. `src/lib/database.ts` picks the client, and `prisma7.config.ts` the schema and migrations, from `DATABASE_URL`. The SQLite schema, `prisma/sqlite/schema.prisma`, is made from `prisma/schema.prisma`, which stays the only one to edit. After changing it, update the SQLite schema and make its migration too:
+
+```bash
+docker/bin/yarn sqlite-schema
+docker/bin/yarn prisma migrate dev --name <migration-name>                                                   # PostgreSQL
+docker compose exec -e DATABASE_URL=file:/app/data/dev.db app yarn prisma migrate dev --name <migration-name> # SQLite
+```
+
+`yarn generate` makes both clients (the container does it on start). The code uses the PostgreSQL client's types for both, so keep to what both databases do:
+
+- No `skipDuplicates` (SQLite doesn't have it) and no `SELECT … FOR UPDATE`: lock a row with a write that changes nothing, `UPDATE "Application" SET id = id WHERE id = …`, which works in both.
+- Inside `prisma.$transaction(async (tx) => …)`, query through `tx` only. SQLite has one connection, so a query through `prisma` waits until the transaction ends, and the transaction times out.
+- SQLite sorts enums by name, PostgreSQL in the order they're declared.
+- What Prisma doesn't manage is added to both migrations by hand: the built-in themes' delete trigger, and `COLLATE NOCASE` for the unique Skill and Language names (citext in PostgreSQL). SQLite's NOCASE only ignores the case of ASCII letters.
+- SQLite can't change most columns in place, so for those Prisma's migration rebuilds the table: it creates `new_<Table>`, copies the rows, drops the old table and renames the new one. That drops the trigger (on Theme) and `COLLATE NOCASE` (on Skill and Language) too. When a migration rebuilds one of these tables, add them back by hand: `COLLATE NOCASE` in its `CREATE TABLE`, and the trigger after the rename, as in `prisma/sqlite/migrations/20261102120000_init/migration.sql`. The database tests on SQLite fail when one is missing.
+- `yarn lint` refuses `skipDuplicates`, and a test checks that the SQLite migrations make exactly the SQLite schema.
+
 To browse and edit rows in Prisma Studio, start it on demand (plain `docker compose up` leaves it off) and open [http://localhost:5555](http://localhost:5555):
 
 ```bash
@@ -137,7 +156,11 @@ Failed sign-ins are rate-limited in Postgres: after 5 failures within a minute f
 
 Dossier reads job postings and writes drafts with the model you choose in Settings → AI provider: a local model through Ollama or llama.cpp, LM Studio, any OpenAI-compatible server, Anthropic or Mistral. Until you save a choice there, the `DOSSIER_AI_*` variables decide (see `.env.example`). API keys are stored encrypted with a key derived from `DOSSIER_SECRET`, and never sent back to the browser.
 
+A server that speaks OpenAI's API with a difference (an address people tend to get wrong, a header it requires, a field every request needs) doesn't need a provider of its own: give it an entry in `src/lib/ai/providers/servers.ts` and a case in `servers.test.ts`. DeepSeek, OpenRouter and OpenCode are there already.
+
 Long AI tasks run as background jobs (`src/lib/jobs`): the page follows their named steps as they happen and picks them up again after a reload. A job's input and result hold personal data, so they don't last: a job that works on an application names it (`startJob(…, { applicationId })`) and is deleted with it, and finished jobs are deleted once they're older than **Keep task data for** in Settings → Your data (`src/lib/jobs/retention.ts`). Keep nothing in a job that has to outlast that; Undo on a toast and a page reattaching after a reload are fine. The prompts live in `src/lib/ai/tasks`; in strict mode ("Never invent experience", on by default) a fact guard flags names and numbers that aren't in the profile or the posting.
+
+The Usage screen shows the tokens each task used, as the servers counted them. Every request names its task (`task`, one of `USAGE_TASKS` in `src/lib/usage.ts`, where a new task gets its label), and a provider passes each answer's counts to `call.used`, null where the server sends none. That includes answers it asks again and answers that end in an error, since those used tokens too. Nothing of the prompt or the answer is kept.
 
 To try the AI features without a hosted provider, run a small model in Docker:
 
@@ -156,30 +179,46 @@ docker compose exec -e AI_LIVE=ollama app yarn vitest run src/lib/ai/providers.l
 
 `AI_LIVE=mistral` checks Mistral instead, with the key saved in Settings → AI provider while Mistral is chosen there, or with `DOSSIER_AI_KEY` (and `DOSSIER_AI_MODEL`) passed with `-e`.
 
+`AI_LIVE=anthropic` checks Anthropic in `providers.live.test.ts` the same way, with the key saved while Anthropic is chosen, or with `-e DOSSIER_AI_KEY=…` (and `DOSSIER_AI_MODEL`, by default `claude-haiku-4-5`). Besides the provider checks, it imports a profile from a short resume: the profile's schema is too large for the API's structured output, so it goes in the prompt instead (#230).
+
 `AI_LIVE=lmstudio` checks LM Studio, with the model saved in Settings while LM Studio is chosen there, or with `-e DOSSIER_AI_MODEL=…` (and `DOSSIER_AI_URL`, by default `http://host.docker.internal:1234`). A model that isn't loaded gets loaded and stays loaded until you eject it.
 
 ## Job search
 
-Find jobs (`/jobs`) searches the job source chosen in Settings → Job search: JSearch, Adzuna or the Bundesagentur für Arbeit. Until a choice is saved, `DOSSIER_JOBS_SOURCE` and the key variables decide (see `.env.example`). In the code, "job" already means a background task (`Job`, `src/lib/jobs`), so a job ad is a "posting", and job search lives in `src/lib/job-search`:
+Find jobs (`/jobs`) searches the job source chosen in Settings → Job search: JSearch, Adzuna, FreeHire or the Bundesagentur für Arbeit. Until a choice is saved, `DOSSIER_JOBS_SOURCE` and the key variables decide (see `.env.example`). In the code, "job" already means a background task (`Job`, `src/lib/jobs`), so a job ad is a "posting", and job search lives in `src/lib/job-search`:
 
 - `search.ts` and `sources.ts`: the query and posting shapes every source maps to, the URL format, and what each source covers. Shared with the browser.
-- One adapter per source (`jsearch.ts`, `adzuna.ts`, `arbeitsagentur.ts`), behind `index.ts`, which checks the country, caches answers in memory for 30 minutes and logs a source that changed or isn't answering, without the search. Failures are a `JobSearchError` with a message for the screen.
-- `config.ts`: which source and key are in effect. Job source keys are encrypted like the AI key, each kind of secret under its own derived key (`src/lib/secrets.ts`).
+- One adapter per source (`jsearch.ts`, `adzuna.ts`, `arbeitsagentur.ts`, `freehire.ts`), behind `index.ts`, which checks the country, caches answers in memory for 30 minutes and logs a source that changed or isn't answering, without the search. Failures are a `JobSearchError` with a message for the screen.
+- `config.ts`: which source and key are in effect. Job source keys are encrypted like the AI key, each kind of secret under its own derived key (`src/lib/secrets.ts`). FreeHire needs no key; `DOSSIER_FREEHIRE_URL` points at a self-hosted catalogue when set.
 - `src/lib/postings.ts`: the `Posting` table holds what the user saved, dismissed or started an application from. `src/lib/posting-searches.ts`: every search, kept with what it found (`PostingSearch`) until the user removes it, so opening one again asks the source nothing.
 
-The tests use answers in each source's shape (`src/test/job-search-fixtures.ts`). The live tests check the real services, and are skipped otherwise. JSearch and Adzuna spend searches from your plan; the Arbeitsagentur is free:
+The tests use answers in each source's shape (`src/test/job-search-fixtures.ts`). The live tests check the real services, and are skipped otherwise. JSearch and Adzuna spend searches from your plan; the Arbeitsagentur and FreeHire are free:
 
 ```bash
 docker compose exec -e JOBS_LIVE=jsearch -e JSEARCH_TEST_KEY=… app yarn vitest run src/lib/job-search/jsearch.live.test.ts
 docker compose exec -e JOBS_LIVE=arbeitsagentur app yarn vitest run src/lib/job-search/sources.live.test.ts
 docker compose exec -e JOBS_LIVE=adzuna -e ADZUNA_TEST_APP_ID=… -e ADZUNA_TEST_KEY=… app yarn vitest run src/lib/job-search/sources.live.test.ts
+docker compose exec -e JOBS_LIVE=freehire app yarn vitest run src/lib/job-search/sources.live.test.ts
+```
+
+## Scoring
+
+Score in Find jobs and the job agent score postings with what Settings → Scoring chose (`src/lib/scoring`): the AI model's `score-posting` task, or Jev, TypeSafe's System One model, with the user's TypeSafe key. Until a choice is saved, `DOSSIER_SCORER` and `DOSSIER_TYPESAFE_KEY` decide. `loadPostingScorer()` in `index.ts` sets up either one; both give a score from 0 to 100 with up to four reasons and three red flags, and `scoredWith` names what made it.
+
+Jev answers typed questions and writes no text, so `jev.ts` asks, in one request, three Scores about the whole posting (how much of it the profile covers, how close the past work is, the level), three Nouls (a location or permit the profile can't meet, a missing language, a posting too thin to judge) and, for each line `posting-lines.ts` finds (bullets and sentences, wrapped lines joined), whether it's asked of applicants and whether the profile shows it. Code weighs the Scores (`JEV_WEIGHTS`), takes off for the mismatches and quotes the lines: "Covers: …", "Missing: …". `typesafe.ts` is the HTTP client: it retries 429 and 529 and turns failures into an `AiError` with a message for people.
+
+The live tests ask the real Jev with the key saved in Settings → Scoring, or `DOSSIER_TYPESAFE_KEY`, and spend tokens on that account. `check` scores two postings against the demo profile; `compare` scores the job agent's latest 40 candidates again, against the profile in the database, and prints Jev's scores next to the AI model's, what was done with each posting, and the weights that would come closest to the AI model's scores. To compare on your own data, import an export of it into the development app first (Settings → Your data, which backs up what's there):
+
+```bash
+docker compose exec -e JEV_LIVE=check app yarn vitest run src/lib/scoring/jev.live.test.ts
+docker compose exec -e JEV_LIVE=compare app yarn vitest run src/lib/scoring/jev.live.test.ts
 ```
 
 ## Your data
 
 Settings → Your data exports everything (profile, custom themes, settings, applications with their history, documents, chat and notes, and the postings kept from Find jobs) as one JSON file, and imports such a file to restore it. An import replaces all data in one transaction, after writing a backup of the current data to `DOSSIER_DATA_DIR/backups` (default `/data`; `./data` in development, which git ignores). "Download all PDFs" zips every tailored document there too, in `downloads`, and removes the zip once it's downloaded.
 
-With "Nightly backups" on (the default), the app writes the same export to `backups` every night at 03:00 server time and deletes backups older than `DOSSIER_BACKUP_RETENTION_DAYS` (14 by default). The timer runs inside the app process, so run a single instance of the app. These are the app's own backups: back up the PostgreSQL database itself too, the way your host does it (for example `pg_dump` on a schedule).
+With "Nightly backups" on (the default), the app writes the same export to `backups` every night at 03:00 server time and deletes backups older than `DOSSIER_BACKUP_RETENTION_DAYS` (14 by default). The timer runs inside the app process, so run a single instance of the app. These are the app's own backups: back up the PostgreSQL database itself too, the way your host does it (for example `pg_dump` on a schedule), or the SQLite file: stop the app and copy the file.
 
 ### Import size limit
 
@@ -187,14 +226,48 @@ Import files are capped at 10 MB, roughly 500 applications. The limit comes from
 
 ## Job agent
 
-The job agent (`src/lib/agent`, the `/agent` screen and Settings → Job agent) runs one saved search a day, scores what's new and can prepare drafts:
+The job agent (`src/lib/agent`, the `/agent` screen and Settings → Job agent) runs up to three named recurring searches on one shared daily schedule, scores what's new and can prepare drafts. Disabled searches count toward the three-search storage cap but consume no source requests:
 
-- **`agent-scan`** (`run.ts`, defined in `jobs.ts` with the key `agent`): one run. It asks the source for the first page only, drops what Find jobs has saved, dismissed or applied for and what the agent has seen (`newPostings()`, by source and id or by `agentDedupeKey()`, a hash of the link without tracking parameters, else of company, title and place), scores the newest of the rest with `score-posting` and keeps each as an `AgentCandidate`.
+- **`agent-scan`** (`run.ts`, defined in `jobs.ts` with the key `agent`): one batch, protected by a PostgreSQL session advisory lock (on SQLite, one process on one file, a lock held in the process; `scan-lock.ts`). The other agent locks are transaction advisory locks through `lockForTransaction()` (`src/lib/db-lock.ts`), which does nothing on SQLite, where transactions already run one at a time. It snapshots all enabled searches and the shared source configuration, requests only the first page of each search sequentially in saved order, and continues after individual source failures. It drops what Find jobs has saved, dismissed or applied for and what the agent has seen (`newPostings()`, by source and id or by `agentDedupeKey()`, a hash of the link without tracking parameters, else of company, title and place). Unique new postings are scored round-robin across searches, newest first within each, with one shared score cap and automatic-draft cap, not one cap per search.
+  Scoring uses the provider chosen in Settings → Scoring (`src/lib/scoring`, see [Scoring](#scoring)).
 - **`agent-draft`** (`draft.ts`, keyed `agent-candidate:<id>`): one draft. The candidate is claimed (SCORED → DRAFTING → DRAFTED) so nothing makes two, and the documents are written by `createApplicationFromDocuments()` in `src/lib/application-create.ts`, which New application uses too. The draft is `origin: AGENT` with `awaitingReview` set, which keeps it off Applications, the board, the dashboard, the inbox and Find jobs until Approve.
-- **Limits** (`runs.ts`): runs are recorded in the `agentRuns` setting, not as Job rows, which the task-data sweep deletes. At most 3 runs in 24 hours, Run now at most an hour after the last run, and the caps `agentMaxScores` and `agentMaxDrafts` in Settings.
-- **Schedule** (`schedule.ts`): a timer in the process, like the nightly backups, that checks every 15 minutes and starts the day's run after `agentHour` in `lastKnownTimeZone()`. It only works with one instance. At startup, candidates left DRAFTING go back to SCORED.
+- **Limits** (`runs.ts`): the durable `agentRuns` ledger counts source requests, not batches or Job rows (which the task-data sweep deletes). At most **3 source requests in any rolling 24 hours**, including attempted failures. Admission reserves enough slots for the entire enabled collection atomically; a two-search batch waits when only one slot remains, rather than running a subset. Dispatch timestamps move slots to actual attempt time. Interrupted scans conservatively keep every reserved slot, even if not sent, because dispatch and persistence cannot be atomic; reconciliation marks their outcome interrupted. Manual runs also wait at least an hour after the previous run. AI evaluation and drafts use the shared `agentMaxScores` and `agentMaxDrafts` limits.
+- **Schedule** (`schedule.ts`): a timer in the process, like the nightly backups, that checks every 15 minutes and starts the day's batch after `agentHour` in `lastKnownTimeZone()`, with an additional wake at quota expiry. Budget deferral can shift the effective daily run time until the whole batch fits. Run one app instance. At startup, candidates left DRAFTING go back to SCORED.
 
-The end-to-end spec `e2e/agent.spec.ts` runs it against the fake JSearch and the fake AI, which scores by title (`posting_score` in `e2e/fake-ai.mts`).
+Recurring searches are stored in `AgentSearch`, through `src/lib/agent/searches.ts` (`listAgentSearches`, `saveAgentSearch`, `deleteAgentSearch`). `src/lib/agent/search.ts` shares the normalized input schema and fixed cap of three with forms. Settings uses authenticated Server Actions for create/edit/reorder/toggle/delete; execution reads the collection directly, with no legacy settings bridge. Toggles patch only `enabled` by ID under the shared search-write lock and validate the current query's country when enabling, so a stale tab cannot overwrite another tab's name, query or order. Explicit editor saves still replace the submitted form values; they are not a general edit-conflict merge. Writes and imports serialize the cap check with a transaction advisory lock; disabled searches count too. Attribution takes the same lock before reading, so imports and wipes cannot remove its foreign-key targets mid-write. `AgentCandidateSearch` links only kept candidates, with immutable name snapshots and a nullable search link, so renaming or deleting a search doesn't rewrite history. Deleting a search leaves candidates, applications and historical labels intact; deleting a candidate cascades its attribution. Candidate dismissal takes the same lock and deletes its attribution, including deleted-search labels. Undo restores the candidate's content, not its old labels. `attributeAgentCandidates()` checks eligibility through its transaction and links source results to existing candidates, including overlaps, without storing raw result pages. Later independent Find jobs saves or dismissals do not erase historical candidate labels.
+
+Backup/export schema **11** and later (12 is the bewerbung fork's, with Recruiters and searches of several sources) include `agentSearches` and `agentCandidateSearches`, with stable IDs, query/order/enabled state and historical labels (including deleted-search labels). Imports of schemas 1–10, the fork's own 6 from before 12 among them, convert a meaningful `agentQuery` setting to “My search”, repairing optional fields just like SQL, without inventing past attribution. SQL performs that conversion during an upgrade and removes the setting; v8 imports ignore `agentQuery`. Provider credentials remain global and excluded unless explicitly requested on export. The `agentRuns` ledger is installation-local, excluded from exports and preserved across imports so a restore cannot reset quota. Delete everything removes it with searches, candidates and attribution.
+
+Per-search history reports **source collection**, not successful AI evaluation: found/new counts can overlap between searches and precede batch dedupe/scoring. A completed source request can coexist with model failure; its batch outcome is shown separately. Candidate attribution retains historical names after search rename/delete, but candidate dismissal removes it. Rendering is read-only: it shows interrupted reservations when no queued/live scan owns them, without acquiring the execution lock or changing the ledger; the next scan persists reconciliation under execution ownership. The broader scan-versus-destructive-import lifecycle race is pre-existing and not solved by the narrow attribution lock: an import/wipe can replace scan inputs while a batch is in flight. Do not treat that lock as whole-scan lifecycle serialization.
+
+The end-to-end specs `e2e/agent.spec.ts` and `e2e/agent-searches.spec.ts` run against the fake JSearch and fake AI, which scores by title (`posting_score` in `e2e/fake-ai.mts`). They cover multiple-search CRUD, cross-tab cap/stale errors, source partial failure, shared quota/score limits, attribution after rename/delete, v8 exports, mobile layout and accessibility. Database tests cover migration/bootstrap, backup round-trips, exclusion/overlap, reservation accounting and schedule deferral. No real source or paid AI requests are needed.
+
+## Announcements
+
+The project can publish short notices, such as a security fix, and each page shows them in a card over the page (`src/app/(app)/announcement-notice.tsx`), one at a time, until they're dismissed. The sidebar's notice is for updates only. The signed-in layout starts the check after a page load, using the settings it read anyway, so a page costs nothing until a check is due (`src/lib/announcements/check.ts`). When to ask next comes from the answer's `Cache-Control`, between 1 hour and 7 days.
+
+- **The request carries nothing about the install,** only `User-Agent: Dossier`. Which notices apply (version range, expiry, dismissed) is decided on the install (`src/lib/announcements/visible.ts`).
+- **A failure changes nothing:** the last good answer stays, and nothing is shown or logged.
+- **Notices are plain text,** with one optional link, which can go anywhere on the web. Anything but `http` or `https` is dropped, because the link becomes an `href`. This is not a channel for advertising.
+
+The answer and the dismissed IDs are the settings `announcementFeed` and `announcementsDismissed`, which exports leave out and imports keep (`INSTALL_SETTINGS` in `src/lib/data-export.ts`).
+
+The backend is the project's own service and isn't published with the app. `src/lib/announcements/api-v1.schema.json` is a copy of its contract, and a test compares it with what the app reads, so update the copy when the contract grows. The API only grows, so the app ignores what it doesn't know.
+
+In this fork (jobauto) no server asks unless `DOSSIER_API_URL` is set; Dossier's own backend is `https://api.dossier.aien.me/v1`. A development server with it set asks on every page, so a change shows without the wait: the first reload asks, and the next one shows it. To try it against a local copy of the backend, set that variable, for example in an untracked `compose.override.yml`. The variable isn't in `.env.example` or `compose.production.yml`, because nobody running the image needs it. `e2e/announcements.spec.ts` points it at the fake job sources.
+## The desktop app
+
+`desktop/` is the app for Linux and Windows, built with Electron. One download, two modes, chosen on first launch: **On my server** opens the user's own Dossier in a window, and **On this computer** runs Dossier itself. There's no auto-update: people download each new version from the release page.
+
+It has its own `package.json` and `yarn.lock`, so the image doesn't carry Electron.
+
+The window has no title bar or menu row of the system's. `desktop/bar/` is the app's own top bar, with the system's window buttons drawn over it, and the page is a view below it, so no server version has to know about the bar. The bar takes its colours from the page's `body` (`bar-colors.ts`), read again when the page loads and when the `dossier_theme` cookie changes.
+
+On this computer runs the same standalone server as the image, on a plain Node binary that ships inside the app, and on SQLite in the user's app folder. So nothing native is built for Electron, and an Electron update, which is how Chromium's security fixes arrive, can't be held back by it. `desktop/scripts/prepare-server.mjs` puts it together for one platform, checking every download against a pinned hash, and the app's own Chromium prints the PDFs (`print-service.ts`, `src/lib/pdf/desktop-print.ts`). The server listens on 127.0.0.1 only. The app makes a secret on first launch and a token at each launch, and signs itself in with the token (`src/lib/desktop.ts`): there's no password, but the sign-in page stays, so other programs reaching the port get nowhere.
+
+Migrations run without Prisma's tools (`server-tools/migrate.mjs`) and **not in a transaction**, because SQLite ignores the files' `PRAGMA foreign_keys=OFF` inside one, and rebuilding a table would then delete the rows that point at it. It copies the database first, and refuses a database from a newer version.
+
+A view showing a server has no preload and is treated as any web page: other sites and mail go to the system browser (`window-rules.ts`), and the page may ask for nothing but writing to the clipboard, for the app's Copy buttons. Only the app's own start screen and bar get the small APIs in `preload.ts` and `bar-preload.ts`.
 
 ## Tests and checks
 
@@ -212,8 +285,9 @@ Put tests next to the code they cover. `*.test.ts` files run in Node (server cod
 `*.test.tsx` files run in jsdom with [Testing Library](https://testing-library.com) and its `jest-dom` matchers (components and hooks).
 `*.db.test.ts` files run against a real Postgres database: `dossier_test` on the same server (or `TEST_DATABASE_URL`), which is created and migrated at the start of each run, and which each test empties with `resetDatabase()` from `src/test/db.ts`.
 They refuse to run against a database whose name doesn't end in `_test`, so your development data is never touched.
+With an SQLite `DATABASE_URL`, they run against the file next to it with `_test` added to its name (`file:/app/data/dev_test.db`).
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests with coverage, with a Postgres service for the database tests, on every pull request and push to `main`, and shows the coverage in the job summary. A newer push to the same branch or pull request cancels the run it replaces. On `main`, a pull request's merge commit isn't checked a second time when it holds exactly the code its pull request's run checked (the branch was up to date with `main`); every other push to `main` is. The coverage thresholds in `vitest.config.mts` ratchet: they sit a few points below the coverage when they were set, and CI fails if coverage drops below them. Raise them when you add tests.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests with coverage, with a Postgres service for the database tests (then runs those again on SQLite), on release branches (`release/1.12.0`), when one is pushed and on each push after that, and shows the coverage in the job summary. A newer push to the same branch cancels the run it replaces. Nothing else runs them: pull requests aren't checked, so run the checks yourself before you open one. The public repository has no release branches: `image.yml` runs the same jobs there after each merge or publish to `main`, before it builds the image. The coverage thresholds in `vitest.config.mts` ratchet: they sit a few points below the coverage when they were set, and CI fails if coverage drops below them. Raise them when you add tests.
 
 ### End-to-end tests
 
@@ -223,7 +297,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests with
 docker/bin/yarn build && docker/bin/yarn test:e2e
 ```
 
-The run starts its own server on port 3100 with a separate `dossier_e2e` database (created and migrated on the way, reset to the demo data before the specs that change data), a fake OpenAI-compatible server on port 3999 (`e2e/fake-ai.mts`) that answers each AI task with plausible output, fake job sources on port 3998 (`e2e/fake-jobs.mts`), which the app reaches through `DOSSIER_JOBS_TEST_BASE_URL`, a variable for the tests only, and a fake Google on port 3997 (`e2e/fake-google.mts`) for sign-in, Gmail and Calendar (`DOSSIER_GOOGLE_TEST_BASE_URL`), which only comes into play once a spec enters an OAuth client in Settings → Google. The daily update check asks the same fake instead of GitHub (`DOSSIER_UPDATES_TEST_BASE_URL`), which says no release is out, so a spec can store the latest release itself. Your development server and data are never touched: the tests refuse any database whose name doesn't end in `_e2e`. CI runs them in a job of their own and keeps the report of a failed run as an artifact.
+The run starts its own server on port 3100 with a separate `dossier_e2e` database (created and migrated on the way, reset to the demo data before the specs that change data), a fake OpenAI-compatible server on port 3999 (`e2e/fake-ai.mts`) that answers each AI task with plausible output, fake job sources on port 3998 (`e2e/fake-jobs.mts`), which the app reaches through `DOSSIER_JOBS_TEST_BASE_URL`, a variable for the tests only, and a fake Google on port 3997 (`e2e/fake-google.mts`) for sign-in, Gmail and Calendar (`DOSSIER_GOOGLE_TEST_BASE_URL`), which only comes into play once a spec enters an OAuth client in Settings → Google. The daily update check asks the same fake instead of GitHub (`DOSSIER_UPDATES_TEST_BASE_URL`), which says no release is out, so a spec can store the latest release itself, and so does Jev (`DOSSIER_TYPESAFE_TEST_BASE_URL`), with answers made from the questions. The same fake answers for the project's backend (`DOSSIER_API_URL`), with no notices until a spec says otherwise. Your development server and data are never touched: the tests refuse any database whose name doesn't end in `_e2e`. CI runs them in a job of their own and keeps the report of a failed run as an artifact.
 
 ## The production image
 
@@ -234,11 +308,13 @@ docker build -t dossier:local .
 DOSSIER_IMAGE=dossier:local DOSSIER_PORT=3300 docker compose -f compose.production.yml -p dossier-local up -d
 ```
 
-CI pushes an image for every commit on `main` to `ghcr.io/<owner>/<repository>:<sha>` (lower case), once the checks and the end-to-end tests pass, on `main` or in the commit's pull request. A version tag (`v1.0.0`) then tags that commit's image with the version and `latest`.
+In the public repository, `image.yml` pushes an image for every commit on `main` to `ghcr.io/<owner>/<repository>:<sha>` (lower case), once the checks and the end-to-end tests pass. A version tag (`v1.0.0`) then tags that commit's image with the version and `latest`.
 
 ## The website
 
-`site/` is the project's website, plain HTML, CSS and a little JavaScript. `site/build.sh` puts it together in `_site/` with the README's screenshots (`.github/images/`), the app's icons and three of its fonts, so there's one copy of each. To look at it, serve `_site/` with any static server, for example `docker run --rm -p 8080:80 -v "$PWD/_site:/usr/share/nginx/html:ro" nginx:alpine`, then open http://localhost:8080. The public repository's Pages workflow publishes it when any of those change on `main`. When the README's screenshots change, the site's change with them.
+`site/` is the project's website, plain HTML, CSS and a little JavaScript. `site/build.sh` puts it together in `_site/` with the README's screenshots (`.github/images/`), the app's icons and three of its fonts, so there's one copy of each. To look at it, serve `_site/` with any static server, for example `docker run --rm -p 8080:80 -v "$PWD/_site:/usr/share/nginx/html:ro" nginx:alpine`, then open http://localhost:8080. The public repository's Pages workflow publishes it when any of those change on `main`, and once a day. When the README's screenshots change, the site's change with them.
+
+The number above the hero's buttons is the Docker image's download count. GitHub's API has no download counts for `ghcr.io`, so `build.sh` reads it from the package page (the `title` of the number under "Total downloads") and writes it into `_site/index.html`, rounded down. The daily run keeps it current. If the page can't be read (you're offline, or GitHub changed its markup), the build prints a warning and keeps the floor written in `site/index.html`. Raise that floor now and then, and update the `sed` in `build.sh` if the warning keeps coming.
 
 ## Reset
 

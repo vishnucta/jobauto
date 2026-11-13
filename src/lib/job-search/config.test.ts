@@ -30,6 +30,7 @@ describe("resolveJobSearchConfig", () => {
       adzuna: { appId: "", keyState: "none" },
       jooble: { keyState: "none" },
       arbeitsagentur: { offered: true, acceptedAt: null },
+      freehire: { host: "freehire.me" },
     });
   });
 
@@ -96,6 +97,7 @@ describe("credentialsFor", () => {
     expect(credentialsFor({ ...config, serpapi: { key: "serp-saved", keyState: "set" } }, "SERPAPI")).toEqual({ key: "serp-saved" });
     expect(credentialsFor({ ...config, jooble: { key: "jooble-saved", keyState: "set" } }, "JOOBLE")).toEqual({ key: "jooble-saved" });
     expect(credentialsFor({ ...config, arbeitsagentur: { offered: true, acceptedAt: ACCEPTED } }, "ARBEITSAGENTUR")).toEqual({});
+    expect(credentialsFor(config, "FREEHIRE")).toEqual({});
   });
 
   it("says what's missing", () => {
@@ -148,5 +150,22 @@ describe("requestContext", () => {
   it("leaves sources at their own address, unless the end-to-end tests point them at a fake", () => {
     expect(requestContext("JSEARCH", undefined)).toEqual({});
     expect(requestContext("ADZUNA", "http://127.0.0.1:3998/")).toEqual({ baseUrl: "http://127.0.0.1:3998/adzuna" });
+    expect(requestContext("FREEHIRE", undefined, "https://jobs.example")).toEqual({ baseUrl: "https://jobs.example" });
+    expect(requestContext("FREEHIRE", "http://127.0.0.1:3998/", "https://jobs.example")).toEqual({
+      baseUrl: "http://127.0.0.1:3998/freehire",
+    });
+  });
+});
+
+describe("FreeHire from the environment", () => {
+  it("chooses FreeHire when DOSSIER_JOBS_SOURCE says so", () => {
+    expect(resolveJobSearchConfig(nothingSaved, { DOSSIER_JOBS_SOURCE: "freehire" }).source).toBe("FREEHIRE");
+  });
+
+  it("searches freehire.me, or the self-hosted FreeHire DOSSIER_FREEHIRE_URL names", () => {
+    expect(resolveJobSearchConfig(nothingSaved, noEnv).freehire).toEqual({ url: "https://freehire.me" });
+    const own = resolveJobSearchConfig(nothingSaved, { DOSSIER_FREEHIRE_URL: "https://jobs.example:8443" });
+    expect(own.freehire).toEqual({ url: "https://jobs.example:8443" });
+    expect(jobSearchView(own).freehire).toEqual({ host: "jobs.example:8443" });
   });
 });

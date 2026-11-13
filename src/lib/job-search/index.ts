@@ -5,8 +5,10 @@ import { logServerError } from "@/lib/log";
 import type { JobSourceAdapter, RequestContext, SourceCredentials } from "./adapter";
 import { cached, remember } from "./cache";
 import { JobSearchError, jobSearchError } from "./errors";
+import { fitsExperience } from "./experience";
 import { adzuna } from "./adzuna";
 import { arbeitsagentur } from "./arbeitsagentur";
+import { freehire } from "./freehire";
 import { jooble } from "./jooble";
 import { jsearch } from "./jsearch";
 import { postingKey, type FoundPosting, type JobSource, type SearchPage, type SearchQuery } from "./search";
@@ -27,6 +29,7 @@ const ADAPTERS: { [S in JobSource]: JobSourceAdapter<S> } = {
   ADZUNA: adzuna,
   JOOBLE: jooble,
   ARBEITSAGENTUR: arbeitsagentur,
+  FREEHIRE: freehire,
 };
 
 const adapterFor = <S extends JobSource>(source: S) => ADAPTERS[source] as JobSourceAdapter<S>;
@@ -56,7 +59,9 @@ export async function searchPostings<S extends JobSource>(
   const key = `search:${source}:${JSON.stringify(query)}:${next ?? ""}`;
   const hit = cached<SearchPage>(key);
   if (hit) return hit;
-  const page = await logged(() => adapter.search(query, credentials, next, context));
+  const found = await logged(() => adapter.search(query, credentials, next, context));
+  // Postings clearly for another level go (public issue 59); ones that don't say stay.
+  const page = { ...found, postings: found.postings.filter((posting) => fitsExperience(posting, query)) };
   remember(key, page);
   return page;
 }

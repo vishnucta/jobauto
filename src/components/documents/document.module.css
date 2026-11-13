@@ -30,8 +30,10 @@
   color: var(--doc-text);
   font-family: var(--body-font);
   /* No ligatures: a parser reading the PDF's text layer must find "Refit" and
-     "financial", not an ﬁ glyph. Required ligatures (Arabic, Devanagari) are
-     not affected by this property. */
+     "financial", not an ﬁ glyph (U+FB01), so "workflow" still matches a
+     search for it in a job portal (#82). None, not only the common ones: Inter's
+     contextual alternates turn " – " into a glyph that reads back wrong too.
+     Required ligatures (Arabic, Devanagari) are not affected by this property. */
   font-variant-ligatures: none;
   font-size: calc(var(--u) * var(--font-size));
   line-height: var(--line-height);
@@ -161,6 +163,15 @@
   min-width: 0;
 }
 
+/* Skill groups (#280): a line each, the group's name first. */
+.skillLine + .skillLine {
+  margin-top: calc(var(--u) * 3);
+}
+
+.skillLabel {
+  font-weight: 600;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -186,6 +197,8 @@
 
 .summary {
   text-wrap: pretty;
+  /* Its paragraphs, as typed in Profile → Summary (#277). */
+  white-space: pre-line;
 }
 
 /* ─── Entries (roles, education) ───────────────────────────────────────── */
@@ -219,6 +232,15 @@
   font-size: 0.9em;
   color: var(--doc-muted);
   white-space: nowrap;
+}
+
+/* A line about the company or the role, under its title (#257). */
+.descriptor {
+  margin-top: calc(var(--u) * 2);
+  font-size: 0.9em;
+  font-style: italic;
+  color: var(--doc-muted);
+  break-before: avoid;
 }
 
 .bullets {
@@ -257,6 +279,13 @@
 
 .publication + .publication {
   margin-top: calc(var(--u) * 5);
+}
+
+/* A linked email or web address in the contact details reads like the others (#369). */
+.contactLink,
+.contactLink:hover {
+  color: inherit;
+  text-decoration: none;
 }
 
 .link,

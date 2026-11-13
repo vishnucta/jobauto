@@ -40,6 +40,13 @@ export function sourceStates(config: JobSearchConfig): SourceState[] {
 /** The sources a search can go to now. */
 export const readySources = (config: JobSearchConfig): JobSource[] => sourceStates(config).flatMap(({ source, problem }) => (problem === null ? [source] : []));
 
+/**
+ * The ready sources that may stand in for one that didn't answer. FreeHire
+ * needs no key, so it's ready on every server: it stands in only when it's
+ * the source chosen in Settings, not for a search nobody set it up for.
+ */
+const standInSources = (config: JobSearchConfig): JobSource[] => readySources(config).filter((source) => source !== "FREEHIRE" || config.source === "FREEHIRE");
+
 type Answered = { source: JobSource; page: SearchPage };
 type SourceAnswer = Answered | { source: JobSource; error: JobSearchError };
 
@@ -75,7 +82,7 @@ export async function askSources(
 
   const answers = await Promise.all(asked.map((source) => ask(config, source, query, cursors[source] ?? null)));
   // Standing in: the ready sources that weren't asked, in Settings' order, one for each that failed; not while paging.
-  const spare = Object.keys(cursors).length > 0 ? [] : readySources(config).filter((source) => !asked.includes(source));
+  const spare = Object.keys(cursors).length > 0 ? [] : standInSources(config).filter((source) => !asked.includes(source));
   const pages: Answered[] = [];
   const problems: SourceProblem[] = [];
   const standIns: JobSource[] = [];

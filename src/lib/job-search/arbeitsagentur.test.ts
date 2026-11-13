@@ -17,6 +17,12 @@ afterEach(() => {
 });
 
 describe("Arbeitsagentur search", () => {
+  it("asks for internships and traineeships for an internship search (public issue 59)", async () => {
+    const requests = stubFetch(() => json(arbeitsagenturPage));
+    await arbeitsagentur.search({ ...query, experience: "intern" }, {}, null);
+    expect(requests[0].url.searchParams.get("angebotsart")).toBe("34");
+  });
+
   it("asks the v6 search with the public client ID", async () => {
     const requests = stubFetch(() => json(arbeitsagenturPage));
     await arbeitsagentur.search(query, {}, null);

@@ -1,9 +1,12 @@
 "use client";
 
-import { useId, type ComponentProps, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
+import { DragHandle, MoveButton } from "@/components/reorder-controls";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+
+export { DragHandle };
 
 /** What an entry needs to be reordered (E4-9): its drag handle, and where it is for the Move buttons. */
 export type Reorder = {
@@ -13,36 +16,6 @@ export type Reorder = {
   moveUp: () => void;
   moveDown: () => void;
 };
-
-/** The handle to drag an entry by, for the pointer; the Move buttons are the keyboard's way. */
-export function DragHandle({ ref, ...props }: ComponentProps<"span">) {
-  return (
-    <span
-      ref={ref}
-      {...props}
-      aria-hidden="true"
-      title="Drag to reorder"
-      className="flex w-7 flex-none cursor-grab touch-none items-center justify-end text-base text-faint select-none hover:text-muted active:cursor-grabbing"
-    >
-      ⠿
-    </span>
-  );
-}
-
-/** ↑ or ↓: stays focusable at the ends (aria-disabled), so focus isn't lost after the last move. */
-function MoveButton({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-disabled={disabled || undefined}
-      onClick={() => !disabled && onClick()}
-      className="grid size-6 place-items-center rounded-[6px] text-sm leading-none text-muted hover:bg-hover hover:text-ink aria-disabled:cursor-default aria-disabled:text-faint aria-disabled:hover:bg-transparent"
-    >
-      <span aria-hidden="true">{children}</span>
-    </button>
-  );
-}
 
 /**
  * A collapsible entry, used for experience, education and references

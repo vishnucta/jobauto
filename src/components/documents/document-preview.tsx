@@ -62,6 +62,7 @@ export function DocumentPreview({
   meta,
   notice,
   panel,
+  onPages,
   className,
   children,
 }: {
@@ -71,6 +72,8 @@ export function DocumentPreview({
   notice?: ReactNode | ((pages: number) => ReactNode);
   /** A panel under the notice, before the page, as wide as the page: the ATS check's report. */
   panel?: ReactNode;
+  /** Told the number of pages after each measurement, for "Fit to one page" (public issue 69). */
+  onPages?: (pages: number) => void;
   className?: string;
   /** A document component, e.g. ResumeDocument. */
   children: ReactNode;
@@ -91,7 +94,9 @@ export function DocumentPreview({
       const page = pageRef.current?.firstElementChild;
       if (!(page instanceof HTMLElement)) return;
       const style = getComputedStyle(page);
-      setPages(countPages(page, { paged }));
+      const counted = countPages(page, { paged });
+      setPages(counted);
+      onPages?.(counted);
       setPageHeight(pageHeightOf(style, paged));
       setPadY(Number(style.getPropertyValue("--pad-y")) || 0);
     };

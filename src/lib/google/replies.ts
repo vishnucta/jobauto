@@ -11,6 +11,7 @@ import { applyStatusChange } from "@/lib/status-changes";
 
 import { googleConnection } from "./account";
 import { proposeSlots, scheduleInterview, type CalendarSync } from "./availability";
+import { worthSuggesting } from "./matching";
 import { formatSlot } from "./slots";
 import { readReply } from "./sync";
 
@@ -94,13 +95,20 @@ export async function readReplyAgain(emailId: string): Promise<void> {
 /**
  * Takes up a reply's suggested status, or turns it down; either way the
  * suggestion goes. Returns the status and the change's event (null when the
- * application was there already), or null when nothing was taken up.
+ * application was there already), or null when nothing was taken up, which
+ * includes a suggestion that would no longer move the application forward.
  */
 export async function takeSuggestedStatus(emailId: string, accept: boolean): Promise<{ status: ApplicationStatus; eventId: string | null } | null> {
-  const email = await prisma.emailMessage.findUnique({ where: { id: emailId }, select: { applicationId: true, suggestedStatus: true } });
+  const email = await prisma.emailMessage.findUnique({
+    where: { id: emailId },
+    select: { applicationId: true, suggestedStatus: true, application: { select: { status: true } } },
+  });
   if (!email) throw new ActionError(GONE);
   await prisma.emailMessage.update({ where: { id: emailId }, data: { suggestedStatus: null } });
-  if (!accept || !email.applicationId || !email.suggestedStatus) return null;
+  // Checked again against where the application is now, so a suggestion made
+  // before it moved on never takes it backwards (#141).
+  if (!accept || !email.applicationId || !email.suggestedStatus || !email.application) return null;
+  if (!worthSuggesting(email.application.status, email.suggestedStatus)) return null;
   const result = await applyStatusChange(prisma, email.applicationId, email.suggestedStatus);
   return { status: email.suggestedStatus, eventId: result.outcome === "changed" ? result.event.id : null };
 }

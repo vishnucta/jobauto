@@ -30,11 +30,6 @@ vi.mock("@/lib/jobs/runner", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/jobs/runner")>()),
   startJob: vi.fn(async () => "draft-job"),
 }));
-// Trimming renders PDFs; here nothing needs cutting.
-vi.mock("@/lib/page-limit", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/page-limit")>()),
-  fitResumeToPages: vi.fn(async () => ({ trimmed: [], fits: true })),
-}));
 
 import { POST } from "@/app/api/mcp/route";
 
@@ -170,6 +165,20 @@ describe("the Claude connector's tools (#221)", () => {
     const id = saved.json.application_id as string;
     expect(await prisma().application.findUniqueOrThrow({ where: { id } })).toMatchObject({ company: "Acme", status: "DRAFT", postingUrl: "https://jobs.example/p1" });
     expect((await prisma().posting.findFirstOrThrow({ where: { externalId: "p1" } })).applicationId).toBe(id);
+
+    // A link Dossier can't read doesn't stop pasted text, and the link is kept.
+    fake.fetched = { ok: false, error: "That page couldn't be reached." };
+    const pasted = await tool("save_application", {
+      posting_url: "https://jobs.example/sign-in-only",
+      posting_text: "Product Designer at Acme",
+      details: { company: "Acme", role: "Product Designer" },
+      resume: { summary: "Designer who ships calm products.", roles: [], skills: ["Figma"] },
+      cover_letter: { paragraphs: [{ text: "I'd like to help Acme." }] },
+    });
+    expect(pasted.json).toMatchObject({ status: "Draft" });
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: pasted.json.application_id as string } })).toMatchObject({
+      postingUrl: "https://jobs.example/sign-in-only",
+    });
 
     expect(await tool("save_application", { details: { company: "Acme", role: "Designer" }, resume: { summary: "", roles: [], skills: [] }, cover_letter: { paragraphs: [{ text: "Hi" }] } })).toMatchObject({
       isError: true,

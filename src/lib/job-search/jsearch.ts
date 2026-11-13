@@ -6,7 +6,7 @@ import type { JobSourceAdapter, JSearchHost, RequestContext, SourceCredentials }
 import { countryName } from "./countries";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
-import { safeLink, type FoundPosting, type PostedWithin, type SearchPage, type SearchQuery } from "./search";
+import { experienceAskedFor, safeLink, type FoundPosting, type PostedWithin, type SearchPage, type SearchQuery } from "./search";
 
 // JSearch (E14-1): Google for Jobs through OpenWeb Ninja, or the same API on
 // RapidAPI. One search page is one request from the plan (200 a month free).
@@ -15,6 +15,10 @@ import { safeLink, type FoundPosting, type PostedWithin, type SearchPage, type S
 // 404.
 
 const SEARCH_PATH = "/search-v2";
+
+// JSearch searches Google for Jobs while it answers, which can take far longer
+// than other sources, outside the US especially (#231).
+export const JSEARCH_TIMEOUT_MS = 45_000;
 
 const HOSTS: Record<JSearchHost, { base: string; headers: (key: string) => Record<string, string> }> = {
   openwebninja: {
@@ -80,7 +84,7 @@ function salaryOf(job: Job): string {
 }
 
 function postedAtOf(job: Job): string | null {
-  const parsed = job.job_posted_at_datetime_utc ? Date.parse(job.job_posted_at_datetime_utc) : NaN;
+  const parsed = job.job_posted_at_datetime_utc ? Date.parse(job.job_posted_at_datetime_utc) : Number.NaN;
   if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
   return job.job_posted_at_timestamp ? new Date(job.job_posted_at_timestamp * 1000).toISOString() : null;
 }
@@ -121,6 +125,17 @@ export function postingFromJob(job: Job): FoundPosting {
   };
 }
 
+/**
+ * " (keys: status, message)" for an answer that's an object: its top-level
+ * keys tell a changed API from an error message, and never hold the search
+ * the way values can.
+ */
+function keysOf(answer: unknown): string {
+  if (!answer || typeof answer !== "object" || Array.isArray(answer)) return "";
+  const keys = Object.keys(answer).slice(0, 10).map((key) => key.slice(0, 40));
+  return keys.length > 0 ? ` (keys: ${keys.join(", ")})` : "";
+}
+
 /** "designer in Hamburg": JSearch reads the place from the query text, as Google does. */
 function queryText({ keywords, place }: SearchQuery): string {
   return place ? `${keywords} in ${place}` : keywords;
@@ -134,6 +149,11 @@ function searchUrl(query: SearchQuery, host: JSearchHost, next: string | null, b
   url.searchParams.set("date_posted", DATE_POSTED[query.postedWithin]);
   if (query.place) url.searchParams.set("radius", String(query.radiusKm));
   if (query.remoteOnly) url.searchParams.set("work_from_home", "true");
+  // The level as far as JSearch can filter it (public issue 59); the rest is read from the postings.
+  const level = experienceAskedFor(query);
+  if (level === "intern") url.searchParams.set("employment_types", "INTERN");
+  else if (level === "junior") url.searchParams.set("job_requirements", "under_3_years_experience");
+  else if (level === "senior" || level === "lead") url.searchParams.set("job_requirements", "more_than_3_years_experience");
   // A page number kept in a past search from RapidAPI's old /search starts
   // over; Show more leaves out the postings it already has.
   if (next?.startsWith("cursor:")) url.searchParams.set("cursor", next.slice("cursor:".length));
@@ -147,8 +167,9 @@ async function searchPage(
   context: RequestContext = {},
 ): Promise<SearchPage> {
   const url = searchUrl(query, host, next, context.baseUrl);
-  const answer = responseSchema.safeParse(await requestJson("JSEARCH", url, { headers: HOSTS[host].headers(key), signal: context.signal }));
-  if (!answer.success) throw jobSearchError("changed", "JSEARCH", { detail: `${url.pathname}: unexpected answer` });
+  const raw = await requestJson("JSEARCH", url, { headers: HOSTS[host].headers(key), signal: context.signal, timeoutMs: JSEARCH_TIMEOUT_MS });
+  const answer = responseSchema.safeParse(raw);
+  if (!answer.success) throw jobSearchError("changed", "JSEARCH", { detail: `${url.pathname}: unexpected answer${keysOf(raw)}` });
 
   const { jobs, cursor } = answer.data.data;
   const seen = new Set<string>();

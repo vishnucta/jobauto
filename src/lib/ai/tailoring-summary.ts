@@ -2,7 +2,9 @@ import type { Tone } from "@/generated/prisma/enums";
 import type { Match, Unit } from "@/lib/application-data";
 import { isParagraph } from "@/lib/letter-frame";
 import { sameName, type ProfileData } from "@/lib/profile";
+import { inEditorOrder, skillNamesIn } from "@/lib/skill-groups";
 import { TONES } from "@/lib/tones";
+import { isCustomUnit } from "@/lib/unit-text";
 
 // The first message on a new application: what was tailored (E7-6, SET-5).
 // Built in code from the documents, the profile and the match, never written
@@ -74,11 +76,14 @@ export function tailoringSummary({
     list.push(`Reworded your ${listOf(projects.map((entry) => entry.name || "untitled"))} ${projects.length === 1 ? "project" : "projects"} for this job`);
   }
 
+  const certifications = resume.filter((entry) => entry.id.startsWith("certification:")).length;
+  if (certifications > 0) list.push(`Kept your ${certifications === 1 ? "certification" : `${certifications} certifications`} word for word`);
   const publications = resume.filter((entry) => entry.id.startsWith("publication:")).length;
   if (publications > 0) list.push(`Kept your ${publications === 1 ? "publication" : `${publications} publications`} word for word`);
+  if (resume.some((entry) => isCustomUnit(entry.id))) list.push("Kept your own sections word for word");
 
-  const skills = (unit("skills")?.text ?? "").split(" · ").filter(Boolean);
-  const profileSkills = profile.skills.map((skill) => skill.name);
+  const skills = skillNamesIn(unit("skills")?.text ?? "");
+  const profileSkills = inEditorOrder(profile.skills).map((skill) => skill.name);
   const kept = profileSkills.filter((name) => skills.some((skill) => sameName(skill, name)));
   if (skills.length > 1 && !skills.every((skill, index) => kept[index] && sameName(skill, kept[index]))) {
     list.push(`Ordered your skills by what ${where} asks for`);
@@ -88,7 +93,7 @@ export function tailoringSummary({
     list.push(dropped.length <= 3 ? `Left out ${listOf(dropped)}, which this job isn't about` : `Left out ${dropped.length} skills that don't help here`);
   }
 
-  if (profile.references.length > 0) {
+  if (profile.references.length > 0 && resume.length > 0) {
     list.push(
       references === "included"
         ? "Included your references, since the posting asks for them"
@@ -116,7 +121,12 @@ export function tailoringSummary({
 
   return showChanges
     ? { intro: `Here's what I tailored for ${where}:`, list, foot }
-    : { intro: `Your tailored resume and cover letter for ${where} are ready.`, list: [], foot };
+    : { intro: `${readyLine(resume.length > 0, letter.length > 0)} for ${where} ${resume.length > 0 && letter.length > 0 ? "are" : "is"} ready.`, list: [], foot };
+}
+
+/** "Your tailored resume and cover letter", or only the one written (#367). */
+function readyLine(resume: boolean, letter: boolean): string {
+  return `Your tailored ${[resume && "resume", letter && "cover letter"].filter(Boolean).join(" and ") || "documents"}`;
 }
 
 /** The message as stored: intro, a bulleted list, the footnote. */

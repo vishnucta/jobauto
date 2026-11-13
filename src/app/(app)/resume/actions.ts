@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
 import { checkResume } from "@/lib/resume-check";
+import { sectionLayoutSchema } from "@/lib/resume-sections";
+import { saveSettings } from "@/lib/settings-data";
 import { copyTheme, createTheme, deleteCustomTheme, makeBaseTheme, updateCustomTheme } from "@/lib/theme-changes";
 import { parseThemeFile, themeFieldsSchema } from "@/lib/theme-file";
 import type { ThemeData } from "@/lib/themes";
@@ -17,6 +19,21 @@ const THEME_GONE = "That theme doesn't exist anymore. Reload the page to see you
 /** Makes a theme the base resume theme (RES-2). */
 export const setBaseTheme = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
   if (!(await makeBaseTheme(id))) throw new ActionError(THEME_GONE);
+  revalidatePath("/resume");
+  return null;
+});
+
+/** The base resume's order, from Profile or the Sections tab (#297), and which sections are on resumes. */
+export const saveResumeSections = action(sectionLayoutSchema, async (resumeSections) => {
+  await saveSettings({ resumeSections });
+  revalidatePath("/resume");
+  revalidatePath("/profile");
+  return null;
+});
+
+/** "Fit to one page" (public issue 69): saved at once; the preview and the PDF squeeze the resume until it fits. */
+export const setFitBaseResume = action(z.object({ fit: z.boolean() }), async ({ fit }) => {
+  await saveSettings({ fitBaseResume: fit });
   revalidatePath("/resume");
   return null;
 });

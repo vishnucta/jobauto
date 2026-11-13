@@ -112,11 +112,12 @@ export async function resolvePosting(source: PostingSource): Promise<ResolvedPos
       place: found.place,
     };
   }
+  // Pasted text is used as it is, with its link kept: a page Dossier can't read, such as one behind a sign-in, mustn't fail it.
+  if (source.posting_text?.trim()) return { text: source.posting_text.trim(), url: source.posting_url ?? "", postingId: null };
   if (source.posting_url) {
     const fetched = await fetchPosting(source.posting_url);
     if (!fetched.ok) return { error: `${fetched.error} Paste the posting's text as posting_text instead.` };
     return { text: fetched.text, url: fetched.url, postingId: null };
   }
-  if (source.posting_text?.trim()) return { text: source.posting_text.trim(), url: "", postingId: null };
   return { error: "Give posting_id, paste_id, search_id and number, posting_url, or posting_text." };
 }

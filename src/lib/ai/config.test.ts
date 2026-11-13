@@ -34,7 +34,7 @@ describe("resolveAiConfig", () => {
     expect(config).toMatchObject({
       provider: "ANTHROPIC",
       baseUrl: "https://api.anthropic.com",
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
       apiKey: "sk-env",
       timeoutMs: 90_000,
     });
@@ -44,7 +44,7 @@ describe("resolveAiConfig", () => {
     expect(resolveAiConfig(nothingSaved, { DOSSIER_AI_PROVIDER: "mistral", DOSSIER_AI_KEY: "mk-env" })).toMatchObject({
       provider: "MISTRAL",
       baseUrl: "https://api.mistral.ai/v1",
-      model: "mistral-medium-latest",
+      model: "mistral-small-2603",
       apiKey: "mk-env",
       timeoutMs: 120_000,
     });
@@ -87,6 +87,8 @@ describe("createProvider", () => {
     expect(createProvider({ ...base, provider: "ANTHROPIC" }).kind).toBe("ANTHROPIC");
     expect(createProvider({ ...base, provider: "MISTRAL" }).kind).toBe("MISTRAL");
     expect(createProvider({ ...base, provider: "LMSTUDIO" }).kind).toBe("LMSTUDIO");
+    expect(createProvider({ ...base, provider: "GROQ" }).kind).toBe("GROQ");
+    expect(createProvider({ ...base, provider: "DEEPSEEK" }).kind).toBe("DEEPSEEK");
   });
 });
 
@@ -108,5 +110,7 @@ describe("isAiUsable (#221)", () => {
     expect(await usable({ provider: "ANTHROPIC" })).toBe(false);
     expect(await usable({ provider: "ANTHROPIC", apiKeyEnc: encryptApiKey("sk-saved") })).toBe(true);
     expect(await usable({ provider: "MISTRAL", apiKeyEnc: encryptApiKey("sk", "b".repeat(32)) })).toBe(false);
+    expect(await usable({ provider: "GROQ", model: "openai/gpt-oss-120b" })).toBe(false);
+    expect(await usable({ provider: "DEEPSEEK", apiKeyEnc: encryptApiKey("sk-saved") })).toBe(true);
   });
 });

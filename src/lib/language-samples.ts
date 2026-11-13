@@ -316,7 +316,7 @@ export function sampleProfile(sample: Sample): ProfileData {
       summary: sample.summary,
       showAge: false,
     },
-    skills: sample.skills.map((name, index) => ({ id: `skill-${index}`, name })),
+    skills: sample.skills.map((name, index) => ({ id: `skill-${index}`, name, group: "" })),
     languages: [],
     experience: [
       {
@@ -324,6 +324,8 @@ export function sampleProfile(sample: Sample): ProfileData {
         role: sample.headline,
         company: sample.company,
         location: sample.city,
+        descriptor: "",
+        volunteering: false,
         bullets: sample.bullet,
         startYear: 2021,
         startMonth: 3,
@@ -347,8 +349,10 @@ export function sampleProfile(sample: Sample): ProfileData {
         current: false,
       },
     ],
+    certifications: [],
     publications: [],
     references: [],
+    customSections: [],
     facts: [],
     photo: null,
   };

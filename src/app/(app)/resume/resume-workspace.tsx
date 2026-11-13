@@ -12,15 +12,17 @@ import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toggle } from "@/components/ui/toggle";
 import type { PaperSize } from "@/generated/prisma/enums";
 import type { ProfileData } from "@/lib/profile";
 import type { ResumeCheck } from "@/lib/resume-check";
 import { saveFile } from "@/lib/save-file";
-import { pagesInWords } from "@/lib/settings";
+import type { SectionLayout } from "@/lib/resume-sections";
 import { parseThemeFile, themeFile, themeFileName } from "@/lib/theme-file";
-import { PAPER_SIZES, type ThemeData } from "@/lib/themes";
+import { FIT_LEVELS, hasSidebar, PAPER_SIZES, type ThemeData } from "@/lib/themes";
 
-import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveResumeSections, saveTheme, setBaseTheme, setFitBaseResume } from "./actions";
+import { SectionsPanel } from "./sections-panel";
 import { draftFrom, ThemeBuilder, type ThemeDraft } from "./theme-builder";
 import { ThemePicker } from "./theme-picker";
 
@@ -32,13 +34,17 @@ export type ResumeWorkspaceProps = {
   baseThemeId: string;
   paper: PaperSize;
   includeReferences: boolean;
-  /** Settings → "Resume length" (SET-9): the most pages a tailored resume may have, or null for no limit. */
-  maxPages: number | null;
   /** Settings → "Base resume language", for its headings and dates; null for English. */
   language: string | null;
+  /** The sections' order and which are off (#297). */
+  sections: SectionLayout;
+  /** "Fit to one page" (public issue 69). */
+  fitToPage: boolean;
+  /** `/resume?panel=sections` opens the Sections tab. */
+  initialPanel?: Panel;
 };
 
-type Panel = "themes" | "customize";
+export type Panel = "themes" | "customize" | "sections";
 
 /**
  * The Base resume screen: the preview on the left and the theme panel on the
@@ -46,10 +52,27 @@ type Panel = "themes" | "customize";
  * shows it right away and saves it in the background; while you customise
  * one, the preview shows the draft.
  */
-export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThemeId, paper, includeReferences, maxPages, language }: ResumeWorkspaceProps) {
+export function ResumeWorkspace({
+  profile,
+  themes: initialThemes,
+  usage,
+  baseThemeId,
+  paper,
+  includeReferences,
+  language,
+  sections: initialSections,
+  fitToPage: initialFit,
+  initialPanel = "themes",
+}: ResumeWorkspaceProps) {
   const [themes, setThemes] = useState(initialThemes);
+  const [fitToPage, setFitToPage] = useState(initialFit);
+  // How far the resume is squeezed to fit one page (public issue 69): the
+  // preview measures itself, and goes a step tighter while it runs over.
+  const [fit, setFit] = useState(0);
+  const [pages, setPages] = useState(1);
   const [baseId, setBaseId] = useState(baseThemeId);
-  const [panel, setPanel] = useState<Panel>("themes");
+  const [panel, setPanel] = useState<Panel>(initialPanel);
+  const [sections, setSections] = useState(initialSections);
   const [draft, setDraft] = useState<ThemeDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<ThemeData | null>(null);
@@ -60,9 +83,27 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
   // and the last one picked, so an older failure doesn't undo a newer pick.
   const savedId = useRef(baseThemeId);
   const pickedId = useRef(baseThemeId);
+  // The same for the sections' order.
+  const savedSections = useRef(initialSections);
+  const latestSections = useRef(initialSections);
 
   const base = themes.find((entry) => entry.id === baseId) ?? themes[0];
   const theme: ThemeData = draft ? { ...draft, id: draft.id ?? "draft", builtIn: false } : base;
+  // The squeeze starts over from the theme as it is whenever what's on the page changes.
+  const shown = [draft, base, profile, paper, includeReferences, language, sections, fitToPage] as const;
+  const [squeezed, setSqueezed] = useState(shown);
+  if (shown.some((input, index) => input !== squeezed[index])) {
+    setSqueezed(shown);
+    setFit(0);
+  }
+  const onPages = (counted: number) => {
+    setPages(counted);
+    if (fitToPage && counted > 1 && fit < FIT_LEVELS) setFit(fit + 1);
+  };
+  const toggleFit = async (next: boolean) => {
+    setFitToPage(next);
+    if (!toastResult(await setFitBaseResume({ fit: next })).ok) setFitToPage(!next);
+  };
   const empty =
     !profile.basics.name.trim() &&
     profile.experience.length === 0 &&
@@ -99,6 +140,14 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
     const result = toastResult(await setBaseTheme({ id }));
     if (result.ok) savedId.current = id;
     else if (pickedId.current === id) setBaseId(savedId.current);
+  };
+
+  const changeSections = async (next: SectionLayout) => {
+    setSections(next);
+    latestSections.current = next;
+    const result = toastResult(await saveResumeSections(next));
+    if (result.ok) savedSections.current = next;
+    else if (latestSections.current === next) setSections(savedSections.current);
   };
 
   /** A new custom theme, now the base theme: from a copy or an imported file. */
@@ -159,8 +208,8 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
     openPanel("themes", true);
   };
 
-  /** What the ATS check prints: the saved base theme, so another one, or an edit to it, makes the report stale. */
-  const checkedState = JSON.stringify(base);
+  /** What the ATS check prints: the saved base theme, sections and Fit to one page, so a change to any of them makes the report stale. */
+  const checkedState = JSON.stringify({ base, sections, fitToPage });
 
   /** "Check for ATS": prints the base resume and reads it back as a parser would. A draft isn't printed, so it waits. */
   const runCheck = async () => {
@@ -193,8 +242,9 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
       <div className="@container flex flex-1 flex-wrap border-t border-line">
         <DocumentPreview
           label={theme.name}
-          meta={(pages) => `${PAPER_SIZES[paper].label} · ${pages} ${pages === 1 ? "page" : "pages"}`}
-          notice={(pages) =>
+          meta={(pages) => `${PAPER_SIZES[paper].label} · ${pages} ${pages === 1 ? "page" : "pages"}${fit > 0 ? " · squeezed to fit" : ""}`}
+          onPages={onPages}
+          notice={() =>
             empty ? (
               // E11-4: an empty page needs a way forward.
               <p role="note" className="rounded-card bg-card px-4 py-2.5 text-meta text-muted">
@@ -203,17 +253,7 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
                   Go to your profile
                 </Link>
               </p>
-            ) : (
-              maxPages !== null &&
-              pages > maxPages && (
-                <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
-                  Your base resume runs over {pagesInWords(maxPages)}. Tailored resumes are trimmed to fit, oldest roles first.{" "}
-                  <Link href="/settings?section=documents" className="font-medium text-warning underline underline-offset-2">
-                    Change the resume length
-                  </Link>
-                </p>
-              )
-            )
+            ) : null
           }
           panel={
             // The preview shows the draft while one is open, which the report isn't about.
@@ -236,17 +276,32 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
             ) : undefined
           }
         >
-          <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} />
+          <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} sections={sections} fit={fitToPage ? fit : 0} />
         </DocumentPreview>
         <aside
           ref={panelArea}
-          aria-label="Theme"
-          className="flex flex-[1_0_300px] flex-col border-t border-line bg-paper px-7 pt-7 pb-12 @min-[780px]:border-t-0 @min-[780px]:border-l"
+          aria-label="Theme and sections"
+          className="flex flex-[1_0_300px] flex-col gap-6 border-t border-line bg-paper px-7 pt-7 pb-12 @min-[780px]:border-t-0 @min-[780px]:border-l"
         >
+          <Toggle
+            label="Fit to one page"
+            description={
+              !fitToPage
+                ? "Off. The resume takes the pages it needs."
+                : fit === 0
+                  ? "On. It fits as it is."
+                  : pages > 1
+                    ? "On, but it runs over one page even at its tightest. Shorten it, or leave a section out under Sections."
+                    : `On. Tighter spacing${fit >= 3 ? " and smaller type" : fit >= 2 ? " and lines" : ""}, so it fits; the PDF does the same.`
+            }
+            checked={fitToPage}
+            onCheckedChange={(next) => void toggleFit(next)}
+          />
           <Tabs value={panel} onValueChange={(value) => openPanel(value as Panel)} className="flex flex-col gap-6">
             <TabsList variant="segmented">
               <TabsTrigger value="themes">Themes</TabsTrigger>
               <TabsTrigger value="customize">Customize</TabsTrigger>
+              <TabsTrigger value="sections">Sections</TabsTrigger>
             </TabsList>
             <TabsContent value="themes">
               <ThemePicker
@@ -273,6 +328,15 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
                   saving={saving}
                 />
               )}
+            </TabsContent>
+            <TabsContent value="sections">
+              <SectionsPanel
+                profile={profile}
+                includeReferences={includeReferences}
+                sections={sections}
+                sidebar={hasSidebar(theme.layout)}
+                onChange={(next) => void changeSections(next)}
+              />
             </TabsContent>
           </Tabs>
         </aside>

@@ -33,6 +33,7 @@ describe("NavLinks", () => {
       "Agent",
       "Applications",
       "Inbox",
+      "Usage",
       "Settings",
     ]);
   });
@@ -45,6 +46,7 @@ describe("NavLinks", () => {
     expect(currentItem("/startups")).toEqual(["Startups"]);
     // Recruiters is a tab of Find jobs.
     expect(currentItem("/recruiters")).toEqual(["Find jobs"]);
+    expect(currentItem("/usage")).toEqual(["Usage"]);
     expect(currentItem("/settings")).toEqual(["Settings"]);
   });
 

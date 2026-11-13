@@ -19,6 +19,7 @@
         "role": "Senior Product Designer",
         "company": "Northwind Logistics",
         "location": "Rotterdam",
+        "descriptor": "Freight platform for European carriers, 300 people",
         "start": "Mar 2021",
         "end": "Present",
         "skills": [
@@ -34,6 +35,7 @@
         "role": "Product Designer",
         "company": "Fieldnote",
         "location": "Amsterdam",
+        "descriptor": "Note-taking app for field researchers",
         "start": "Jun 2018",
         "end": "Feb 2021",
         "skills": [
@@ -48,6 +50,7 @@
         "role": "UX Designer",
         "company": "Studio Brik",
         "location": "Rotterdam",
+        "descriptor": "",
         "start": "Sep 2015",
         "end": "May 2018",
         "skills": [
@@ -88,6 +91,17 @@
         "start": "2010",
         "end": "2013",
         "notes": ""
+      }
+    ],
+    "certifications": [
+      {
+        "id": "c1",
+        "name": "Certified Accessibility Specialist",
+        "issuer": "Inclusive Design Institute",
+        "obtained": "Jun 2022",
+        "expires": "Jun 2028",
+        "credentialId": "IDI-20481",
+        "link": "https://verify.example.org/IDI-20481"
       }
     ],
     "publications": [

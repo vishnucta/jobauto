@@ -9,18 +9,15 @@ import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
-import { logServerError } from "@/lib/log";
-import { describeTrim, fitResumeToPages } from "@/lib/page-limit";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { noteAgencies } from "@/lib/recruiters/store";
-import { maxPages } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
 
 // Creating an application from finished documents (E7-6), shared by New
 // application and the job agent (E16-5): the Draft application, its resume
 // and cover letter in the base theme, and the opening chat message, in one
-// transaction; then the resume is trimmed to the page limit (E10-10).
+// transaction. Nothing is trimmed to a page limit any more (#234).
 
 export type ApplicationDetails = {
   title: string;
@@ -143,22 +140,31 @@ export async function createApplicationFromDocuments({ reading, documents, match
         ...(note.trim() ? { facts: { create: { text: note.trim() } } } : {}),
         language,
         documents: {
+          // Each starts its history with the first draft (E8-10). One that wasn't
+          // asked for isn't there, and can be written from the application (#367).
           create: [
-            // Each starts its history with the first draft (E8-10).
-            {
-              kind: "RESUME",
-              units: documents.resume,
-              themeId: settings.baseThemeId,
-              writtenWith: documents.resumeWith,
-              versions: { create: { units: documents.resume, cause: "WRITTEN" } },
-            },
-            {
-              kind: "COVER_LETTER",
-              units: letter,
-              themeId: settings.baseThemeId,
-              writtenWith: documents.letterWith,
-              versions: { create: { units: letter, cause: "WRITTEN" } },
-            },
+            ...(documents.resumeWith
+              ? [
+                  {
+                    kind: "RESUME" as const,
+                    units: documents.resume,
+                    themeId: settings.baseThemeId,
+                    writtenWith: documents.resumeWith,
+                    versions: { create: { units: documents.resume, cause: "WRITTEN" as const } },
+                  },
+                ]
+              : []),
+            ...(documents.letterWith
+              ? [
+                  {
+                    kind: "COVER_LETTER" as const,
+                    units: letter,
+                    themeId: settings.baseThemeId,
+                    writtenWith: documents.letterWith,
+                    versions: { create: { units: letter, cause: "WRITTEN" as const } },
+                  },
+                ]
+              : []),
           ],
         },
         messages: { create: { role: "AI", text: summaryText(summary) } },
@@ -187,21 +193,5 @@ export async function createApplicationFromDocuments({ reading, documents, match
   if (!created.isNew) return created.id;
   // A job she applies for through an agency puts the agency on the Recruiters list.
   await noteAgencies([{ company: details.company, title: details.role }], "job");
-
-  // E10-10: once created, a resume that runs over its page limit is
-  // trimmed, and the opening message says what was cut. A failure here
-  // leaves the resume as written rather than failing the application.
-  const limit = maxPages(settings.pageLimit);
-  if (limit) {
-    try {
-      const { trimmed, fits } = await fitResumeToPages(created.id, profile, limit);
-      if (trimmed.length > 0 && settings.showDiff) {
-        const text = summaryText({ ...summary, list: [...summary.list, ...describeTrim(trimmed, profile, fits, limit)] });
-        await prisma.chatMessage.updateMany({ where: { applicationId: created.id, role: "AI", writtenWith: null }, data: { text } });
-      }
-    } catch (error) {
-      logServerError("one-page trimming", error);
-    }
-  }
   return created.id;
 }

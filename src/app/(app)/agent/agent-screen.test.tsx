@@ -21,6 +21,7 @@ vi.mock("./actions", () => ({
 }));
 
 const card = (id: string, score: number, extra: Partial<AgentCandidateView> = {}): AgentCandidateView => ({
+  searches: [],
   id,
   title: `Posting ${id}`,
   company: `Company ${id}`,
@@ -37,12 +38,17 @@ const card = (id: string, score: number, extra: Partial<AgentCandidateView> = {}
   ...extra,
 });
 const view: AgentView = {
+  searches: [],
+  sourceRequestsUsed: 0,
+  nextEligibility: "Wed 21 Oct, 07:00",
+  timeZone: "Europe/Berlin",
+  searchHistory: [],
+  searchResults: [],
   enabled: true,
   autoDraft: false,
   minScore: 70,
   maxScores: 15,
   maxDrafts: 3,
-  search: "Product designer · Rotterdam, 25 km · via JSearch",
   setupProblem: null,
   setupSection: null,
   limitReached: false,
@@ -58,10 +64,34 @@ const open = (changes: Partial<AgentView> = {}) => render(<AgentScreen view={{ .
 beforeEach(() => vi.clearAllMocks());
 
 describe("AgentScreen (E16-6)", () => {
+  it.each([null, "The agent scan was interrupted. Try again."])("does not present a collected source page as overall success for batch outcome %s", (batchMessage) => {
+    const search = { id: "one", name: "Incomplete", query: { keywords: "Designer", place: "", country: "", radiusKm: 25 as const, remoteOnly: false, postedWithin: "any" as const }, enabled: false, sort: 0, createdAt: new Date(), updatedAt: new Date() };
+    open({ searches: [search], searchHistory: [{ searchId: "one", searchName: search.name, found: 3, fresh: 0, error: null, at: "Tue 20 Oct, 07:00", batchMessage }] });
+    expect(screen.getByText("Designer · No country selected")).toBeInTheDocument();
+    expect(screen.getByText(/Last source request completed:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Last success/)).not.toBeInTheDocument();
+    expect(screen.getByText(batchMessage ? `Batch outcome: ${batchMessage}` : "Batch pending or still processing; discovery counts may be incomplete.")).toBeInTheDocument();
+  });
+
+  it("shows quota, per-search results and historical attribution without changing review actions", () => {
+    const search = { id: "one", name: "Renamed", query: { keywords: "Designer", place: "Berlin", country: "de", radiusKm: 25 as const, remoteOnly: false, postedWithin: "any" as const }, enabled: true, sort: 0, createdAt: new Date(), updatedAt: new Date() };
+    const result = { searchId: "one", searchName: "Original", found: 10, fresh: 4, error: "Source failed" };
+    open({ searches: [search], sourceRequestsUsed: 2, limitReached: true, searchHistory: [{ ...result, at: "Tue 20 Oct, 07:00", batchMessage: "Interrupted" }], searchResults: [result, { ...result, searchId: "gone", searchName: "Removed", error: null }], scored: [card("s1", 84, { searches: [{ searchId: "one", searchName: "Original" }, { searchId: null, searchName: "Removed" }] })] });
+    expect(screen.getByText("Source requests available").nextElementSibling).toHaveTextContent("1 of 3");
+    expect(screen.getByText("Whole-batch quota eligibility").nextElementSibling).toHaveTextContent("Wed 21 Oct, 07:00 (Europe/Berlin)");
+    expect(screen.getByText("Renamed · Enabled")).toBeInTheDocument();
+    expect(screen.getByText(/Last source request failed:/)).toHaveTextContent("10 found · 4 new to agent");
+    expect(screen.getByText("Run as “Original”")).toBeInTheDocument();
+    expect(screen.getByText(/Removed \(deleted search\):/)).toBeInTheDocument();
+    expect(screen.getByText("Found by: Original · Removed (deleted search)")).toBeInTheDocument();
+    expect(screen.getByText(/Found counts may overlap/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prepare draft" })).toBeInTheDocument();
+  });
+
   it("says what it searches, when it ran and when it runs next", () => {
     open();
     expect(screen.getByRole("heading", { level: 1, name: "Job agent" })).toBeInTheDocument();
-    expect(screen.getByText("Searches for").nextElementSibling).toHaveTextContent("Product designer · Rotterdam, 25 km · via JSearch");
+    expect(screen.getByText("Enabled searches").nextElementSibling).toHaveTextContent("0 of 0");
     expect(screen.getByText("Last run").nextElementSibling).toHaveTextContent("Tue 20 Oct, 07:002 new postings are waiting for a look.");
     expect(screen.getByText("Next run").nextElementSibling).toHaveTextContent("Wed 21 Oct, 07:00");
   });
@@ -147,7 +177,7 @@ describe("AgentScreen (E16-6)", () => {
   it("runs now on request", async () => {
     const user = userEvent.setup();
     open();
-    await user.click(screen.getByRole("button", { name: "Run now" }));
+    await user.click(screen.getByRole("button", { name: "Run all now" }));
     expect(runAgentNow).toHaveBeenCalledWith({});
     expect(screen.getByRole("button", { name: "Running…" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Starting the run…");
@@ -166,7 +196,12 @@ describe("AgentScreen (E16-6)", () => {
     second.unmount();
 
     open({ limitReached: true });
-    expect(screen.getByRole("note")).toHaveTextContent("The agent has run 3 times in the past 24 hours");
+    expect(screen.getByRole("note")).toHaveTextContent("The whole batch needs more source requests than are available.");
+  });
+
+  it("links missing Jev credentials to the scoring settings", () => {
+    open({ setupProblem: "Enter your TypeSafe key in Settings → Scoring first.", setupSection: "scoring" });
+    expect(screen.getByRole("link", { name: "Go to Settings → Scoring" })).toHaveAttribute("href", "/settings?section=scoring");
   });
 
   it("says when there's nothing yet", () => {

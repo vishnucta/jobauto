@@ -56,8 +56,9 @@ export async function deleteCustomTheme(id: string): Promise<{ name: string; bas
   const theme = await prisma.theme.findUnique({ where: { id }, select: { name: true, builtIn: true } });
   if (!theme) return "not-found";
   if (theme.builtIn) return "built-in";
+  const { baseThemeId: current } = await loadSettings();
   const baseThemeId = await prisma.$transaction(async (tx) => {
-    let base = (await loadSettings()).baseThemeId;
+    let base = current;
     if (base === id) {
       base = DEFAULT_BASE_THEME;
       await saveSettings({ baseThemeId: base }, tx);

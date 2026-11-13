@@ -54,6 +54,24 @@ describe("applyStatusChange", () => {
   });
 });
 
+describe("a card's place on the board (public issue 60)", () => {
+  const place = async (id: string) => (await db.application.findUniqueOrThrow({ where: { id } })).boardSort;
+
+  it("gives it up on a status change, so the card goes on top of its new column", async () => {
+    const { id } = await db.application.create({ data: { boardSort: 3 } });
+    expect(await applyStatusChange(db, id, "SENT", t(0))).toMatchObject({ event: { previousBoardSort: 3 } });
+    expect(await place(id)).toBeNull();
+  });
+
+  it("gets it back on Undo", async () => {
+    const { id } = await db.application.create({ data: { boardSort: 3 } });
+    const change = await applyStatusChange(db, id, "SENT", t(0));
+    if (change.outcome !== "changed") throw new Error("expected a change");
+    await undoStatusChange(db, change.event.id);
+    expect(await place(id)).toBe(3);
+  });
+});
+
 describe("undoStatusChange", () => {
   it("restores the previous status, stage and sent date, and deletes the event", async () => {
     const { id } = await db.application.create({ data: {} });

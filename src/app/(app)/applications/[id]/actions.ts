@@ -3,24 +3,45 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { Prisma } from "@/generated/prisma/client";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
+import { isAiConfigured } from "@/lib/ai/config";
+import { profileUnits } from "@/lib/ai/tasks/tailor-resume";
+import { trimmedSchema, unitsSchema } from "@/lib/application-data";
+import { loadDocuments, readJson } from "@/lib/application-documents";
 import { addApplicationNote, deleteApplicationNote, noteBody, restoreApplicationNote, updateApplicationNote } from "@/lib/application-notes";
-import { leaveOut, putBack, saveUnitText } from "@/lib/document-edits";
+import { leaveOut, PART_GONE, putBack, saveUnitText } from "@/lib/document-edits";
 import { listDocumentVersions, loadDocumentVersion, restoreDocumentVersion } from "@/lib/document-history";
+import { documentLabels } from "@/lib/document-labels";
 import { setDocumentLook } from "@/lib/document-look";
 import { restoreUnitText, sendChatMessage, startLanguageRewrite, startUnitRewrite, undoChatMessage } from "@/lib/document-rewrites";
+import { updateDocuments } from "@/lib/document-units";
 import { putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { DOCUMENT_LABELS } from "@/lib/file-name";
+import { frozenCopySchema, frozenProfile, readFrozenCopy, withSectionFromProfile } from "@/lib/frozen-copy";
 import { followInCalendar, saveInterviewDate } from "@/lib/interview-date";
+import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
+import { scoreResumeJob, scoreResumeJobKey } from "@/lib/jobs/score-resume";
+import { writeDocumentJob, writeDocumentJobKey } from "@/lib/jobs/write-document";
 import { addMissingSkill } from "@/lib/match-skills";
+import { prisma } from "@/lib/prisma";
+import { loadProfile } from "@/lib/profile-data";
+import { profileUpdate } from "@/lib/profile-update";
 import { checkResume, cleanDocumentText } from "@/lib/resume-check";
+import { sectionLayoutSchema, sectionOfUnit } from "@/lib/resume-sections";
+import { scoringProblem } from "@/lib/scoring";
+import { loadSettings } from "@/lib/settings-data";
+
+const GONE = "That application no longer exists.";
 
 const refresh = (id: string) => revalidatePath(`/applications/${id}`);
 
 // The tailored documents' looks, edits, AI changes and versions are made by
 // src/lib/document-look.ts, document-edits.ts, document-rewrites.ts and
-// document-history.ts, which the Claude connector uses too.
+// document-history.ts, which the Claude connector uses too. The Sections
+// menu, "Update from profile", "Write the cover letter" and the resume's
+// score (Dossier 1.12 and 1.13) are made here.
 
 /** The Resume tab's layout switch (APP-4): the theme's own layout, or a single column. */
 export const setFollowThemeLayout = action(
@@ -38,6 +59,119 @@ export const setShowPhoto = action(z.object({ id: z.string().min(1), show: z.boo
   refresh(id);
   return null;
 });
+
+/** The Sections menu (#297): this resume's own order and which sections are on it. */
+export const setApplicationSections = action(z.object({ id: z.string().min(1), order: sectionLayoutSchema.shape.order, off: sectionLayoutSchema.shape.off, titles: sectionLayoutSchema.shape.titles }), async ({ id, order, off, titles }) => {
+  const application = await prisma.application.findUnique({ where: { id }, select: { sections: true } });
+  if (!application) throw new ActionError(GONE);
+  const withReferences = readJson(sectionLayoutSchema, application.sections)?.withReferences;
+  await prisma.application.update({ where: { id }, data: { sections: { order, off, ...(titles ? { titles } : {}), ...(withReferences ? { withReferences } : {}) } } });
+  refresh(id);
+  return null;
+});
+
+/** "Use the base resume's order": a draft follows the base resume again; one that was sent takes its order as it is now, once. */
+export const followBaseSections = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
+  const application = await prisma.application.findUnique({ where: { id }, select: { frozen: true } });
+  if (!application) throw new ActionError(GONE);
+  const sections = application.frozen === null ? Prisma.DbNull : (await loadSettings()).resumeSections;
+  await prisma.application.update({ where: { id }, data: { sections } });
+  refresh(id);
+  return null;
+});
+
+/**
+ * "Add" on the Sections menu (#297): puts a section from the profile on this
+ * resume, in the profile's own words. Nothing else ever does: a resume only
+ * holds what it was written with and what's added here.
+ */
+export const addApplicationSection = action(z.object({ id: z.string().min(1), key: z.string().min(1) }), async ({ id, key }) => {
+  const [application, profile, settings] = await Promise.all([
+    prisma.application.findUnique({ where: { id }, select: { sections: true, language: true, frozen: true } }),
+    loadProfile(),
+    loadSettings(),
+  ]);
+  if (!application) throw new ActionError(GONE);
+
+  const fresh = profileUnits(profile, documentLabels(application.language)).filter((unit) => sectionOfUnit(unit.id, profile) === key);
+  const added = new Set(fresh.map((unit) => unit.id));
+  const copy = readFrozenCopy(application.frozen);
+  await updateDocuments(id, async (documents, tx) => {
+    const units = documents[DocumentKind.RESUME];
+    if (!units) throw new ActionError(PART_GONE);
+    // A sent resume is drawn from its copy, so the section has to reach that too (#299). Taking one back on that it still holds changes nothing.
+    const holdsIt = copy !== null && units.some((unit) => unit.text.trim() && sectionOfUnit(unit.id, frozenProfile(copy, profile)) === key);
+    if (copy && !holdsIt) {
+      await tx.application.update({ where: { id }, data: { frozen: withSectionFromProfile(copy, profile, key) as unknown as Prisma.InputJsonValue } });
+    }
+    for (const unit of fresh) {
+      const index = units.findIndex((entry) => entry.id === unit.id);
+      if (index < 0) units.push(unit);
+      else if (!units[index].text.trim()) units[index] = unit;
+    }
+  });
+  // Back through here, so they're no longer listed as left out. Written after the document itself: updateDocuments checks it wasn't changed meanwhile.
+  const row = await prisma.document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: id, kind: DocumentKind.RESUME } }, select: { id: true, trimmed: true } });
+  const trimmed = readJson(trimmedSchema, row.trimmed);
+  const rest = trimmed?.filter((cut) => !(cut.kind === "unit" ? added.has(cut.unit.id) : added.has(cut.unitId)));
+  if (trimmed && rest && rest.length !== trimmed.length) {
+    await prisma.document.update({ where: { id: row.id }, data: { trimmed: rest.length > 0 ? rest : Prisma.DbNull } });
+  }
+
+  const own = readJson(sectionLayoutSchema, application.sections);
+  const layout = own ?? settings.resumeSections;
+  if (layout.off.includes(key) || key === "references") {
+    await prisma.application.update({
+      where: { id },
+      data: {
+        sections: {
+          ...layout,
+          off: layout.off.filter((entry) => entry !== key),
+          ...(key === "references" ? { withReferences: true } : {}),
+        },
+      },
+    });
+  }
+  refresh(id);
+  return null;
+});
+
+/**
+ * "Update from profile" (#301): titles, dates, contact details and links as
+ * the profile has them now, with what's new in the sections this resume holds.
+ * Returns what to put back for Undo, or null when there was nothing to update.
+ */
+export const updateFromProfile = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
+  if (!(await prisma.application.count({ where: { id } }))) throw new ActionError(GONE);
+  const { application, liveProfile, resume, includeReferences } = await loadDocuments(id);
+  if (!resume) throw new ActionError(PART_GONE);
+  const copy = readFrozenCopy(application.frozen);
+  const update = profileUpdate({ copy: copy?.profile ?? null, live: liveProfile, units: resume.units, trimmed: resume.trimmed ?? null, language: application.language, includeReferences });
+  if (!update.changed) return null;
+
+  await updateDocuments(id, async (documents, tx) => {
+    documents[DocumentKind.RESUME] = update.units;
+    if (copy && update.copy) await tx.application.update({ where: { id }, data: { frozen: { ...copy, profile: update.copy } as unknown as Prisma.InputJsonValue } });
+  });
+  refresh(id);
+  return { profile: copy?.profile ?? null, units: resume.units };
+});
+
+/** Undo after "Update from profile". */
+export const undoUpdateFromProfile = action(
+  z.object({ id: z.string().min(1), profile: frozenCopySchema.shape.profile.nullable(), units: unitsSchema }),
+  async ({ id, profile, units }) => {
+    const application = await prisma.application.findUnique({ where: { id }, select: { frozen: true } });
+    if (!application) throw new ActionError(GONE);
+    const copy = readFrozenCopy(application.frozen);
+    await updateDocuments(id, async (documents, tx) => {
+      documents[DocumentKind.RESUME] = units;
+      if (copy && profile) await tx.application.update({ where: { id }, data: { frozen: { ...copy, profile } as unknown as Prisma.InputJsonValue } });
+    });
+    refresh(id);
+    return null;
+  },
+);
 
 /**
  * The Theme menu on the Resume and Cover letter tabs (#226, public issue 10):
@@ -274,6 +408,39 @@ export const restoreVersion = action(z.object({ id: z.string().min(1), versionId
   toast(`Restored the ${DOCUMENT_LABELS[kind].toLowerCase()} as it was then. The version you had is in the history too.`);
   refresh(id);
   return null;
+});
+
+// ─── A document it was created without (#367) ──────────────────────────────
+
+/**
+ * "Write the cover letter" (or resume) on an application created without
+ * it: writes it in the background and returns the job's id. Asking again
+ * while it's being written follows the same job.
+ */
+export const startWritingDocument = action(
+  z.object({ id: z.string().min(1), kind: z.enum([DocumentKind.RESUME, DocumentKind.COVER_LETTER]) }),
+  async ({ id, kind }) => {
+    const application = await prisma.application.findUnique({ where: { id }, select: { documents: { select: { kind: true } } } });
+    if (!application) throw new ActionError(GONE);
+    if (application.documents.some((document) => document.kind === kind)) throw new ActionError("It's been written already. Reload the page to see it.");
+    if (!(await isAiConfigured())) throw new ActionError("That needs an AI provider. Choose one in Settings → AI provider.");
+    const key = writeDocumentJobKey(id, kind);
+    const [running] = await findUnfinishedJobs(key);
+    return running?.id ?? startJob(writeDocumentJob, { applicationId: id, kind }, { key, applicationId: id });
+  },
+);
+
+// ─── The resume's score (#370) ───────────────────────────────────────────────
+
+/** "Score" and "Score again" on the Resume tab: scores the tailored resume in the background and returns the job's id. */
+export const startScoringResume = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
+  const resume = await prisma.document.findUnique({ where: { applicationId_kind: { applicationId: id, kind: DocumentKind.RESUME } }, select: { id: true } });
+  if (!resume) throw new ActionError((await prisma.application.count({ where: { id } })) ? "Write the tailored resume first." : GONE);
+  const problem = await scoringProblem();
+  if (problem) throw new ActionError(problem);
+  const key = scoreResumeJobKey(id);
+  const [running] = await findUnfinishedJobs(key);
+  return running?.id ?? startJob(scoreResumeJob, { applicationId: id }, { key, applicationId: id });
 });
 
 // ─── The email (Email tab) ───────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import "server-only";
 import type { ApplicationStatus, EmailDirection, ReplyKind } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 
+import { worthSuggesting } from "./matching";
 import { questionsSchema } from "./sync";
 
 // What the inbox and an application's Conversation tab show (E15-3).
@@ -56,9 +57,12 @@ const list = (value: unknown) => {
   return parsed.success ? parsed.data : [];
 };
 
-function view({ handledAt, classifiedWith, application, questions, replyGaps, ...row }: Row): EmailView {
+function view({ handledAt, classifiedWith, application, questions, replyGaps, suggestedStatus, ...row }: Row): EmailView {
   return {
     ...row,
+    // Only while it still moves the application forward: an older reply's
+    // "Move to Screening?" isn't offered once it has reached Interview (#141).
+    suggestedStatus: application && worthSuggesting(application.status, suggestedStatus) ? suggestedStatus : null,
     questions: list(questions),
     replyGaps: list(replyGaps),
     handled: handledAt !== null,

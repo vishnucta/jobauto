@@ -7,11 +7,13 @@ import { ActionError } from "@/lib/action";
 import { stringsOf } from "@/lib/agent/candidates";
 import { approveCandidate, dismissCandidate, draftJobKey, restoreDismissedCandidate, startCandidateDraft } from "@/lib/agent/draft";
 import { startAgentRun } from "@/lib/agent/jobs";
+import type { SavedAgentSearch } from "@/lib/agent/search";
+import { listAgentSearches } from "@/lib/agent/searches";
 import { updateAgentSettings } from "@/lib/agent/settings";
 import { loadAgentView, type AgentCandidateView } from "@/lib/agent/view";
 import { formatDateTime } from "@/lib/dates";
-import { countryCodeFor } from "@/lib/job-search/countries";
-import { POSTED_WITHIN, postingKey, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
+import { countryCodeFor, countryName } from "@/lib/job-search/countries";
+import { describeSearch, EMPTY_QUERY, POSTED_WITHIN, postingKey, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
@@ -48,9 +50,13 @@ function refusal(error: unknown) {
   throw error;
 }
 
-/** The agent's settings, named as update_job_agent takes them. */
-function agentSettings(settings: SettingsData, timeZone: string) {
-  const query = settings.agentQuery;
+/**
+ * The agent's settings, named as update_job_agent takes them. It keeps up to
+ * three searches, run in order; the search fields are the first one's, which
+ * update_job_agent changes, and `searches` lists them all.
+ */
+function agentSettings(settings: SettingsData, searches: readonly SavedAgentSearch[], timeZone: string) {
+  const query = searches[0]?.query ?? EMPTY_QUERY;
   return {
     enabled: settings.agentEnabled,
     keywords: query.keywords,
@@ -59,6 +65,7 @@ function agentSettings(settings: SettingsData, timeZone: string) {
     radius_km: query.radiusKm,
     remote_only: query.remoteOnly,
     posted_within: query.postedWithin,
+    searches: searches.map((search) => ({ name: search.name, enabled: search.enabled, searches_for: describeSearch(search.query, countryName(search.query.country)) })),
     hour: settings.agentHour,
     time_zone: timeZone,
     min_score: settings.agentMinScore,
@@ -73,6 +80,7 @@ const findLine = (find: AgentCandidateView) => ({
   find_id: find.id,
   title: find.title,
   company: find.company || undefined,
+  found_by: find.searches.length > 0 ? find.searches.map((search) => search.searchName) : undefined,
   facts: find.facts || undefined,
   origin: find.origin || undefined,
   url: find.url || undefined,
@@ -183,8 +191,7 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
       const now = new Date();
       const [view, settings, timeZone] = await Promise.all([loadAgentView(now), loadSettings(), lastKnownTimeZone()]);
       return text({
-        settings: agentSettings(settings, timeZone),
-        searches_for: view.search ?? undefined,
+        settings: agentSettings(settings, view.searches, timeZone),
         setup_problem: view.setupProblem ?? undefined,
         daily_limit_reached: view.limitReached || undefined,
         next_run: view.nextRun ?? undefined,
@@ -206,6 +213,7 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
       title: "Change the job agent",
       description:
         "Changes the job agent's settings, as Settings → Job agent does: give only what changes. Turning it on needs keywords and a country. " +
+        "The agent runs up to three searches; keywords, place, country, radius_km, remote_only and posted_within change the first one (made when there's none), and the user changes the others in Settings → Job agent. " +
         "run_now: true also runs it now, at most 3 times a day and an hour apart; follow it with check_task.",
       inputSchema: z.object({
         enabled: z.boolean().optional().describe("Whether it runs once a day"),
@@ -227,7 +235,8 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
     async ({ run_now, enabled, keywords, place, country, radius_km, remote_only, posted_within, hour, min_score, max_scores, auto_draft, max_drafts }) => {
       let query: SearchQuery | undefined;
       if ([keywords, place, country, radius_km, remote_only, posted_within].some((value) => value !== undefined)) {
-        const current = (await loadSettings()).agentQuery;
+        const [first] = await listAgentSearches();
+        const current = first?.query ?? EMPTY_QUERY;
         const code = country === undefined ? current.country : countryCodeFor(country) || (/^[a-z]{2}$/i.test(country) ? country.toLowerCase() : "");
         if (country && !code) return failure("Dossier doesn't know that country. Give its name or ISO code, e.g. 'Germany' or 'de'.");
         query = {
@@ -237,6 +246,8 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
           radiusKm: radius_km ?? current.radiusKm,
           remoteOnly: remote_only ?? current.remoteOnly,
           postedWithin: posted_within ?? current.postedWithin,
+          // The level set on the screen stays.
+          ...(current.experience === undefined ? {} : { experience: current.experience }),
         };
       }
       const changes = { enabled, query, hour, minScore: min_score, maxScores: max_scores, maxDrafts: max_drafts, autoDraft: auto_draft };
@@ -258,7 +269,8 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
           return refusal(error);
         }
       }
-      return text({ saved: true, settings: agentSettings(await loadSettings(), await lastKnownTimeZone()), link: linkTo("/agent") });
+      const [settings, searches, timeZone] = await Promise.all([loadSettings(), listAgentSearches(), lastKnownTimeZone()]);
+      return text({ saved: true, settings: agentSettings(settings, searches, timeZone), link: linkTo("/agent") });
     },
   );
 

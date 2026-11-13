@@ -56,6 +56,25 @@ describe("GET /api/pdf", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([37, 80, 68, 70]));
   });
 
+  it("squeezes the base resume a step at a time until it fits one page, when Fit to one page is on (public issue 69)", async () => {
+    const pages = (count: number) => new TextEncoder().encode(`%PDF ${"/Type /Page ".repeat(count)}`);
+    vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([{ key: "fitBaseResume", value: "true" }]));
+    vi.mocked(renderPdf).mockImplementation(async (path) => (path === "/print/base?fit=2" ? pages(1) : pages(2)));
+    expect((await get("?doc=base")).status).toBe(200);
+    expect(vi.mocked(renderPdf).mock.calls.map(([path]) => path)).toEqual(["/print/base", "/print/base?fit=1", "/print/base?fit=2"]);
+
+    // At its tightest it may still run over: the last try is what's sent.
+    vi.mocked(renderPdf).mockClear().mockResolvedValue(pages(2));
+    expect((await get("?doc=base")).status).toBe(200);
+    expect(vi.mocked(renderPdf).mock.calls.map(([path]) => path)).toEqual(["/print/base", "/print/base?fit=1", "/print/base?fit=2", "/print/base?fit=3", "/print/base?fit=4"]);
+
+    // Off: one render, pages or not.
+    vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([]));
+    vi.mocked(renderPdf).mockClear().mockResolvedValue(pages(2));
+    await get("?doc=base");
+    expect(vi.mocked(renderPdf).mock.calls.map(([path]) => path)).toEqual(["/print/base"]);
+  });
+
   it("answers 404 for documents it doesn't know", async () => {
     expect((await get("?doc=resume:abc")).status).toBe(404);
     expect((await get("")).status).toBe(404);

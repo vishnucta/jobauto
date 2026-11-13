@@ -14,7 +14,7 @@ import { JobSearchError } from "@/lib/job-search";
 import { credentialsFor, jobSearchView, loadJobSearchConfig, type JobSearchConfig } from "@/lib/job-search/config";
 import { prisma } from "@/lib/prisma";
 import { UPGRADE_GUIDE_URL } from "@/lib/releases";
-import { JOB_RETENTION_OPTIONS } from "@/lib/settings";
+import { DOCUMENTS_TO_WRITE, DOCUMENTS_TO_WRITE_LABELS, JOB_RETENTION_OPTIONS } from "@/lib/settings";
 import {
   aiChoiceSchema,
   availableAiModels,
@@ -182,6 +182,8 @@ async function settingsView() {
       adzuna_app_id: jobs.adzuna.appId || null,
       adzuna_key: jobs.adzuna.keyState,
       jooble_key: jobs.jooble.keyState,
+      // FreeHire needs no key: where it's searched, its own server or DOSSIER_FREEHIRE_URL.
+      freehire_host: jobs.freehire.host,
       arbeitsagentur: { offered: jobs.arbeitsagentur.offered, understood: jobs.arbeitsagentur.acceptedAt !== null },
     },
     documents: {
@@ -193,7 +195,7 @@ async function settingsView() {
       languages: [...DOCUMENT_LANGUAGES.map((language) => language.name), ...settings.customLanguages],
       file_name_pattern: settings.fileNamePattern,
       include_references: settings.includeRefs,
-      page_limit: settings.pageLimit,
+      documents_to_write: settings.documentsToWrite,
     },
     your_data: {
       nightly_backup: settings.nightlyBackup,
@@ -236,7 +238,7 @@ async function settingsView() {
 const SECTIONS = [
   { name: "ai", id: "ai", fields: ["ai_provider", "ai_address", "ai_model", "creativity", "never_invent_experience", "show_what_changed"] },
   { name: "job_search", id: "jobs", fields: ["job_source", "jsearch_host", "adzuna_app_id"] },
-  { name: "documents", id: "documents", fields: ["paper", "date_format", "default_tone", "document_language", "resume_language", "file_name_pattern", "include_references", "page_limit"] },
+  { name: "documents", id: "documents", fields: ["paper", "date_format", "default_tone", "document_language", "resume_language", "file_name_pattern", "include_references", "documents_to_write"] },
   { name: "your_data", id: "data", fields: ["nightly_backup", "keep_task_data_hours"] },
   { name: "about", id: "about", fields: ["check_for_updates_daily"] },
 ] as const;
@@ -418,7 +420,9 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
         resume_language: choice.resumeLanguage.describe("The base resume's language, one of Dossier's own, e.g. German"),
         file_name_pattern: choice.fileNamePattern.describe(`PDF file names, from ${FILE_NAME_TOKENS.map(({ token }) => token).join(", ")}`),
         include_references: choice.includeRefs,
-        page_limit: choice.pageLimit.describe("The most pages a tailored resume may run to"),
+        documents_to_write: choice.documentsToWrite.describe(
+          `What a new application gets written by default: ${DOCUMENTS_TO_WRITE.map((value) => `${value} (${DOCUMENTS_TO_WRITE_LABELS[value]})`).join(", ")}`,
+        ),
         nightly_backup: choice.nightlyBackup,
         keep_task_data_hours: choice.jobRetentionHours.describe(JOB_RETENTION_OPTIONS.map(({ hours, label }) => `${hours} (${label})`).join(", ")),
         check_for_updates_daily: choice.updateCheck,
@@ -455,7 +459,7 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
         resumeLanguage: input.resume_language === "English" ? null : input.resume_language,
         fileNamePattern: input.file_name_pattern,
         includeRefs: input.include_references,
-        pageLimit: input.page_limit,
+        documentsToWrite: input.documents_to_write,
         nightlyBackup: input.nightly_backup,
         jobRetentionHours: input.keep_task_data_hours,
         updateCheck: input.check_for_updates_daily,

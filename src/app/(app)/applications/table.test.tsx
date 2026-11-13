@@ -9,12 +9,13 @@ import { DEFAULT_SORT, type ListParams } from "@/lib/applications-list";
 import { ApplicationsScreen } from "./applications-screen";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
-vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })), reorderBoard: vi.fn(async () => ({ ok: true, data: null })) }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null }));
 vi.mock("@/components/change-status", () => ({ changeStatus: vi.fn(async () => true) }));
 
 const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow => ({
   id,
+  score: null,
   company: "Ledgerly",
   role: "Senior Product Designer",
   location: "Amsterdam",
@@ -26,6 +27,7 @@ const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow =>
   sent: "20 Sep",
   updated: "2 days ago",
   updatedAt: Date.UTC(2026, 8, 26),
+  boardSort: null,
   ...extra,
 });
 const rows = [row("kestrel", { company: "Kestrel Maps", role: "Product Designer, Mobile", match: null }), row("draft", { status: "DRAFT", sent: null, location: "" })];
@@ -45,6 +47,7 @@ describe("the table (E9-3)", () => {
       "Role",
       "Status",
       "Match",
+      "Score",
       "Location",
       "Sent",
       "Updated ↓",
@@ -63,12 +66,13 @@ describe("the table (E9-3)", () => {
       "Product Designer, MobileKestrel Maps",
       expect.stringContaining("Sent"),
       "Not matched",
+      "Not scored",
       "Amsterdam",
       "20 Sep",
       "2 days ago",
       "⋯",
     ]);
-    expect(within(draft).getAllByRole("cell").slice(2, 5).map((cell) => cell.textContent)).toEqual(["5/7", "Not given", "Not sent"]);
+    expect(within(draft).getAllByRole("cell").slice(2, 6).map((cell) => cell.textContent)).toEqual(["5/7", "Not scored", "Not given", "Not sent"]);
   });
 
   it("sorts by a column, and reverses on a second click", async () => {

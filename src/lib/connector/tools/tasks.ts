@@ -16,7 +16,9 @@ import { refineJob } from "@/lib/jobs/refine";
 import { regenerateUnitJob } from "@/lib/jobs/regenerate-unit";
 import { translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { cancelJob, isFinished, JOB_MESSAGES, retryJob } from "@/lib/jobs/runner";
-import { scorePostingJob } from "@/lib/jobs/score-posting";
+import { scorePastedPostingJob, scorePostingJob } from "@/lib/jobs/score-posting";
+import { scoreResumeJob } from "@/lib/jobs/score-resume";
+import { writeDocumentJob } from "@/lib/jobs/write-document";
 import { writeDocumentsJob } from "@/lib/jobs/write-documents";
 import { writeEmailJob } from "@/lib/jobs/write-email";
 import { zipPdfsJob } from "@/lib/jobs/zip-pdfs";
@@ -81,11 +83,15 @@ const KINDS: Record<string, Tell> = {
       link: linkTo(task.applicationId ? `/applications/${task.applicationId}` : "/new"),
     };
   },
-  [writeDocumentsJob.type]: (task, linkTo) => ({
-    task: "Writing the resume and cover letter for New application",
-    about: { application_id: task.applicationId ?? undefined },
-    link: linkTo(task.applicationId ? `/applications/${task.applicationId}` : "/new"),
-  }),
+  [writeDocumentsJob.type]: (task, linkTo) => {
+    // Both, or only the one asked for (#367).
+    const write = inputOf(writeDocumentsJob, task)?.write ?? "both";
+    return {
+      task: `Writing ${write === "resume" ? "the resume" : write === "letter" ? "the cover letter" : "the resume and cover letter"} for New application`,
+      about: { application_id: task.applicationId ?? undefined },
+      link: linkTo(task.applicationId ? `/applications/${task.applicationId}` : "/new"),
+    };
+  },
   [regenerateUnitJob.type]: (task, linkTo) => {
     const input = inputOf(regenerateUnitJob, task);
     const rewrite = resultOf(regenerateUnitJob, task);
@@ -106,6 +112,25 @@ const KINDS: Record<string, Tell> = {
       result: done ? { parts_rewritten: done.rewritten, parts_left_as_they_were: done.left.length } : undefined,
       link: input ? linkTo(`/applications/${input.applicationId}`) : undefined,
       next: done ? "Read them with get_document. The earlier text is in each document's versions." : undefined,
+    };
+  },
+  [writeDocumentJob.type]: (task, linkTo) => {
+    const input = inputOf(writeDocumentJob, task);
+    return {
+      task: input?.kind === DocumentKind.RESUME ? "Writing the application's resume" : "Writing the application's cover letter",
+      about: { application_id: input?.applicationId },
+      link: input ? linkTo(`/applications/${input.applicationId}?tab=${TAB[input.kind]}`) : undefined,
+      next: task.status === JobStatus.DONE ? "Read it with get_document." : undefined,
+    };
+  },
+  [scoreResumeJob.type]: (task, linkTo) => {
+    const input = inputOf(scoreResumeJob, task);
+    const fit = resultOf(scoreResumeJob, task);
+    return {
+      task: "Scoring the application's tailored resume",
+      about: { application_id: input?.applicationId },
+      result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
+      link: input ? linkTo(`/applications/${input.applicationId}?tab=resume`) : undefined,
     };
   },
   [refineJob.type]: (task, linkTo) => {
@@ -173,6 +198,16 @@ const KINDS: Record<string, Tell> = {
       about: { posting: posting ? [posting.title, posting.company].filter(Boolean).join(" at ") : undefined },
       result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
       link: linkTo(kept?.savedAt ? viewHref("saved") : kept?.dismissedAt ? viewHref("dismissed") : "/jobs"),
+    };
+  },
+  [scorePastedPostingJob.type]: (task, linkTo) => {
+    const input = inputOf(scorePastedPostingJob, task);
+    const fit = resultOf(scorePastedPostingJob, task);
+    return {
+      task: "Scoring a pasted posting for New application",
+      about: { posting: input ? [input.title, input.company].filter(Boolean).join(" at ") || undefined : undefined },
+      result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
+      link: linkTo("/new"),
     };
   },
   [refreshStartupsJob.type]: (task, linkTo) => {

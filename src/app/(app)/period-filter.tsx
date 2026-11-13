@@ -15,9 +15,22 @@ const PendingContext = createContext(false);
 /**
  * The dashboard's time filter (E9-8, DSH-7), in one row above everything it
  * scopes. The choice shows at once; while the new figures load, the old
- * ones stay, dimmed (see PeriodScoped).
+ * ones stay, dimmed (see PeriodScoped). The Usage screen has one too, which
+ * doesn't remember its choice (#290).
  */
-export function PeriodFilter({ period, children }: { period: DashboardPeriod; children: ReactNode }) {
+export function PeriodFilter({
+  period,
+  path = "/",
+  remember = true,
+  children,
+}: {
+  period: DashboardPeriod;
+  /** The screen it filters, which takes `?period=`. */
+  path?: string;
+  /** Keeps the choice as the dashboard's for next time. */
+  remember?: boolean;
+  children: ReactNode;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -34,13 +47,13 @@ export function PeriodFilter({ period, children }: { period: DashboardPeriod; ch
           options={DASHBOARD_PERIODS.map(({ value, label }) => ({ value, label }))}
           value={shown}
           onValueChange={(next) => {
-            void rememberDashboardPeriod({ period: next });
+            if (remember) void rememberDashboardPeriod({ period: next });
             // The calendar's month stays.
             const query = new URLSearchParams(params);
             query.set("period", next);
             startTransition(() => {
               show(next);
-              router.replace(`/?${query}`, { scroll: false });
+              router.replace(`${path}?${query}`, { scroll: false });
             });
           }}
         />

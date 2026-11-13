@@ -24,8 +24,8 @@ export const PROVIDER_DEFAULTS: Record<AiProvider, { baseUrl: string; model: str
   // Generous: a local model on a laptop can take minutes for a cover letter.
   [AiProvider.LOCAL]: { baseUrl: "http://localhost:11434", model: null, timeoutSeconds: 300 },
   [AiProvider.OPENAI]: { baseUrl: "https://api.openai.com/v1", model: null, timeoutSeconds: 120 },
-  [AiProvider.ANTHROPIC]: { baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5", timeoutSeconds: 120 },
-  [AiProvider.MISTRAL]: { baseUrl: "https://api.mistral.ai/v1", model: "mistral-medium-latest", timeoutSeconds: 120 },
+  [AiProvider.ANTHROPIC]: { baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5-5", timeoutSeconds: 120 },
+  [AiProvider.MISTRAL]: { baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-2603", timeoutSeconds: 120 },
   [AiProvider.GROQ]: { baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b", timeoutSeconds: 120 },
   [AiProvider.DEEPSEEK]: { baseUrl: "https://api.deepseek.com", model: "deepseek-flash", timeoutSeconds: 120 },
   // As generous as a local model, and loading one can take a while too.

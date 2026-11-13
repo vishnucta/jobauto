@@ -12,9 +12,9 @@ export type JobSearchSettingsView = {
   jooble: { keyState: JobKeyState };
   /** Whether this server offers the Bundesagentur für Arbeit, and when its note was accepted (#223). */
   arbeitsagentur: { offered: boolean; acceptedAt: string | null };
+  /** The FreeHire it searches: "freehire.me", or a self-hosted one's host (DOSSIER_FREEHIRE_URL). */
+  freehire: { host: string };
 };
-
-export const JOB_KEY_UNREADABLE = "Your saved key can't be read. Please enter it again.";
 
 /** Where to get a JSearch key, by where it's from. */
 export const JSEARCH_KEY_URLS: Record<JSearchHost, string> = {
@@ -43,18 +43,21 @@ export type SourceInfo = {
   attributionLink: { home: string; local: RegExp } | null;
   /** The countries it lists jobs in (ISO codes); null for every country. */
   countries: readonly string[] | null;
+  /** Whether it looks within a distance of the place; without, the place only puts postings there first. */
+  radius: boolean;
 };
 
 export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
   JSEARCH: {
     name: "JSearch",
     description: "Postings from LinkedIn, Indeed, Glassdoor and company sites, through Google for Jobs.",
-    tag: "Most countries · free key with 200 searches a month",
+    tag: "Most countries · free plan with a few searches a month",
     keyUrl: "https://www.openwebninja.com/api/jsearch",
     quotaPeriod: "this month",
     attribution: null,
     attributionLink: null,
     countries: null,
+    radius: true,
   },
   SERPAPI: {
     name: "SerpApi",
@@ -65,17 +68,19 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     attribution: null,
     attributionLink: null,
     countries: null,
+    radius: true,
   },
   ADZUNA: {
     name: "Adzuna",
     description: "Adzuna's own job index in 19 countries. It only shares the start of each posting.",
-    tag: "19 countries · free key, about 250 searches a day",
+    tag: "19 countries · free key, its limits shown in your account",
     keyUrl: "https://developer.adzuna.com/signup",
     quotaPeriod: "today",
     attribution: "Jobs by Adzuna",
     // Its terms: "Adzuna" on each displayed advert, at least 116 × 23 px, linked to adzuna.co.uk or the local site.
     attributionLink: { home: "https://www.adzuna.co.uk", local: /^www\.adzuna\.(?:[a-z]{2,3}|co\.[a-z]{2}|com\.[a-z]{2})$/ },
     countries: ["at", "au", "be", "br", "ca", "ch", "de", "es", "fr", "gb", "in", "it", "mx", "nl", "nz", "pl", "sg", "us", "za"],
+    radius: true,
   },
   JOOBLE: {
     name: "Jooble",
@@ -87,6 +92,7 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     attribution: "Jobs by Jooble",
     attributionLink: null,
     countries: null,
+    radius: true,
   },
   ARBEITSAGENTUR: {
     name: "Bundesagentur für Arbeit",
@@ -97,6 +103,19 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     attribution: "Source: Bundesagentur für Arbeit",
     attributionLink: null,
     countries: ["de"],
+    radius: true,
+  },
+  FREEHIRE: {
+    name: "FreeHire",
+    description: "Mostly tech postings, read straight from company career pages (Greenhouse, Lever, Workday and more), with full postings.",
+    tag: "Most countries · free, no key · no distance filter",
+    keyUrl: null,
+    quotaPeriod: null,
+    attribution: "Jobs by FreeHire",
+    attributionLink: null,
+    countries: null,
+    // It has a city filter, but only for the names it knows, and a country with it widens rather than narrows.
+    radius: false,
   },
   // Not a source to choose: postings an AI client (Claude, Gemini…) found itself and added through the connector.
   CLIENT: {
@@ -108,8 +127,13 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     attribution: null,
     attributionLink: null,
     countries: null,
+    // Dossier doesn't search it, so there's no distance filter to speak of; its searches read as before (searchesWithin).
+    radius: false,
   },
 };
+
+/** FreeHire's public catalogue; DOSSIER_FREEHIRE_URL can name a self-hosted one instead. */
+export const FREEHIRE_URL = "https://freehire.me";
 
 /** "JSearch and SerpApi", or "AI client · Gemini CLI": where a kept search's postings came from, naming the client that added them. */
 export function searchSourcesName(sources: readonly PostingOrigin[], addedBy = ""): string {
@@ -127,6 +151,18 @@ export function describeSourceProblem(problem: SourceProblem): string {
 export function sourceCovers(source: JobSource, country: string): boolean {
   const countries = SOURCE_INFO[source].countries;
   return countries === null || countries.includes(country);
+}
+
+/**
+ * Whether a search of `sources` looks within a distance of the place: any of
+ * them does. FreeHire on its own doesn't, so "Within" is off and the search
+ * reads without its km. Searched together with JSearch, the distance still
+ * holds for JSearch's postings; for FreeHire's, the place only puts postings
+ * there first. A search no job source ran (an AI client's) reads as before.
+ */
+export function searchesWithin(sources: readonly PostingOrigin[]): boolean {
+  const searched = sources.filter((source) => source !== "CLIENT");
+  return searched.length === 0 || searched.some((source) => SOURCE_INFO[source].radius);
 }
 
 // The Bundesagentur für Arbeit (#223) has no official API: Dossier uses the

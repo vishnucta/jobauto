@@ -1,17 +1,23 @@
 "use client";
 
 import {
+  closestCenter,
   DndContext,
   DragOverlay,
   MouseSensor,
+  pointerWithin,
+  rectIntersection,
   TouchSensor,
-  useDraggable,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
+  type UniqueIdentifier,
 } from "@dnd-kit/core";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useRef, useState, type ReactNode } from "react";
 
@@ -19,24 +25,30 @@ import { StatusDot } from "@/components/ui/status-dot";
 import type { ApplicationStatus } from "@/generated/prisma/enums";
 import type { ApplicationRow } from "@/lib/applications-data";
 import { statusLabel } from "@/lib/applications-list";
+import { orderedColumn } from "@/lib/board-order";
 import { cn } from "@/lib/cn";
 
 import { RowMenu } from "./row-menu";
 
 /**
- * The board (LST-3, LST-4): a column per status in the filter, cards newest
- * first. Drag a card to another column to move it; each card also has a
- * "Move to…" menu for the keyboard and touch. Clicking a card opens it.
- * It fills the height it's given: each column's cards scroll on their own.
+ * The board (LST-3, LST-4): a column per status in the filter, cards in
+ * board order (public issue 60). Drag a card to another column to move it,
+ * or within its column to reorder it; each card also has a "Move to…" menu
+ * and Move up / Move down for the keyboard and touch. Clicking a card opens
+ * it. It fills the height it's given: each column's cards scroll on their
+ * own.
  */
 export function Board({
   rows,
   statuses,
   onMove,
+  onReorder,
 }: {
   rows: ApplicationRow[];
   statuses: ApplicationStatus[];
   onMove: (row: ApplicationRow, to: ApplicationStatus) => void;
+  /** A column's cards in their new order, after a drag or a menu move. */
+  onReorder: (ordered: ApplicationRow[]) => void;
 }) {
   const [dragging, setDragging] = useState<ApplicationRow | null>(null);
   // A drag ends with a click on some browsers; it mustn't open the card.
@@ -48,30 +60,53 @@ export function Board({
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
 
+  const columnOf = new Map(rows.map((row) => [row.id, row.status]));
+  const columnName = (id: UniqueIdentifier) => statusLabel(columnOf.get(String(id)) ?? (id as ApplicationStatus));
+
+  // The column under the pointer decides, or the one the card overlaps most
+  // when the pointer's between columns, then the closest card in it. Off the
+  // columns there's nothing to drop on, so the card stays where it was.
+  const collisions: CollisionDetection = ({ droppableContainers, ...args }) => {
+    const columns = droppableContainers.filter(({ id }) => !columnOf.has(String(id)));
+    const [column] = [...pointerWithin({ ...args, droppableContainers: columns }), ...rectIntersection({ ...args, droppableContainers: columns })];
+    if (!column) return [];
+    const cards = droppableContainers.filter(({ id }) => columnOf.get(String(id)) === column.id);
+    return cards.length > 0 ? closestCenter({ ...args, droppableContainers: cards }) : [column];
+  };
+
+  const place = (row: ApplicationRow, at: number) => {
+    const cards = orderedColumn(rows, row.status);
+    const from = cards.findIndex((card) => card.id === row.id);
+    if (at !== from) onReorder(arrayMove(cards, from, at));
+  };
+
   const start = ({ active }: DragStartEvent) => setDragging(rows.find((row) => row.id === active.id) ?? null);
   const end = ({ active, over }: DragEndEvent) => {
     draggedAt.current = Date.now();
     setDragging(null);
     const row = rows.find((entry) => entry.id === active.id);
-    const to = over?.id as ApplicationStatus | undefined;
-    if (row && to && to !== row.status) onMove(row, to);
+    if (!row || !over) return;
+    // Over a card, or over the column itself when it's empty.
+    const to = columnOf.get(String(over.id)) ?? (over.id as ApplicationStatus);
+    if (to !== row.status) onMove(row, to);
+    else place(row, orderedColumn(rows, to).findIndex((card) => card.id === over.id));
   };
 
-  const byNewest = [...rows].sort((a, b) => b.updatedAt - a.updatedAt);
   const name = (row: ApplicationRow) => [row.role, row.company].filter(Boolean).join(" at ");
 
   return (
     <DndContext
       id="applications-board"
       sensors={sensors}
+      collisionDetection={collisions}
       onDragStart={start}
       onDragEnd={end}
       onDragCancel={() => setDragging(null)}
       accessibility={{
         announcements: {
           onDragStart: ({ active }) => `Picked up ${name(rows.find((row) => row.id === active.id)!)}.`,
-          onDragOver: ({ over }) => (over ? `Over ${statusLabel(over.id as ApplicationStatus)}.` : "Not over a column."),
-          onDragEnd: ({ over }) => (over ? `Dropped on ${statusLabel(over.id as ApplicationStatus)}.` : "Dropped back where it was."),
+          onDragOver: ({ over }) => (over ? `Over ${columnName(over.id)}.` : "Not over a column."),
+          onDragEnd: ({ over }) => (over ? `Dropped on ${columnName(over.id)}.` : "Dropped back where it was."),
           onDragCancel: () => "Moving cancelled.",
         },
       }}
@@ -81,16 +116,19 @@ export function Board({
       <div className="relative min-h-0 flex-1 scrollbar-subtle overflow-x-auto overflow-y-hidden px-10 pt-1.5 pb-5">
         <div className="flex h-full w-max items-stretch gap-3.5">
           {statuses.map((status) => {
-            const cards = byNewest.filter((row) => row.status === status);
+            const cards = orderedColumn(rows, status);
             return (
-              <Column key={status} status={status} count={cards.length}>
-                {cards.map((row) => (
+              <Column key={status} status={status} count={cards.length} items={cards.map((card) => card.id)}>
+                {cards.map((row, index) => (
                   <Card
                     key={row.id}
                     row={row}
                     dimmed={dragging?.id === row.id}
                     onOpen={(event) => Date.now() - draggedAt.current < 300 && event.preventDefault()}
                     onMove={(to) => onMove(row, to)}
+                    onReorder={(direction) => place(row, index + (direction === "up" ? -1 : 1))}
+                    canMoveUp={index > 0}
+                    canMoveDown={index < cards.length - 1}
                   />
                 ))}
               </Column>
@@ -103,8 +141,8 @@ export function Board({
   );
 }
 
-function Column({ status, count, children }: { status: ApplicationStatus; count: number; children: ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+function Column({ status, count, items, children }: { status: ApplicationStatus; count: number; items: string[]; children: ReactNode }) {
+  const { setNodeRef, isOver, over } = useDroppable({ id: status });
   const headingId = `board-${status}`;
   return (
     <section
@@ -112,7 +150,7 @@ function Column({ status, count, children }: { status: ApplicationStatus; count:
       aria-labelledby={headingId}
       className={cn(
         "flex min-h-0 w-[252px] flex-none flex-col gap-2.5 rounded-panel p-3 outline-[1.5px] -outline-offset-2 motion-safe:transition-colors",
-        isOver ? "bg-selected outline-dashed outline-line-strong" : "bg-track outline-transparent",
+        isOver || items.includes(String(over?.id)) ? "bg-selected outline-dashed outline-line-strong" : "bg-track outline-transparent",
       )}
     >
       <h2 id={headingId} className="flex items-center gap-2 px-1 pt-1 pb-0.5">
@@ -126,7 +164,9 @@ function Column({ status, count, children }: { status: ApplicationStatus; count:
       {count > 0 ? (
         // Scrolls on its own, out to the column's edges so its scrollbar sits
         // at the side and focus rings aren't cut off; the heading stays.
-        <ul className="-mx-3 -mt-1 -mb-3 flex min-h-0 flex-1 scrollbar-subtle flex-col gap-2.5 overflow-y-auto px-3 pt-1 pb-3">{children}</ul>
+        <SortableContext items={items} strategy={verticalListSortingStrategy}>
+          <ul className="-mx-3 -mt-1 -mb-3 flex min-h-0 flex-1 scrollbar-subtle flex-col gap-2.5 overflow-y-auto px-3 pt-1 pb-3">{children}</ul>
+        </SortableContext>
       ) : (
         <p className="px-2.5 py-5 text-center text-label text-muted">Nothing here yet</p>
       )}
@@ -139,18 +179,29 @@ function Card({
   dimmed,
   onOpen,
   onMove,
+  onReorder,
+  canMoveUp,
+  canMoveDown,
 }: {
   row: ApplicationRow;
   dimmed: boolean;
   onOpen: (event: React.MouseEvent) => void;
   onMove: (to: ApplicationStatus) => void;
+  onReorder: (direction: "up" | "down") => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
-  const { setNodeRef, listeners } = useDraggable({ id: row.id });
+  const { setNodeRef, listeners, transform, transition } = useSortable({ id: row.id });
   return (
-    <li ref={setNodeRef} {...listeners} className={cn("relative touch-manipulation", dimmed && "opacity-40")}>
+    <li
+      ref={setNodeRef}
+      {...listeners}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("relative touch-manipulation", dimmed && "opacity-40")}
+    >
       <CardFace row={row} onOpen={onOpen} />
       <div className="absolute top-2 right-2">
-        <RowMenu row={row} onMove={onMove} />
+        <RowMenu row={row} onMove={onMove} onReorder={onReorder} canMoveUp={canMoveUp} canMoveDown={canMoveDown} />
       </div>
     </li>
   );
@@ -186,7 +237,10 @@ function CardFace({ row, lifted = false, onOpen }: { row: ApplicationRow; lifted
         </p>
       )}
       <p className="mt-0.5 flex justify-between gap-2 border-t border-line pt-1.5 text-xs text-muted">
-        <span>{row.match ? `${row.match.hit}/${row.match.total} match` : "Not matched"}</span>
+        <span>
+          {row.match ? `${row.match.hit}/${row.match.total} match` : "Not matched"}
+          {row.score !== null && ` · scored ${row.score}`}
+        </span>
         <span>{row.updated}</span>
       </p>
     </div>

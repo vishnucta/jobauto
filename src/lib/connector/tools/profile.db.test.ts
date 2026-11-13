@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BUILT_IN_SECTIONS } from "@/lib/resume-sections";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
@@ -119,9 +120,19 @@ describe("reading the profile", () => {
     expect(json.projects).toEqual([expect.objectContaining({ name: "Tidewater design tokens", has_link: true })]);
     expect(json.publications).toEqual([expect.objectContaining({ citation: expect.stringContaining("**Doe, J.**"), has_link: true, on_resumes: true })]);
     expect(json.references).toEqual([{ id: expect.any(String), name: "John Doe", relation: "Former manager", company: "Northwind Logistics", has_email: true, has_phone: false }]);
-    for (const left of ["jane.doe@example.com", "+31 6 1234 5678", "Westersingel", "1992-04-18", "linkedin.com/in", "john.doe@example.com", "github.com/janedoe", "doi.org"]) {
+    // Certifications (#293) without their credential IDs and links.
+    expect(json.certifications).toEqual([expect.objectContaining({ name: "Certified Accessibility Specialist", issuer: "Inclusive Design Institute", has_link: true, on_resumes: true })]);
+    expect(json).not.toHaveProperty("sections_off_resumes");
+    for (const left of ["jane.doe@example.com", "+31 6 1234 5678", "Westersingel", "1992-04-18", "linkedin.com/in", "john.doe@example.com", "github.com/janedoe", "doi.org", "IDI-20481", "verify.example.org"]) {
       expect(text).not.toContain(left);
     }
+  });
+
+  it("names the sections off the base resume, and still lists their entries to edit by (#297)", async () => {
+    await saveSettings({ resumeSections: { order: [...BUILT_IN_SECTIONS], off: ["projects"] } });
+    const { json } = await tool("get_profile");
+    expect(json.sections_off_resumes).toEqual(["Projects"]);
+    expect(json.projects).toEqual([expect.objectContaining({ name: "Tidewater design tokens" })]);
   });
 });
 

@@ -53,6 +53,10 @@ export function appEnv(): Record<string, string> {
     DOSSIER_GOOGLE_TEST_BASE_URL: `http://localhost:${FAKE_GOOGLE_PORT}`,
     // A production server, so it would ask GitHub for the latest release daily.
     DOSSIER_UPDATES_TEST_BASE_URL: `http://localhost:${FAKE_JOBS_PORT}/github`,
+    // Jev is the fake job sources' too, once a spec chooses it in Settings → Scoring (#274).
+    DOSSIER_TYPESAFE_TEST_BASE_URL: `http://localhost:${FAKE_JOBS_PORT}/typesafe`,
+    // A production server, so it would ask the project's backend for its notices (E18).
+    DOSSIER_API_URL: `http://localhost:${FAKE_JOBS_PORT}/v1`,
     PORT: String(APP_PORT),
   };
 }
@@ -81,6 +85,17 @@ export async function resetData(): Promise<void> {
 export async function fakeStartupRequests(): Promise<{ url: string; userAgent: string }[]> {
   const response = await fetch(`http://localhost:${FAKE_JOBS_PORT}/startup-requests`);
   return ((await response.json()) as { requests: { url: string; userAgent: string }[] }).requests;
+}
+
+/** What the fake backend answers from now on (E18): these notices, 503, or no answer at all. */
+export async function fakeAnnouncements(announcements: unknown[], answer: "ok" | "down" | "silent" = "ok"): Promise<void> {
+  await fetch(`http://localhost:${FAKE_JOBS_PORT}/announcement-answer`, { method: "POST", body: JSON.stringify({ announcements, answer }) });
+}
+
+/** The requests the fake backend got so far, with their headers. */
+export async function fakeAnnouncementRequests(): Promise<{ url: string; headers: Record<string, string> }[]> {
+  const response = await fetch(`http://localhost:${FAKE_JOBS_PORT}/announcement-requests`);
+  return ((await response.json()) as { requests: { url: string; headers: Record<string, string> }[] }).requests;
 }
 
 /** How many searches the fake JSearch has answered so far (E14-10). */

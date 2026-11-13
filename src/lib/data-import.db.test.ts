@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { decryptApiKey, encryptApiKey } from "@/lib/ai/api-key";
-import { decryptSecret, encryptSecret, JOB_SOURCE_KEY } from "@/lib/secrets";
+import { decryptSecret, encryptSecret, JOB_SOURCE_KEY, TYPESAFE_KEY } from "@/lib/secrets";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { seedBuiltIns } from "../../prisma/seed/built-ins";
@@ -73,6 +73,20 @@ describe("importExport (E10-6)", () => {
     if (!parsed.ok) throw new Error(parsed.error);
     await importExport(prisma(), parsed.data);
     expect(await prisma().application.findFirstOrThrow({ where: { company: "Northstar Health" } })).toMatchObject({ nextInterviewAt: null });
+  });
+
+  it("keeps skill groups, and reads files from before them as having none (#280)", async () => {
+    await prisma().skill.updateMany({ where: { name: "Figma" }, data: { group: "Tools" } });
+    const file = await asFile();
+    expect(file.profile.skills.find((skill) => skill.name === "Figma")).toMatchObject({ group: "Tools" });
+    await importExport(prisma(), file);
+    expect(await prisma().skill.findFirstOrThrow({ where: { name: "Figma" } })).toMatchObject({ group: "Tools" });
+
+    const older = { ...file, schemaVersion: 6, profile: { ...file.profile, skills: file.profile.skills.map((skill) => Object.fromEntries(Object.entries(skill).filter(([key]) => key !== "group"))) } };
+    const parsed = parseExport(JSON.stringify(older));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await importExport(prisma(), parsed.data);
+    expect(await prisma().skill.findFirstOrThrow({ where: { name: "Figma" } })).toMatchObject({ group: "" });
   });
 
   it("deletes every background job, since their inputs and results hold the data it replaces", async () => {
@@ -193,6 +207,38 @@ describe("importExport (E10-6)", () => {
     expect(await prisma().postingSearch.findFirstOrThrow()).toMatchObject({ sources: ["JSEARCH"], cursors: { JSEARCH: "cursor:9" }, problems: [] });
   });
 
+  it("reads the fork's own version 6 files from before the merge: recruiters and several sources, without upstream's 6 to 11 (bewerbung fork)", async () => {
+    await prisma().recruiter.create({ data: { id: "rec-1", name: "Hays", events: { create: { id: "ev-1", text: "Added", at: now } } } });
+    await prisma().postingSearch.create({ data: { sources: ["JSEARCH", "JOOBLE"], query: { keywords: "designer" }, postings: [], cursors: { JOOBLE: "2" }, createdAt: now } });
+    const file = await asFile();
+    expect(file.schemaVersion).toBe(EXPORT_SCHEMA_VERSION);
+    // What the fork wrote as 6: its additions, the job agent's one search as a setting, and nothing upstream added after 5.
+    const forkSix = {
+      ...file,
+      schemaVersion: 6,
+      settings: [...file.settings, { key: "agentQuery", value: JSON.stringify({ keywords: "Product designer", place: "Berlin", country: "de" }) }],
+      profile: {
+        ...file.profile,
+        skills: file.profile.skills.map((skill) => ({ ...skill, group: undefined })),
+        experience: file.profile.experience.map((entry) => ({ ...entry, descriptor: undefined, volunteering: undefined })),
+        certifications: undefined,
+        customSections: undefined,
+      },
+      applications: file.applications.map((application) => ({ ...application, boardSort: undefined, sections: undefined, frozen: undefined, resumeFit: undefined })),
+      agentSearches: undefined,
+      agentCandidateSearches: undefined,
+    };
+    const parsed = parseExport(JSON.stringify(forkSix));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await prisma().recruiter.deleteMany();
+    await prisma().postingSearch.deleteMany();
+    await importExport(prisma(), parsed.data);
+    expect(await prisma().recruiter.findUniqueOrThrow({ where: { id: "rec-1" }, include: { events: true } })).toMatchObject({ name: "Hays", events: [{ text: "Added" }] });
+    expect(await prisma().postingSearch.findFirstOrThrow()).toMatchObject({ sources: ["JSEARCH", "JOOBLE"], cursors: { JOOBLE: "2" } });
+    expect(await prisma().agentSearch.findMany()).toMatchObject([{ name: "My search", query: { keywords: "Product designer", country: "de" } }]);
+    expect(await prisma().setting.count({ where: { key: "agentQuery" } })).toBe(0);
+  });
+
   it("restores the job agent's candidates and drafts, so what it saw stays seen (E16)", async () => {
     const draft = await prisma().application.create({ data: { title: "Agent draft", origin: "AGENT", agentScore: 88, awaitingReview: true } });
     await prisma().agentCandidate.create({
@@ -282,6 +328,68 @@ describe("importExport (E10-6)", () => {
     expect(await prisma().publication.count()).toBe(0);
   });
 
+  it("restores custom sections, an application's own order and what it was sent with, and reads files from before them as having none (#297, #298, #299)", async () => {
+    await prisma().customSection.create({ data: { id: "s1", title: "Awards", format: "LINES", items: { create: [{ id: "i1", title: "Best Paper", link: "example.org", sort: 0 }] } } });
+    const application = await prisma().application.findFirstOrThrow();
+    const frozen = { profile: { basics: { name: "As sent" } }, themes: { RESUME: null, COVER_LETTER: null }, paper: "A4", dateFormat: "NUMERIC", includeReferences: false, followedBase: false };
+    await prisma().application.update({ where: { id: application.id }, data: { sections: { order: ["skills"], off: ["custom:s1"] }, frozen } });
+    const file = await asFile();
+    const sections = await prisma().customSection.findMany({ include: { items: true } });
+    await importExport(prisma(), file);
+    expect(await prisma().customSection.findMany({ include: { items: true } })).toEqual(sections);
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: application.id } })).toMatchObject({ sections: { order: ["skills"], off: ["custom:s1"] }, frozen });
+
+    const parsed = parseExport(JSON.stringify({ ...file, schemaVersion: 8, profile: { ...file.profile, customSections: undefined } }));
+    expect(parsed).toMatchObject({ ok: true, data: { schemaVersion: 8, profile: { customSections: [] } } });
+  });
+
+  it("restores certifications, and reads files from before them as having none (#293)", async () => {
+    await prisma().certification.updateMany({ data: { onResumes: false } });
+    const file = JSON.parse(JSON.stringify(await buildExport(prisma(), { now })));
+    const before = await prisma().certification.findMany();
+    await importExport(prisma(), exportSchema.parse(file));
+    expect(await prisma().certification.findMany()).toEqual(before);
+
+    const parsed = parseExport(JSON.stringify({ ...file, schemaVersion: 7, profile: { ...file.profile, certifications: undefined } }));
+    expect(parsed).toMatchObject({ ok: true, data: { schemaVersion: 7, profile: { certifications: [] } } });
+    if (!parsed.ok) return;
+    await importExport(prisma(), parsed.data);
+    expect(await prisma().certification.count()).toBe(0);
+  });
+
+  it("restores the line about each role's company, and reads files from before it with none (#257)", async () => {
+    const file = JSON.parse(JSON.stringify(await buildExport(prisma(), { now })));
+    const lines = async () => (await prisma().experience.findMany({ orderBy: { sort: "asc" } })).map((entry) => entry.descriptor);
+    const before = await lines();
+    expect(before).toContain("Freight platform for European carriers, 300 people");
+    await importExport(prisma(), exportSchema.parse(file));
+    expect(await lines()).toEqual(before);
+
+    // undefined: left out of the JSON, as in a file from before it.
+    const experience = file.profile.experience.map((entry: object) => ({ ...entry, descriptor: undefined }));
+    const parsed = parseExport(JSON.stringify({ ...file, schemaVersion: 5, profile: { ...file.profile, experience } }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await importExport(prisma(), parsed.data);
+    expect(await lines()).toEqual(before.map(() => ""));
+  });
+
+  it("restores which roles are volunteering, and reads files from before it with paid roles only (#294)", async () => {
+    const [first] = await prisma().experience.findMany({ orderBy: { sort: "asc" } });
+    await prisma().experience.update({ where: { id: first.id }, data: { volunteering: true } });
+    const file = JSON.parse(JSON.stringify(await buildExport(prisma(), { now })));
+    const marks = async () => (await prisma().experience.findMany({ orderBy: { sort: "asc" } })).map((entry) => entry.volunteering);
+    const before = await marks();
+    expect(before.filter(Boolean)).toHaveLength(1);
+    await importExport(prisma(), exportSchema.parse(file));
+    expect(await marks()).toEqual(before);
+
+    const experience = file.profile.experience.map((entry: object) => ({ ...entry, volunteering: undefined }));
+    const parsed = parseExport(JSON.stringify({ ...file, schemaVersion: 7, profile: { ...file.profile, experience } }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    await importExport(prisma(), parsed.data);
+    expect(await marks()).toEqual(before.map(() => false));
+  });
+
   it("restores the photo, the themes' photo options and each application's Photo switch, and reads older files with the defaults (#224)", async () => {
     const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
     await prisma().profileField.createMany({ data: [{ key: "photo", value: png }, { key: "photoOnResumes", value: "false" }] });
@@ -304,6 +412,18 @@ describe("importExport (E10-6)", () => {
     await importExport(prisma(), exportSchema.parse(older));
     expect(await prisma().theme.findUniqueOrThrow({ where: { id: "mine" } })).toMatchObject({ photoShape: "CIRCLE", photoPosition: "HEADER_END" });
     expect(await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } })).toMatchObject({ showPhoto: null });
+  });
+
+  it("restores the board's order, and reads older files as newest first (public issue 60)", async () => {
+    await prisma().application.updateMany({ where: { company: "Ledgerly" }, data: { boardSort: 4 } });
+    const file = JSON.parse(JSON.stringify(await buildExport(prisma(), { now })));
+
+    await importExport(prisma(), exportSchema.parse(file));
+    expect(await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } })).toMatchObject({ boardSort: 4 });
+
+    const older = { ...file, applications: file.applications.map((application: object) => ({ ...application, boardSort: undefined })) };
+    await importExport(prisma(), exportSchema.parse(older));
+    expect(await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } })).toMatchObject({ boardSort: null });
   });
 
   it("reads files from before facts, with an application's note as its first fact (PRO-14, APP-15)", async () => {
@@ -346,6 +466,25 @@ describe("importExport (E10-6)", () => {
     expect(await value("jsearchKeyEnc")).toBe("ak-from-file");
     expect(await value("adzunaKeyEnc")).toBe("adz-current");
     expect(decryptApiKey((await prisma().setting.findUniqueOrThrow({ where: { key: "apiKeyEnc" } })).value, secret)).toBe("sk-current");
+  });
+
+  it("never exports the TypeSafe key, and keeps this server's on import (#274)", async () => {
+    await prisma().setting.createMany({
+      data: [
+        { key: "typesafeKeyEnc", value: encryptSecret(TYPESAFE_KEY, "ts-current", secret) },
+        { key: "scorer", value: "JEV" },
+      ],
+    });
+    // Not even with the keys asked for: the TypeSafe key belongs to this server.
+    const file = await asFile({ includeApiKey: true });
+    expect(file.settings.map((setting) => setting.key)).not.toContain("typesafeKeyEnc");
+    expect(file.settings).toContainEqual({ key: "scorer", value: "JEV" });
+    expect(JSON.stringify(file)).not.toContain("ts-current");
+
+    await importExport(prisma(), { ...file, settings: file.settings.filter((setting) => setting.key !== "scorer") });
+    const kept = await prisma().setting.findUniqueOrThrow({ where: { key: "typesafeKeyEnc" } });
+    expect(decryptSecret(TYPESAFE_KEY, kept.value, secret)).toBe("ts-current");
+    expect(await prisma().setting.findUnique({ where: { key: "scorer" } })).toBeNull();
   });
 
   it("points documents at the base theme when their theme isn't in the file", async () => {

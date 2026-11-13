@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
-import { rememberListView } from "./actions";
+import { rememberListView, reorderBoard } from "./actions";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -33,5 +33,47 @@ describe("rememberListView (E9-4)", () => {
 
   it("refuses what the list doesn't know", async () => {
     expect(await rememberListView({ view: "grid" as "board", filter: "all", sort: { key: "updated", reversed: false } })).toMatchObject({ ok: false });
+  });
+});
+
+describe("reorderBoard (public issue 60)", () => {
+  const places = async () => {
+    const rows = await prisma().application.findMany({ orderBy: { id: "asc" }, select: { id: true, boardSort: true } });
+    return Object.fromEntries(rows.map((row) => [row.id, row.boardSort]));
+  };
+
+  // Newest first: a, b, c.
+  beforeEach(() =>
+    prisma().application.createMany({
+      data: ["a", "b", "c"].map((id, index) => ({ id, status: "SENT" as const, updatedAt: new Date(Date.UTC(2026, 8, 27, 12, 30 - index)) })),
+    }),
+  );
+
+  it("gives the column its new places and leaves other columns alone", async () => {
+    await prisma().application.create({ data: { id: "draft", status: "DRAFT" } });
+    expect(await reorderBoard({ status: "SENT", ids: ["c", "a", "b"] })).toEqual({ ok: true, data: null });
+    expect(await places()).toEqual({ c: 0, a: 1, b: 2, draft: null });
+  });
+
+  it("keeps each card's Updated, since reordering isn't news", async () => {
+    const updated = () => prisma().application.findMany({ orderBy: { id: "asc" }, select: { id: true, updatedAt: true } });
+    const before = await updated();
+    await reorderBoard({ status: "SENT", ids: ["c", "b", "a"] });
+    expect(await updated()).toEqual(before);
+  });
+
+  it("leaves a card that a search hides in its place", async () => {
+    await reorderBoard({ status: "SENT", ids: ["c", "a"] });
+    expect(await places()).toEqual({ c: 0, b: 1, a: 2 });
+  });
+
+  it("leaves alone a card that has moved to another column since", async () => {
+    await prisma().application.update({ where: { id: "c" }, data: { status: "SCREENING" } });
+    await reorderBoard({ status: "SENT", ids: ["c", "b", "a"] });
+    expect(await places()).toEqual({ b: 0, a: 1, c: null });
+  });
+
+  it("refuses an empty order", async () => {
+    expect(await reorderBoard({ status: "SENT", ids: [] })).toMatchObject({ ok: false });
   });
 });

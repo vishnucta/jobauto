@@ -13,7 +13,7 @@ const SKILLS = [
   "Accounts Payable", "Audit Support", "VAT / Intrastat", "Taxation", "Credit Analysis", "Data Analysis", "SAP S/4HANA", "Oracle", "NetSuite", "Essbase",
   "Salesforce", "Financial modeling", "MS Excel", "Accounting", "Stakeholder Management", "Business Partnering", "Cost controlling",
 ];
-const skills = SKILLS.map((name, index) => ({ id: `s${index}`, name }));
+const skills = SKILLS.map((name, index) => ({ id: `s${index}`, name, group: "" }));
 const ids = (...names: string[]) => names.map((name) => skills.find((skill) => skill.name === name)!.id);
 
 const entry = (role: string, start: [number, number], end: [number, number] | null, skillNames: string[]): Fixture["experience"][number] => ({
@@ -21,6 +21,8 @@ const entry = (role: string, start: [number, number], end: [number, number] | nu
   role,
   company: "Somewhere",
   location: "",
+  descriptor: "",
+  volunteering: false,
   bullets: "",
   skillIds: ids(...skillNames),
   startYear: start[0],
@@ -100,7 +102,7 @@ describe("search words from the profile", () => {
 
   it("splits a skill written with a slash, and leaves out one that is too long", () => {
     const result = searchWords(
-      { basics: basics({ headline: "" }), skills: [{ id: "a", name: "COREP / IFR" }, { id: "b", name: "Preparation of supervisory reports for banks" }], experience: [] },
+      { basics: basics({ headline: "" }), skills: [{ id: "a", name: "COREP / IFR", group: "" }, { id: "b", name: "Preparation of supervisory reports for banks", group: "" }], experience: [] },
       TODAY,
     );
     expect(texts(result, "From your skills")).toEqual(["COREP", "IFR"]);
@@ -144,10 +146,13 @@ describe("search words from the profile", () => {
   it("follows the profile: a new skill or role changes the words", () => {
     const before = searchWords(analyst, TODAY);
     // Used in three roles, so it is among the skills she used most.
-    const added = searchWords({ ...analyst, skills: [...skills, { id: "new", name: "Treasury" }], experience: analyst.experience.map((role, index) => (index < 3 ? { ...role, skillIds: [...role.skillIds, "new"] } : role)) }, TODAY);
+    const added = searchWords({ ...analyst, skills: [...skills, { id: "new", name: "Treasury", group: "" }], experience: analyst.experience.map((role, index) => (index < 3 ? { ...role, skillIds: [...role.skillIds, "new"] } : role)) }, TODAY);
     expect(texts(before, "From your skills")).not.toContain("Treasury");
     expect(texts(added, "From your skills")).toContain("Treasury");
     expect(texts(searchWords({ ...analyst, experience: [entry("Controller", [2026, 5], null, []), ...analyst.experience] }, TODAY), "Job titles")?.[0]).toBe("Controller");
+    // Volunteering (#294) isn't a title to search for, however recent.
+    const volunteering = { ...entry("Club Treasurer", [2026, 5], null, []), volunteering: true };
+    expect(texts(searchWords({ ...analyst, experience: [volunteering, ...analyst.experience] }, TODAY), "Job titles")).toEqual(texts(before, "Job titles"));
   });
 
   it("has nothing to say about an empty profile", () => {

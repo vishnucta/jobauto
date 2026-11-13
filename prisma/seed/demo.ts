@@ -33,6 +33,8 @@ type Db = Pick<
   | "experience"
   | "project"
   | "education"
+  | "certification"
+  | "customSection"
   | "publication"
   | "reference"
   | "fact"
@@ -68,6 +70,8 @@ export async function hasUserData(db: Db): Promise<boolean> {
     db.experience.count(),
     db.project.count(),
     db.education.count(),
+    db.certification.count(),
+    db.customSection.count(),
     db.publication.count(),
     db.reference.count(),
     db.fact.count(),
@@ -103,6 +107,8 @@ export async function seedDemo(
         await tx.experience.deleteMany();
         await tx.project.deleteMany();
         await tx.education.deleteMany();
+        await tx.certification.deleteMany();
+        await tx.customSection.deleteMany();
         await tx.publication.deleteMany();
         await tx.reference.deleteMany();
         await tx.fact.deleteMany();
@@ -133,6 +139,7 @@ export async function seedDemo(
             role: entry.role,
             company: entry.company,
             location: entry.location,
+            descriptor: entry.descriptor,
             bullets: entry.bullets,
             sort,
             ...dateSpan(entry.start, entry.end),
@@ -161,6 +168,11 @@ export async function seedDemo(
           data: { degree, school, notes, sort, ...dateSpan(start, end) },
         });
         educationIds.set(id, created.id);
+      }
+      const certificationIds = new Map<string, string>();
+      for (const [sort, { id, ...entry }] of demoProfile().certifications.entries()) {
+        const created = await tx.certification.create({ data: { ...entry, sort } });
+        certificationIds.set(id, created.id);
       }
       const publicationIds = new Map<string, string>();
       for (const [sort, { id, citation, link }] of publications.entries()) {
@@ -284,6 +296,7 @@ export async function seedDemo(
         (id) => educationIds.get(id)!,
         (id) => projectIds.get(id)!,
         (id) => publicationIds.get(id)!,
+        (id) => certificationIds.get(id)!,
       );
       const letterUnits = demoLetterUnits();
       const extract = ledgerly.extract;

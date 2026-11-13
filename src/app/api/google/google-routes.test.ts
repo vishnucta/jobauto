@@ -61,6 +61,22 @@ describe("GET /api/google/callback", () => {
     expect(saveGoogleAccount).toHaveBeenCalledWith({ email: "jane@gmail.com", refreshToken: "r", scopes: "openid email" });
   });
 
+  it("goes back to the setup guide when it started there (E21-5)", async () => {
+    const started = await connect(request(`/api/google/connect?return=${encodeURIComponent("/welcome?step=google")}`), undefined);
+    const state = new URL(started.headers.get("location")!).searchParams.get("state")!;
+    const response = await callback(request(`/api/google/callback?state=${state}&code=abc`));
+    expect(response.headers.get("location")).toBe(`${origin}/welcome?step=google&google=connected`);
+
+    // Anywhere else isn't on the way back.
+    const elsewhere = await connect(request(`/api/google/connect?return=${encodeURIComponent("https://evil.example/")}`), undefined);
+    const other = new URL(elsewhere.headers.get("location")!).searchParams.get("state")!;
+    expect((await callback(request(`/api/google/callback?state=${other}&code=abc`))).headers.get("location")).toBe(`${origin}/settings?section=google&google=connected`);
+
+    env.DOSSIER_GOOGLE_CLIENT_ID = undefined;
+    const missing = await connect(request(`/api/google/connect?return=${encodeURIComponent("/welcome?step=google")}`), undefined);
+    expect(missing.headers.get("location")).toBe(`${origin}/welcome?step=google&google=not-configured`);
+  });
+
   it("refuses a forged state, a denial, and a visitor who isn't signed in", async () => {
     expect(back(await callback(request("/api/google/callback?state=forged&code=abc")))).toBe("expired");
     const state = await signState("/settings?section=google");

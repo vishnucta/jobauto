@@ -11,7 +11,8 @@ const GENERATE_SECRET = "for example the output of `openssl rand -base64 32`";
 const HASH_PASSWORD = "Make one with `docker run --rm -it ghcr.io/aientech/dossier hash-password`";
 
 export const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio", "groq", "deepseek"] as const;
-export const JOB_SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "jooble", "arbeitsagentur", "off"] as const;
+export const JOB_SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "jooble", "arbeitsagentur", "freehire", "off"] as const;
+export const SCORER_NAMES = ["ai", "jev"] as const;
 
 // An empty value (`DOSSIER_AI_KEY=` in .env) counts as unset.
 const unsetIfEmpty = (value: unknown) =>
@@ -47,13 +48,19 @@ const schema = z.object({
   ),
   DATABASE_URL: required(
     "DATABASE_URL",
-    "Set it to your PostgreSQL connection string, e.g. postgresql://user:password@host:5432/dossier.",
+    "Set it to your PostgreSQL connection string, e.g. postgresql://user:password@host:5432/dossier, or to an SQLite file, e.g. file:/data/dossier.db.",
   ).pipe(
     // Never echo the value: it contains the database password.
-    z.string().regex(/^postgres(ql)?:\/\//, {
-      error:
-        "DATABASE_URL must be a PostgreSQL connection string starting with postgresql://.",
-    }),
+    z
+      .string()
+      .regex(/^(postgres(ql)?:\/\/|file:)/, {
+        error:
+          "DATABASE_URL must be a PostgreSQL connection string starting with postgresql://, or an SQLite file starting with file:.",
+      })
+      // A relative path would mean another file to the migrations, which run in another folder.
+      .refine((url) => !url.startsWith("file:") || path.isAbsolute(url.slice("file:".length)), {
+        error: "DATABASE_URL must give the SQLite file's full path, e.g. file:/data/dossier.db.",
+      }),
   ),
   DOSSIER_DATA_DIR: z
     .preprocess(unsetIfEmpty, z.string().default("/data"))
@@ -115,6 +122,11 @@ const schema = z.object({
   DOSSIER_ADZUNA_APP_ID: optional(z.string()),
   DOSSIER_ADZUNA_KEY: optional(z.string()),
   DOSSIER_JOOBLE_KEY: optional(z.string()),
+  // FreeHire origin; unset uses https://freehire.me. Point at a self-hosted
+  // FreeHire, or leave unset for the public catalogue.
+  DOSSIER_FREEHIRE_URL: optional(
+    z.url({ protocol: /^https?$/, error: "DOSSIER_FREEHIRE_URL must be an http:// or https:// URL." }).transform((url) => url.replace(/\/+$/, "")),
+  ),
   // Off takes the Bundesagentur für Arbeit out everywhere (#223): it isn't an
   // official API, so a server can choose not to offer it. Unset means on.
   DOSSIER_JOBS_ARBEITSAGENTUR: optional(
@@ -133,6 +145,17 @@ const schema = z.object({
       error: (issue) => `DOSSIER_BROWSER_CHANNEL must be chromium, chrome or msedge (got "${String(issue.input)}").`,
     }),
   ),
+  // Defaults for Settings → Scoring (#274), until a choice is saved there:
+  // ai scores postings with the AI provider, jev with TypeSafe's Jev.
+  DOSSIER_SCORER: optional(
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .pipe(z.enum(SCORER_NAMES, { error: (issue) => `DOSSIER_SCORER must be one of ${SCORER_NAMES.join(", ")} (got "${String(issue.input)}").` })),
+  ),
+  // Never echo the value: it's an API key.
+  DOSSIER_TYPESAFE_KEY: optional(z.string().trim()),
   // Google sign-in for Gmail and Calendar (E15-1): an OAuth client of type
   // "Web application". Settings → Google can save one instead, which wins.
   // Never echo the secret.
@@ -154,10 +177,26 @@ const schema = z.object({
   DOSSIER_GOOGLE_TEST_BASE_URL: optional(
     z.url({ protocol: /^https?$/, error: "DOSSIER_GOOGLE_TEST_BASE_URL must be an http:// or https:// URL." }),
   ),
+  // Where to ask for the project's notices (announcements/check.ts). Unset, as
+  // this fork (jobauto) leaves it, nothing is asked; Dossier's own backend is
+  // https://api.dossier.aien.me/v1. The end-to-end tests point it at a fake.
+  DOSSIER_API_URL: optional(
+    z.url({ protocol: /^https?$/, error: "DOSSIER_API_URL must be an http:// or https:// URL." }).transform((url) => url.replace(/\/+$/, "")),
+  ),
+  // Set by the desktop app on a server it starts: the token it signs in with
+  // for this launch (desktop.ts). Never set on a server otherwise.
+  DOSSIER_DESKTOP_TOKEN: optional(z.string()),
+  // And where it prints PDFs (pdf/desktop-print.ts), with its own Chromium.
+  DOSSIER_DESKTOP_PRINT_URL: optional(z.url({ protocol: /^https?$/, error: "DOSSIER_DESKTOP_PRINT_URL must be an http:// or https:// URL." })),
   // For the end-to-end tests only: asks <url> for the latest release instead
   // of GitHub's API (e2e/fake-jobs.mts answers).
   DOSSIER_UPDATES_TEST_BASE_URL: optional(
     z.url({ protocol: /^https?$/, error: "DOSSIER_UPDATES_TEST_BASE_URL must be an http:// or https:// URL." }),
+  ),
+  // For the end-to-end tests only: sends Jev's requests to <url> instead of
+  // TypeSafe's API (e2e/fake-jobs.mts answers).
+  DOSSIER_TYPESAFE_TEST_BASE_URL: optional(
+    z.url({ protocol: /^https?$/, error: "DOSSIER_TYPESAFE_TEST_BASE_URL must be an http:// or https:// URL." }),
   ),
 }).check((context) => {
   if (context.value.DOSSIER_JOBS_SOURCE === "arbeitsagentur" && context.value.DOSSIER_JOBS_ARBEITSAGENTUR === "off") {

@@ -8,7 +8,7 @@ import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { themeFile } from "@/lib/theme-file";
 import { BUILT_IN_THEMES } from "@/lib/themes";
 
-import { deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import { deleteTheme, duplicateTheme, importTheme, saveResumeSections, saveTheme, setBaseTheme } from "./actions";
 
 // The actions run against the test database, signed in.
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
@@ -144,3 +144,10 @@ describe("managing themes (E5-7)", () => {
   });
 });
 
+
+describe("the base resume's sections (#297)", () => {
+  it("saves the base resume's order", async () => {
+    await saveResumeSections({ order: ["skills", "summary"], off: ["projects"] });
+    expect(await prisma().setting.findUnique({ where: { key: "resumeSections" } })).toMatchObject({ value: JSON.stringify({ order: ["skills", "summary"], off: ["projects"] }) });
+  });
+});

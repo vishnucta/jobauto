@@ -212,6 +212,9 @@ function Welcome() {
         <Link href="/new?fresh=1" className={buttonClassName("primary", "md", "hover:text-on-primary")}>
           + New application
         </Link>
+        <Link href="/welcome" className="text-sm text-muted underline underline-offset-2 hover:text-ink">
+          Open the setup guide
+        </Link>
       </div>
     </Panel>
   );

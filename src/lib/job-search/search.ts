@@ -5,14 +5,15 @@ import { daysBetween, formatShortCalendarDate } from "@/lib/dates";
 import type { PostingFit } from "@/lib/fit";
 
 import { countryCodeFor } from "./countries";
+import { searchesWithin } from "./sources";
 
 // Job search (E14): what a search asks for and what a posting looks like,
 // whichever source answers. Shared by the server and the Find jobs screen.
 // In this code "job" already means a background task (src/lib/jobs), so a
 // job ad is a "posting".
 
-/** The job sources Dossier can search (E14-1 to E14-3), in the order Settings lists them; one is chosen there. */
-export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.SERPAPI, PostingSource.ADZUNA, PostingSource.JOOBLE, PostingSource.ARBEITSAGENTUR] as const;
+/** The job sources Dossier can search (E14-1 to E14-3, FreeHire), in the order Settings lists them; one is chosen there. */
+export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.SERPAPI, PostingSource.ADZUNA, PostingSource.JOOBLE, PostingSource.FREEHIRE, PostingSource.ARBEITSAGENTUR] as const;
 export type JobSource = (typeof JOB_SOURCES)[number];
 
 /** Where a posting can come from: a job source, or an AI client that found it itself (add_found_jobs). */
@@ -42,6 +43,18 @@ export const POSTED_WITHIN = [
 export type PostedWithin = (typeof POSTED_WITHIN)[number]["value"];
 const POSTED_VALUES = POSTED_WITHIN.map((option) => option.value) as [PostedWithin, ...PostedWithin[]];
 
+/** The experience level a search asks for (public issue 59); "any" or none leaves it open. */
+export const EXPERIENCE_LEVELS = [
+  { value: "any", label: "Any level" },
+  { value: "intern", label: "Internship" },
+  { value: "junior", label: "Entry level" },
+  { value: "mid", label: "Mid level" },
+  { value: "senior", label: "Senior" },
+  { value: "lead", label: "Lead or director" },
+] as const;
+export type ExperienceLevel = (typeof EXPERIENCE_LEVELS)[number]["value"];
+const LEVEL_VALUES = EXPERIENCE_LEVELS.map((option) => option.value) as [ExperienceLevel, ...ExperienceLevel[]];
+
 /** One search, as every source gets it. */
 export const searchQuerySchema = z.object({
   keywords: z.string().trim().max(200),
@@ -56,8 +69,14 @@ export const searchQuerySchema = z.object({
   radiusKm: z.literal(RADII_KM),
   remoteOnly: z.boolean(),
   postedWithin: z.enum(POSTED_VALUES),
+  /** Missing in searches from before 1.12.0, which means any. */
+  experience: z.enum(LEVEL_VALUES).optional(),
 });
 export type SearchQuery = z.output<typeof searchQuerySchema>;
+
+/** The level a search asks for, or null for any. */
+export const experienceAskedFor = (query: Pick<SearchQuery, "experience">): Exclude<ExperienceLevel, "any"> | null =>
+  query.experience && query.experience !== "any" ? query.experience : null;
 
 export const EMPTY_QUERY: SearchQuery = {
   keywords: "",
@@ -164,11 +183,12 @@ export type PastSearchDay = {
   searches: { id: string; sources: PostingOrigin[]; addedBy: string; query: SearchQuery; found: number; time: string }[];
 };
 
-/** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line. */
-export function describeSearch(query: SearchQuery, countryName: string): string {
-  const where = query.place ? `${query.place}, ${query.radiusKm} km` : countryName;
+/** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line, without the km when none of its sources has a radius (searchesWithin). */
+export function describeSearch(query: SearchQuery, countryName: string, sources?: readonly PostingOrigin[] | null): string {
+  const where = query.place ? (sources && !searchesWithin(sources) ? query.place : `${query.place}, ${query.radiusKm} km`) : countryName;
   const posted = POSTED_WITHIN.find((option) => option.value === query.postedWithin);
-  return [query.keywords, where, query.remoteOnly ? "Remote only" : "", posted && posted.value !== "any" ? posted.label : ""].filter(Boolean).join(" · ");
+  const level = EXPERIENCE_LEVELS.find((option) => option.value === experienceAskedFor(query));
+  return [query.keywords, where, query.remoteOnly ? "Remote only" : "", posted && posted.value !== "any" ? posted.label : "", level?.label ?? ""].filter(Boolean).join(" · ");
 }
 
 /** Identifies a posting across searches. */
@@ -266,7 +286,7 @@ export function uniquePostings(postings: readonly FoundPosting[], known: Iterabl
 }
 
 // ─── In the URL ──────────────────────────────────────────────────────────────
-// /jobs?q=designer&where=Hamburg&country=de&radius=25&remote=1&posted=week, so
+// /jobs?q=designer&where=Hamburg&country=de&radius=25&remote=1&posted=week&level=senior, so
 // Back, a reload or a bookmark show the same search.
 
 const one = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? "";
@@ -277,6 +297,7 @@ export function queryFromParams(params: Record<string, string | string[] | undef
   if (!keywords) return null;
   const radius = Number(one(params.radius));
   const posted = POSTED_VALUES.find((value) => value === one(params.posted));
+  const level = LEVEL_VALUES.find((value) => value === one(params.level));
   const country = one(params.country).trim().toLowerCase();
   return {
     keywords: keywords.slice(0, 200),
@@ -285,6 +306,7 @@ export function queryFromParams(params: Record<string, string | string[] | undef
     radiusKm: RADII_KM.find((km) => km === radius) ?? DEFAULT_RADIUS_KM,
     remoteOnly: one(params.remote) === "1",
     postedWithin: posted ?? "any",
+    ...(level && level !== "any" ? { experience: level } : {}),
   };
 }
 
@@ -326,6 +348,8 @@ export function searchHref(query: SearchQuery): string {
   if (query.radiusKm !== DEFAULT_RADIUS_KM) params.set("radius", String(query.radiusKm));
   if (query.remoteOnly) params.set("remote", "1");
   if (query.postedWithin !== "any") params.set("posted", query.postedWithin);
+  const level = experienceAskedFor(query);
+  if (level) params.set("level", level);
   return `/jobs?${params.toString()}`;
 }
 

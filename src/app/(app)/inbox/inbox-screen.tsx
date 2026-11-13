@@ -8,6 +8,7 @@ import { formatWhen, KIND_LABELS } from "@/components/email/conversation";
 import { PageHeader } from "@/components/page-header";
 import { toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
+import { SelectControl } from "@/components/ui/select";
 import { StatusDot } from "@/components/ui/status-dot";
 import { checkInbox, dismissEmail, linkEmail } from "@/lib/google/actions";
 import type { EmailView, Inbox } from "@/lib/google/inbox-data";
@@ -157,11 +158,13 @@ function Unmatched({ email, timeZone, applications }: { email: EmailView; timeZo
         <span className="flex-none text-meta text-muted">{formatWhen(email.sentAt, timeZone)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <SelectControl
+          compact
           aria-label="Link to application"
           value={choice}
           onChange={(event) => setChoice(event.target.value)}
-          className="h-[30px] max-w-[320px] min-w-0 flex-1 cursor-pointer rounded-control border border-line-input bg-input px-2 text-control"
+          wrapperClassName="max-w-[320px] flex-1"
+          className="h-[30px] w-full min-w-0 rounded-control border border-line-input bg-input text-control"
         >
           <option value="">Choose application…</option>
           {applications.map((application) => (
@@ -169,7 +172,7 @@ function Unmatched({ email, timeZone, applications }: { email: EmailView; timeZo
               {application.label}
             </option>
           ))}
-        </select>
+        </SelectControl>
         <Button size="sm" variant="secondary" disabled={!choice || pending} onClick={() => run(async () => toastResult(await linkEmail({ emailId: email.id, applicationId: choice })))}>
           Link
         </Button>

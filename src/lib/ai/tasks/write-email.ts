@@ -66,6 +66,7 @@ export type EmailInput = {
  */
 export const writeEmail: Task<EmailInput, Unit[]> = async (provider, { profile, extracted, match, tone, facts, posting, letter }, options) => {
   const answer = await provider.complete({
+    task: "write-email",
     system: system(
       INSTRUCTIONS,
       `Tone: ${TONES[tone].label}. ${TONES[tone].description}`,

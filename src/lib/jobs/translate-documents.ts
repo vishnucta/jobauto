@@ -10,11 +10,11 @@ import { SIGN_OFF_UNIT, trimmedSchema, unitsSchema, type Unit } from "@/lib/appl
 import { documentLabels, languagesLine } from "@/lib/document-labels";
 import { updateDocuments } from "@/lib/document-units";
 import { saveVersion } from "@/lib/document-versions";
+import { profileOfApplication } from "@/lib/frozen-copy";
 import { PRIVATE_FRAME_UNITS } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
-import { loadProfile } from "@/lib/profile-data";
 import { TONES } from "@/lib/tones";
-import { isPublicationUnit, unitName } from "@/lib/unit-text";
+import { isVerbatimUnit, unitName } from "@/lib/unit-text";
 
 import { defineJob } from "./runner";
 
@@ -53,15 +53,16 @@ function leftOutParts(raw: unknown): [string, Cut][] {
 
 /**
  * The parts of a document the model writes in another language. A
- * publication is the candidate's own citation (#218), the letter's sender and
- * signature hold contact details that never go to a model (E8-11), and the
- * email's recipient is an address.
+ * publication is the candidate's own citation (#218), and a certification or
+ * a custom section is the profile's word for word, as tailoring keeps them
+ * (isVerbatimUnit); the letter's sender and signature hold contact details
+ * that never go to a model (E8-11), and the email's recipient is an address.
  */
 function translatable(kind: (typeof ORDER)[number], unit: Unit): boolean {
   if (!unit.text.trim()) return false;
   switch (kind) {
     case DocumentKind.RESUME:
-      return !isPublicationUnit(unit.id) && unit.id !== LANGUAGES_UNIT;
+      return !isVerbatimUnit(unit.id) && unit.id !== LANGUAGES_UNIT;
     case DocumentKind.COVER_LETTER:
       return !PRIVATE_FRAME_UNITS.has(unit.id);
     case DocumentKind.EMAIL:
@@ -122,7 +123,8 @@ export const translateDocumentsJob = defineJob({
   async run({ applicationId, language }, { step, signal }) {
     const application = await prisma.application.findUnique({ where: { id: applicationId }, include: { documents: true } });
     if (!application) return { language, rewritten: 0, left: [] };
-    const [provider, options, profile] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile()]);
+    // A sent application's own copy of the profile, as its resume is drawn from.
+    const [provider, options, profile] = await Promise.all([getAiProvider(), loadTaskOptions(), profileOfApplication(application.frozen)]);
 
     const asked: { kind: (typeof ORDER)[number]; units: Unit[]; texts: Map<string, string> }[] = [];
     const cut = new Map<string, Cut>();

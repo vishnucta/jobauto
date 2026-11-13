@@ -1,4 +1,4 @@
-import { Bot, BriefcaseBusiness, FileText, House, Inbox, Rocket, Search, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Bot, BriefcaseBusiness, FileText, Gauge, House, Inbox, Rocket, Search, Settings, UserRound, type LucideIcon } from "lucide-react";
 
 // The app's sections, shared by the sidebar and the page bar so they always agree.
 
@@ -40,7 +40,13 @@ export const NAV: { label?: string; items: NavItem[] }[] = [
       { href: "/inbox", label: "Inbox", icon: Inbox },
     ],
   },
-  { items: [{ href: "/settings", label: "Settings", icon: Settings }] },
+  {
+    items: [
+      // Tokens used per AI task (#290).
+      { href: "/usage", label: "Usage", icon: Gauge },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
 export const isCurrent = ({ href, isActive = (path) => within(path, href) }: NavItem, pathname: string) => isActive(pathname);

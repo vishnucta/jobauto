@@ -56,7 +56,7 @@ cd jobauto
 yarn install
 ```
 
-This puts the app in a folder called `jobauto` in your user folder. If it asks whether Corepack may download Yarn, type `Y` and press Enter. `yarn install` downloads everything the app needs, which takes a few minutes.
+This puts the app in a folder called `jobauto` in your user folder. If it asks whether Corepack may download Yarn, type `Y` and press Enter. `yarn install` downloads everything the app needs, which takes a few minutes. That includes a ready-made copy of `better-sqlite3`, the driver for an SQLite file, which the app can keep its data in instead of PostgreSQL; if there's no ready-made copy for your version of Node.js, it tries to build one, which needs Visual Studio's C++ build tools.
 
 #### 3. Make your settings file (once)
 
@@ -90,12 +90,12 @@ Save the file and close Notepad. Keep `.env` private, and don't lose it: it hold
 #### 4. Set up the database (once)
 
 ```powershell
-yarn prisma generate
+yarn generate
 yarn prisma migrate deploy
 yarn prisma db seed
 ```
 
-The second command creates the database the first time. Ignore any message that suggests updating Prisma.
+The first command prepares the app's database code, for PostgreSQL and SQLite alike. The second creates the database the first time. Ignore any message that suggests updating Prisma.
 
 #### 5. Start it
 
@@ -220,7 +220,7 @@ While **Chrome for Apply** is open, any device in your Tailscale network can con
 
 The app is also an MCP server, so Claude, Gemini CLI or another MCP client can work in it for you: search one or several job sources, add jobs it found on the web, change your profile, write, ATS-check and send applications, fill in forms on the Apply tab, and more.
 
-1. In the app, open **Settings → Claude connector** and turn it on.
+1. In the app, open **Settings → MCP connector** and turn it on.
 2. In Claude Code on this laptop, run this once, then type `/mcp` in Claude Code and sign in when the browser opens:
 
 ```powershell
@@ -261,7 +261,7 @@ Stop the app with **Ctrl+C**, then:
 cd $HOME\jobauto
 git pull
 yarn install
-yarn prisma generate
+yarn generate
 yarn prisma migrate deploy
 ```
 

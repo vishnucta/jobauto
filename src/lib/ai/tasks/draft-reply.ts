@@ -53,6 +53,7 @@ export type DraftedReply = { body: string; gaps: string[]; unverified: string[] 
 export const draftReply: Task<DraftReplyInput, DraftedReply> = async (provider, input, options) => {
   const { profile, extracted, tone, email, timeZone, thread, slots, note, facts, posting } = input;
   const answer = await provider.complete({
+    task: "draft-reply",
     system: system(
       INSTRUCTIONS,
       `Tone: ${TONES[tone].label}. ${TONES[tone].description}`,

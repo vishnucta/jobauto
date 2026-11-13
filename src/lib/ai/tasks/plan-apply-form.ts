@@ -74,6 +74,7 @@ const ANSWER_KEY_LIST = ANSWER_KEYS.map((key) => ({ key, holds: ANSWER_LABELS[ke
 /** Phase A: which saved answer, option or short text goes into each field the matcher left; contact details are never sent. */
 export const planApplyForm: Task<PlanApplyFormInput, FieldAdvice[]> = async (provider, input, { strict, signal }) => {
   const answer = await provider.complete({
+    task: "plan-apply-form",
     system: system(INSTRUCTIONS, truthfulness(strict), NO_EM_DASHES, UNTRUSTED_POSTING),
     messages: [
       {

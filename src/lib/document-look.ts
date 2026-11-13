@@ -1,10 +1,13 @@
 import "server-only";
 
+import { Prisma } from "@/generated/prisma/client";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
+import { readFrozenCopy } from "@/lib/frozen-copy";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
+import { THEME_FIELDS } from "@/lib/theme-data";
 
 // How an application's tailored resume and cover letter look: their theme
 // (#226), on the resume, the profile photo (#224) and the theme's own
@@ -34,11 +37,18 @@ export async function setDocumentLook(applicationId: string, { themeId, showPhot
     if (!(await prisma.theme.count({ where: { id: themeId } }))) {
       throw new ActionError("That theme doesn't exist anymore. Reload the page to see your themes.");
     }
-    if (!(await prisma.application.count({ where: { id: applicationId } }))) throw new ActionError(GONE);
+    const application = await prisma.application.findUnique({ where: { id: applicationId }, select: { frozen: true } });
+    if (!application) throw new ActionError(GONE);
     await prisma.document.updateMany({
       where: { applicationId, kind: { in: [DocumentKind.RESUME, DocumentKind.COVER_LETTER] } },
       data: { themeId },
     });
+    // A sent resume is drawn in the theme it was sent with, until it's given another here (#299).
+    const copy = readFrozenCopy(application.frozen);
+    if (copy) {
+      const theme = await prisma.theme.findUniqueOrThrow({ where: { id: themeId }, select: THEME_FIELDS });
+      await prisma.application.update({ where: { id: applicationId }, data: { frozen: { ...copy, themes: { RESUME: theme, COVER_LETTER: theme } } as unknown as Prisma.InputJsonValue } });
+    }
   }
   if (showPhoto !== undefined || followThemeLayout !== undefined || languageName !== undefined) {
     const { count } = await prisma.application.updateMany({ where: { id: applicationId }, data: { showPhoto, followThemeLayout, language: languageName } });

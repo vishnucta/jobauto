@@ -48,6 +48,7 @@ const INSTRUCTIONS = `You read job postings and pull out their details as JSON.
 export const extractPosting: Task<{ posting: string; today?: Date }, Extracted> = async (provider, { posting, today = new Date() }, { signal }) => {
   const ask = () =>
     provider.complete({
+      task: "extract-posting",
       system: system(INSTRUCTIONS, `Today is ${localDate(today)}.`, UNTRUSTED_POSTING),
       messages: [{ role: "user", content: postingForPrompt(posting) }],
       schema: answerSchema,

@@ -166,6 +166,12 @@ describe("the search form", () => {
     expect(screen.getByLabelText("Within")).toBeDisabled();
   });
 
+  it("has no radius for a source without one", () => {
+    renderScreen({ source: "FREEHIRE" });
+    expect(screen.getByLabelText("Within")).toBeDisabled();
+    expect(screen.getByText("FreeHire has no distance filter")).toBeInTheDocument();
+  });
+
   it("says when the source doesn't cover the country", async () => {
     renderScreen({ source: "ARBEITSAGENTUR" });
     await userEvent.selectOptions(screen.getByLabelText("Country"), "fr");
@@ -325,6 +331,11 @@ describe("the results", () => {
   it("says when nothing was found", () => {
     renderScreen({ search: stored([]) });
     expect(screen.getByText("No postings for “product designer” within 25 km of Hamburg. Try a bigger radius or fewer words.")).toBeInTheDocument();
+  });
+
+  it("says when nothing was found on a source without a radius", () => {
+    renderScreen({ source: "FREEHIRE", search: stored([], false, { sources: ["FREEHIRE"] }) });
+    expect(screen.getByText("No postings for “product designer” in Hamburg. Try fewer words.")).toBeInTheDocument();
   });
 
   it("labels each of Adzuna's postings with a link to its site for the posting's country, as its terms ask", () => {
@@ -652,6 +663,13 @@ describe("the Source list: one or several sources for a search", () => {
     expect(note).toHaveTextContent("Add your SerpApi key in Settings → Job search first.");
     expect(note).toHaveTextContent("You've used up your JSearch searches for this month. Searched Bundesagentur für Arbeit instead.");
     expect(within(note).getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
+  });
+
+  it("keeps Within when FreeHire is ticked with a source that filters by distance", () => {
+    renderScreen({ search: stored([], false, { sources: ["JSEARCH", "FREEHIRE"] }) });
+    expect(screen.getByLabelText("Within")).toBeEnabled();
+    expect(screen.queryByText(/has no distance filter/)).not.toBeInTheDocument();
+    expect(screen.getByText("No postings for “product designer” within 25 km of Hamburg. Try a bigger radius or fewer words.")).toBeInTheDocument();
   });
 
   it("says which other sources listed the same job", () => {

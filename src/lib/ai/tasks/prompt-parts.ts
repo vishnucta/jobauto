@@ -1,9 +1,16 @@
 import type { Creativity } from "@/generated/prisma/enums";
 import type { Extracted, Match } from "@/lib/application-data";
 import { citationText } from "@/lib/citation";
-import { factTexts, formatDateRange, languageLevelLabel, resumePublications, type ProfileData } from "@/lib/profile";
+import { factTexts, formatDateRange, formatMonthYear, languageLevelLabel, resumeCertifications, resumeCustomSections, resumePublications, type ProfileData } from "@/lib/profile";
 
 import type { AIProvider } from "../provider";
+
+/** A bullets field as lines, without its **bold** marks (#368). */
+const bulletLines = (bullets: string) =>
+  bullets
+    .split("\n")
+    .map((line) => citationText(line))
+    .filter(Boolean);
 
 // Building blocks shared by the AI tasks (E6-5, PRD §7).
 
@@ -15,8 +22,6 @@ export type TaskOptions = {
   strict: boolean;
   /** SET-7: the language to write in, e.g. "Dutch"; the posting's language decides when null. */
   language: string | null;
-  /** SET-9 "Resume length": the most pages a resume may have, or null for no limit (E10-10). */
-  maxPages?: number | null;
   signal?: AbortSignal;
 };
 
@@ -26,7 +31,7 @@ export type TaskResult<T> = { data: T; promptVersion: string };
 export type Task<I, O> = (provider: AIProvider, input: I, options: TaskOptions) => Promise<TaskResult<O>>;
 
 /** Postings longer than this are cut: nothing useful is that long, and prompts must fit local models. */
-const MAX_POSTING_CHARACTERS = 20_000;
+export const MAX_POSTING_CHARACTERS = 20_000;
 
 /**
  * The profile as the model sees it. Only what writing needs: no email,
@@ -38,7 +43,23 @@ export function profileForPrompt(profile: ProfileData, { includeReferences = fal
   const skillNames = new Map(profile.skills.map((skill) => [skill.id, skill.name]));
   const { basics } = profile;
   const facts = factTexts(profile.facts);
+  // Without their links and credential IDs, and only those shown on resumes (#293).
+  const certifications = resumeCertifications(profile.certifications).map((entry) => ({
+    name: entry.name,
+    issuer: entry.issuer,
+    obtained: formatMonthYear(entry.year, entry.month),
+    ...(entry.expiryYear === null ? {} : { validUntil: formatMonthYear(entry.expiryYear, entry.expiryMonth) }),
+  }));
   const publications = resumePublications(profile.publications).map((entry) => citationText(entry.citation));
+  // Sections the candidate made (#298), without their links.
+  const otherSections = resumeCustomSections(profile.customSections).map((section) => ({
+    title: section.title,
+    items: section.items.map((item) =>
+      section.format === "ENTRIES"
+        ? { title: item.title, subtitle: item.subtitle, dates: formatDateRange(item), details: item.details.split("\n").map((line) => line.trim()).filter(Boolean) }
+        : citationText(item.title),
+    ),
+  }));
   return JSON.stringify(
     {
       name: basics.name,
@@ -53,8 +74,13 @@ export function profileForPrompt(profile: ProfileData, { includeReferences = fal
         role: entry.role,
         company: entry.company,
         location: entry.location,
+        // As written: a fact about the employer, like its name (#257).
+        ...(entry.descriptor.trim() ? { about: entry.descriptor.trim() } : {}),
+        // Unpaid, and not years of experience (#294).
+        ...(entry.volunteering ? { volunteering: true } : {}),
         dates: formatDateRange(entry),
-        bullets: entry.bullets.split("\n").map((line) => line.trim()).filter(Boolean),
+        // Without **bold** marks (#368): the resume puts them back where the words stay.
+        bullets: bulletLines(entry.bullets),
         skillsUsed: entry.skillIds.flatMap((id) => skillNames.get(id) ?? []),
       })),
       // A project's link is left out like the other links: the resume shows it as it is.
@@ -62,7 +88,7 @@ export function profileForPrompt(profile: ProfileData, { includeReferences = fal
         id: entry.id,
         name: entry.name,
         dates: formatDateRange(entry),
-        bullets: entry.bullets.split("\n").map((line) => line.trim()).filter(Boolean),
+        bullets: bulletLines(entry.bullets),
         skillsUsed: entry.skillIds.flatMap((id) => skillNames.get(id) ?? []),
       })),
       education: profile.education.map((entry) => ({
@@ -72,8 +98,10 @@ export function profileForPrompt(profile: ProfileData, { includeReferences = fal
         dates: formatDateRange(entry),
         notes: entry.notes,
       })),
+      ...(certifications.length > 0 ? { certifications } : {}),
       // Citations as plain text, without their links, and only those shown on resumes (#218).
       ...(publications.length > 0 ? { publications } : {}),
+      ...(otherSections.length > 0 ? { otherSections } : {}),
       ...(includeReferences
         ? { references: profile.references.map(({ name, relation, company }) => ({ name, relation, company })) }
         : {}),

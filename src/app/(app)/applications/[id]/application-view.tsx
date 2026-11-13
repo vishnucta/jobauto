@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Switch } from "radix-ui";
-import { useEffect, useId, useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useId, useOptimistic, useRef, useState, useTransition } from "react";
 
 import { plainUnit, type UnitRenderer } from "@/components/documents/document-page";
 import { DocumentPreview } from "@/components/documents/document-preview";
@@ -21,6 +21,7 @@ import {
   type PaperSize,
   type Tone,
 } from "@/generated/prisma/enums";
+import type { ResumeFit } from "@/lib/resume-fit";
 import { type Match, type Requirement, type Unit } from "@/lib/application-data";
 import { EMAIL_UNITS, WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
 import { documentLabels } from "@/lib/document-labels";
@@ -37,8 +38,11 @@ import type { WriteEmailResult } from "@/lib/jobs/write-email";
 import type { FactItem, ProfileData } from "@/lib/profile";
 import type { RefineSuggestions } from "@/lib/refine-suggestions";
 import type { CheckFix, ResumeCheck } from "@/lib/resume-check";
+import { resumeContent, sectionsWithContent } from "@/lib/resume-content";
+import { inSidebar, sectionName, type SectionLayout } from "@/lib/resume-sections";
+import { skillLine, skillNamesIn } from "@/lib/skill-groups";
 import { hasSidebar, type ThemeData } from "@/lib/themes";
-import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
+import { cleanUnitText, isVerbatimUnit, unitName } from "@/lib/unit-text";
 
 import {
   addMatchSkill,
@@ -51,15 +55,22 @@ import {
   rewriteInLanguage,
   saveUnit,
   sendMessage,
+  addApplicationSection,
+  followBaseSections,
+  setApplicationSections,
   setApplicationTheme,
   setDocumentLanguage,
   setFollowThemeLayout,
   setShowPhoto,
+  undoUpdateFromProfile,
+  updateFromProfile,
   startRegenerating,
   startWritingEmail,
   undoEmailRewrite,
   undoMessage,
 } from "./actions";
+import { ResumeScore } from "./resume-score";
+import { WriteMissingDocument } from "./write-missing-document";
 import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
 import { ApplicationMenu } from "./application-menu";
@@ -73,8 +84,9 @@ import { NotesTab } from "./notes-tab";
 import { PostingTab, type PostingData } from "./posting-tab";
 import { RefinePanel, type ChatEntry } from "./refine-panel";
 import { StatusControl } from "./status-control";
+import { SectionsMenu } from "./sections-menu";
 import { ThemeMenu } from "./theme-menu";
-import { byPageLimit, TrimmedNotice } from "./trimmed-notice";
+import { TrimmedNotice } from "./trimmed-notice";
 
 import { aboutWords, type Tab } from "./tabs";
 import { UnitFrame } from "./unit-frame";
@@ -145,10 +157,22 @@ export type ApplicationViewProps = {
   /** Every theme, for the Theme menu (#226), and which is the base theme. */
   themes: ThemeData[];
   baseThemeId: string;
+  /** The resume's sections: their order and which are off (#297). */
+  sections: SectionLayout;
+  /** It has its own order, rather than following the base resume's. */
+  ownSections: boolean;
+  /** It was sent, so changes to the profile no longer reach it (#299). */
+  sent: boolean;
+  /** "Update from profile" would change what the resume shows (#301). */
+  canUpdate: boolean;
+  /** The sections the profile has content for, and their names, for the Sections menu. */
+  baseSections: { key: string; name: string }[];
   /** The email to send the application with (Email tab), once it's written. */
   email: Unit[] | null;
   /** The email being written, e.g. since before a reload. */
   writingEmail: string | null;
+  /** A resume or letter it was created without, being written (#367), e.g. since before a reload. */
+  writingDocuments?: { resume: string | null; letter: string | null };
   /** The PDFs to attach to the email. */
   attachments: Attachments;
   /** Sending through Gmail (E15-2), and the application's mail (E15-3). */
@@ -158,12 +182,13 @@ export type ApplicationViewProps = {
   dateFormat: DateFormat;
   /** Settings → "Include references", when the posting asks for them (SET-9). */
   includeReferences: boolean;
-  /** Settings → "Resume length" (SET-9), which the ATS check judges the pages by; null for no limit. */
-  maxPages: number | null;
   /** The date on the letter, at UTC midnight. */
   letterDate: Date;
   /** "5/7 match" on the Job posting tab, when the requirements were matched. */
   score: { hit: number; total: number } | null;
+  /** The tailored resume's score, once asked for (#370), and its scoring if it's running. */
+  resumeFit?: ResumeFit | null;
+  scoringResume?: string | null;
   initialTab: Tab;
   /** Whether an AI provider is set up; without one, the AI buttons point to Settings. */
   aiReady: boolean;
@@ -200,17 +225,24 @@ export function ApplicationView({
   letter,
   themes,
   baseThemeId,
+  sections,
+  ownSections,
+  sent,
+  canUpdate,
+  baseSections,
   email,
   writingEmail,
+  writingDocuments = { resume: null, letter: null },
   attachments,
   gmail,
   profile,
   paper,
   dateFormat,
   includeReferences,
-  maxPages,
   letterDate,
   score,
+  resumeFit = null,
+  scoringResume = null,
   initialTab,
   aiReady,
   rewriting: rewritingAtLoad,
@@ -288,6 +320,37 @@ export function ApplicationView({
       showThemeChoice(themes.find((theme) => theme.id === themeId) ?? null);
       toastResult(await setApplicationTheme({ id: application.id, themeId }));
     });
+  const [sectionsChoice, showSections] = useOptimistic(sections);
+  const changeSections = (next: SectionLayout) =>
+    startTransition(async () => {
+      showSections(next);
+      toastResult(await setApplicationSections({ id: application.id, order: next.order, off: next.off, titles: next.titles }));
+    });
+  const addSection = (key: string) =>
+    startTransition(async () => {
+      toastResult(await addApplicationSection({ id: application.id, key }));
+    });
+  const updateProfile = () =>
+    startTransition(async () => {
+      const result = toastResult(await updateFromProfile({ id: application.id }));
+      if (!result.ok) return;
+      const previous = result.data;
+      if (!previous) return void toast("This resume already matches your profile.");
+      toast("Updated from your profile.", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undone = toastResult(await undoUpdateFromProfile({ id: application.id, ...previous }));
+            if (undone.ok) toast("Put the resume back as it was.");
+          },
+        },
+      });
+    });
+  const followBase = () =>
+    startTransition(async () => {
+      toastResult(await followBaseSections({ id: application.id }));
+    });
+
   const themeMenu = (current: ThemeData) => (
     <ThemeMenu themes={themes} baseThemeId={baseThemeId} current={current} onChange={changeTheme} />
   );
@@ -545,12 +608,12 @@ export function ApplicationView({
       toast(`Added “${result.data.name}” to your skills. Attach it to a role under Experience to make it count.`);
     });
 
-  /** "Put back" something left out, to fit the page limit (E10-10) or by hand (#217). */
-  const putBack = (index: number, pageLimit = resume?.trimmed?.[index] ? byPageLimit(resume.trimmed[index]) : false) =>
+  /** "Put back" something left out by hand (#217), or by the page limit of earlier versions (E10-10). */
+  const putBack = (index: number) =>
     startTransition(async () => {
       const result = await putBackTrimmed({ id: application.id, index });
       if (!result.ok) return toast(result.error);
-      toast(pageLimit ? "Put back. The resume may run over its page limit now." : "Put back.");
+      toast("Put back.");
     });
 
   /** "Leave out" on a part of the tailored resume (#217), with Undo on the toast. */
@@ -558,7 +621,7 @@ export function ApplicationView({
     startTransition(async () => {
       const result = await leaveOutUnit({ id: application.id, unitId: unit.id });
       if (!result.ok) return toast(result.error);
-      toast(`Left out: ${unit.label}.`, { action: { label: "Undo", onClick: () => putBack(result.data.index, false) } });
+      toast(`Left out: ${unit.label}.`, { action: { label: "Undo", onClick: () => putBack(result.data.index) } });
     });
 
   /** "Undo" under a reply (E8-6): puts back what it changed. */
@@ -579,7 +642,7 @@ export function ApplicationView({
     resumeTheme?.id,
     application.language,
     application.role,
-    maxPages,
+    sectionsChoice,
     resume?.units.map((unit) => [unit.id, unit.text]),
   ]);
 
@@ -613,9 +676,13 @@ export function ApplicationView({
         const skills = resume?.units.find((unit) => unit.id === "skills");
         if (!skills) return toast("This resume has no Skills section to add it to.");
         // The report isn't run again, so its button stays: a second press mustn't add the skill twice.
-        const listed = skills.text.split(/[·,\n]/).map((name) => name.trim().toLocaleLowerCase());
+        const listed = skillNamesIn(skills.text).flatMap((name) => name.split(",")).map((name) => name.trim().toLocaleLowerCase());
         if (listed.includes(fix.skill.trim().toLocaleLowerCase())) return toast(`“${fix.skill}” is in this resume's Skills already.`);
-        return save(DocumentKind.RESUME, skills, `${skills.text} · ${fix.skill}`, `Added “${fix.skill}” to this resume's Skills.`);
+        // With skill groups the unit has a line per group: the skill goes on the line without a label, or on a line of its own.
+        const lines = skills.text.split("\n");
+        const plain = lines.findIndex((line) => skillLine(line.trim()).label === null);
+        const text = plain < 0 ? [...lines, fix.skill].join("\n") : lines.map((line, index) => (index === plain ? `${line} · ${fix.skill}` : line)).join("\n");
+        return save(DocumentKind.RESUME, skills, text, `Added “${fix.skill}” to this resume's Skills.`);
       }
       case "mention": {
         if (!aiReady) {
@@ -663,7 +730,7 @@ export function ApplicationView({
         kind === DocumentKind.EMAIL
           ? WRITTEN_EMAIL_UNITS.has(id)
           : kind === DocumentKind.RESUME
-            ? !isPublicationUnit(id)
+            ? !isVerbatimUnit(id)
             : !isFrameUnit(id) || WRITTEN_FRAME_UNITS.has(id);
       return (
         <UnitFrame
@@ -836,6 +903,23 @@ export function ApplicationView({
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="flex items-center gap-1">Tailored resume · {themeMenu(resumeTheme)}</span>
                   {languageMenu}
+                  {!viewed(DocumentKind.RESUME) && (
+                    <SectionsMenu
+                      sections={sectionsChoice}
+                      present={sectionsWithContent(resumeContent(profile, { units: resumeUnits, includeReferences }))}
+                      base={baseSections.map((section) => section.key)}
+                      nameOf={(key) => baseSections.find((section) => section.key === key)?.name ?? sectionName(key, profile.customSections)}
+                      isSidebar={(key) => inSidebar(key, profile.customSections)}
+                      sidebar={followLayout && hasSidebar(resumeTheme.layout)}
+                      own={ownSections}
+                      sent={sent}
+                      canUpdate={canUpdate}
+                      onUpdate={updateProfile}
+                      onChange={changeSections}
+                      onAdd={addSection}
+                      onFollowBase={followBase}
+                    />
+                  )}
                   {hasSidebar(resumeTheme.layout) && (
                     <PreviewSwitch label="Sidebar layout" checked={followLayout} onCheckedChange={changeLayout} />
                   )}
@@ -846,6 +930,7 @@ export function ApplicationView({
                       Check for ATS
                     </Button>
                   )}
+                  <ResumeScore applicationId={application.id} fit={resumeFit} scoring={scoringResume} />
                 </span>
               }
               panel={
@@ -870,11 +955,12 @@ export function ApplicationView({
                 showPhoto={photoChoice}
                 language={application.language}
                 includeReferences={includeReferences}
+                sections={sectionsChoice}
                 renderUnit={viewed(DocumentKind.RESUME) ? plainUnit : unitsOf(DocumentKind.RESUME, resumeUnits)}
               />
             </DocumentPreview>
           ) : (
-            <MissingDocument>This application has no tailored resume.</MissingDocument>
+            <WriteMissingDocument applicationId={application.id} kind={DocumentKind.RESUME} aiReady={aiReady} writing={writingDocuments.resume} />
           )}
         </TabsContent>
 
@@ -906,7 +992,7 @@ export function ApplicationView({
               />
             </DocumentPreview>
           ) : (
-            <MissingDocument>This application has no cover letter.</MissingDocument>
+            <WriteMissingDocument applicationId={application.id} kind={DocumentKind.COVER_LETTER} aiReady={aiReady} writing={writingDocuments.letter} />
           )}
         </TabsContent>
 
@@ -1040,11 +1126,3 @@ function PreviewSwitch({ label, checked, onCheckedChange }: { label: string; che
   );
 }
 
-/** The canvas with a note in place of a document the application doesn't have. */
-function MissingDocument({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-1 justify-center overflow-auto bg-canvas px-10 pt-16 pb-16">
-      <p className="max-w-[420px] text-center text-muted">{children}</p>
-    </div>
-  );
-}

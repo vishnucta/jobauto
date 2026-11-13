@@ -37,6 +37,7 @@ export type Translation = { translated: { id: string; text: string }[]; missing:
 export const translateDocument: Task<TranslateInput, Translation> = async (provider, { kind, language, units }, options) => {
   const what = DOCUMENT_NAMES[kind];
   const answer = await provider.complete({
+    task: "translate-document",
     system: system(
       `You write a candidate's ${what} again in ${language}, as JSON: one entry for each part you are given, with its unitId and its whole text in ${language}. It is the same ${what}, in another language for another reader.`,
       [
