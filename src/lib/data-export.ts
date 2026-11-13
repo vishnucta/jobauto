@@ -64,6 +64,8 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "googleClientId",
   "googleClientSecretEnc",
   "browserTimeZone",
+  // The apply assistant's laptop Chrome is an address in this server's network.
+  "applyBrowserAddress",
   // An import must never open the Claude connector's addresses on this server (#221).
   "connectorEnabledAt",
 ];

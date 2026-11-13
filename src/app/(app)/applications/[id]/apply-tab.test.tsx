@@ -7,7 +7,7 @@ import { DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import type { ApplyAttemptView, ApplyTabData } from "@/lib/apply/view";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { fillThisPage, startApply } from "./apply-actions";
+import { fillThisPage, saveApplyBrowser, startApply, testApplyBrowser } from "./apply-actions";
 import { ApplyTab } from "./apply-tab";
 
 // The Apply tab's run card and its "Fill this page" button (jobauto fork).
@@ -16,6 +16,8 @@ vi.mock("./apply-actions", () => ({
   startApply: vi.fn(async () => ({ ok: true, data: { jobId: "job-1", attemptId: "run-2" } })),
   fillThisPage: vi.fn(async () => ({ ok: true, data: { jobId: "job-9", attemptId: "run-1" } })),
   saveApplyAnswers: vi.fn(async () => ({ ok: true, data: null })),
+  saveApplyBrowser: vi.fn(async () => ({ ok: true, data: null, toast: "Saved." })),
+  testApplyBrowser: vi.fn(async () => ({ ok: true, data: { version: "Chrome/142.0.7444.60" } })),
   settleApplyAttempt: vi.fn(async () => ({ ok: true, data: null })),
 }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn() }));
@@ -69,6 +71,7 @@ const tabData = (over: Partial<ApplyTabData> = {}): ApplyTabData => ({
   hasResume: true,
   hasLetter: true,
   missing: [],
+  browserAddress: null,
   ...over,
 });
 
@@ -80,6 +83,52 @@ const card = (name: string) => within(screen.getByRole("heading", { name: new Re
 beforeEach(() => {
   vi.clearAllMocks();
   jobs.listeners.clear();
+});
+
+describe("The warning at the top", () => {
+  it("comes first, and says where the window opens, what job boards may stop, and to check before Send", () => {
+    renderTab();
+    expect(screen.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Before you use it");
+    const warning = card("Before you use it");
+    expect(warning.getByText(/The browser window opens on the computer the app runs on/)).toBeInTheDocument();
+    expect(warning.getByText(/may forbid automated tools/)).toBeInTheDocument();
+    expect(warning.getByText(/Check every field, and every answer the AI wrote/)).toBeInTheDocument();
+    expect(warning.queryByText(/the server controls it/)).not.toBeInTheDocument();
+  });
+
+  it("adds that the server controls the laptop's Chrome once one is connected", () => {
+    renderTab(tabData({ browserAddress: "http://100.101.102.103:9222" }));
+    expect(card("Before you use it").getByText(/the server controls it/)).toBeInTheDocument();
+  });
+});
+
+describe("Browser window", () => {
+  it("opens on the computer the app runs on until a laptop's Chrome is saved", () => {
+    renderTab();
+    const panel = card("Browser window");
+    expect(panel.getByText(/The window opens on the computer the app runs on/)).toBeInTheDocument();
+    expect(panel.getByRole("button", { name: "Save" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/a Chrome window on the computer the app runs on/)).toBeInTheDocument();
+  });
+
+  it("saves the laptop's address, and tests it", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const panel = card("Browser window");
+    await user.type(panel.getByLabelText("Your laptop's Chrome"), " 100.101.102.103:9222 ");
+    await user.click(panel.getByRole("button", { name: "Test" }));
+    expect(testApplyBrowser).toHaveBeenCalledWith({ address: "100.101.102.103:9222" });
+    expect(toast).toHaveBeenLastCalledWith("Chrome/142.0.7444.60 answered. It's ready.");
+    await user.click(panel.getByRole("button", { name: "Save" }));
+    expect(saveApplyBrowser).toHaveBeenCalledWith({ id: "app-1", address: "100.101.102.103:9222" });
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("says the window opens on the laptop once one is saved", () => {
+    renderTab(tabData({ browserAddress: "http://100.101.102.103:9222" }));
+    expect(card("Browser window").getByText(/opens in the Chrome on your laptop, at http:\/\/100.101.102.103:9222/)).toBeInTheDocument();
+    expect(screen.getByText(/I open it in the Chrome on your laptop/)).toBeInTheDocument();
+  });
 });
 
 describe("Fill this page, in the run's card", () => {

@@ -8,7 +8,7 @@ jobauto runs on your own computer: one password, your data in a PostgreSQL datab
 | [2. Download a zip](#2-download-a-zip-windows) | Windows, no terminal: download, double-click, done. Works on an empty computer. | Available |
 | [3. Docker](#3-docker) | You have Docker Desktop, or a server. | As in upstream Dossier |
 
-The Apply tab opens the employer's form in a browser window on the machine the app runs on, so install it on the computer you apply from.
+The Apply tab opens the employer's form in a browser window on the machine the app runs on, so install it on the computer you apply from. If it runs on a server instead, see [Apply from a laptop](#apply-from-a-laptop).
 
 ## What you need
 
@@ -186,7 +186,28 @@ Before publishing, test the zip on a clean Windows: **Windows Sandbox** (turn it
 
 ## 3. Docker
 
-Docker Desktop on macOS or Windows, or Docker Engine on Linux: follow **Run it on your computer** in the [README](README.md#run-it-on-your-computer), and upstream's [installation guide](https://github.com/AienTech/dossier/wiki) for servers. The image there is upstream Dossier's: the fork's additions (Groq and DeepSeek, the Apply tab, the Edge and Chrome fallbacks) need the fork's source, so build it yourself with `docker compose build` from a clone instead of pulling the image. The Apply tab needs a screen, which a container doesn't have, so prefer section 1 on the computer you apply from.
+Docker Desktop on macOS or Windows, or Docker Engine on Linux: follow **Run it on your computer** in the [README](README.md#run-it-on-your-computer), and upstream's [installation guide](https://github.com/AienTech/dossier/wiki) for servers. The image there is upstream Dossier's: the fork's additions (Groq and DeepSeek, the Apply tab, the Edge and Chrome fallbacks) need the fork's source, so build it yourself with `docker compose build` from a clone instead of pulling the image. The Apply tab needs a screen, which a container doesn't have: prefer section 1 on the computer you apply from, or let it use the Chrome on your laptop, as in the next section.
+
+## Apply from a laptop
+
+When the app runs on a server, such as a NAS, and you open it from a laptop, the server has no screen to show the Apply tab's browser window on. Instead, it can use a Chrome on your laptop: you start that Chrome from a shortcut that opens its remote debugging port, and the server reaches it through [Tailscale](https://tailscale.com). The window then opens on your laptop as it would locally, and the server fills it in. These steps are for a Windows laptop with Google Chrome, already signed in to the same Tailscale network as the server.
+
+1. **Find the laptop's Tailscale address.** Click the Tailscale icon by the clock: the address starts with `100.`, such as `100.101.102.103`. Or type `tailscale ip -4` in PowerShell.
+2. **Make the shortcut.** Right-click the desktop, choose **New → Shortcut**, and paste this as the location:
+   ```
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\jobauto-apply-chrome"
+   ```
+   Call it **Chrome for Apply**. It opens a Chrome with a profile of its own, apart from your everyday Chrome: Chrome only opens the debugging port for a separate profile.
+3. **Let the server reach it (once).** Chrome only listens on the laptop itself. This passes its port on to your Tailscale network, not to the internet. In PowerShell (as administrator, if it says access is denied):
+   ```powershell
+   tailscale serve --bg --tcp 9222 tcp://127.0.0.1:9222
+   ```
+   To undo it later: `tailscale serve reset`.
+4. **Tell the app.** Start **Chrome for Apply**. In the app, open an application's **Apply** tab, enter `http://` followed by the laptop's address and `:9222` under **Browser window**, such as `http://100.101.102.103:9222`, then click **Test** and **Save**. Use the address, not the laptop's name: Chrome doesn't answer names.
+
+From then on, start **Chrome for Apply** before you click **Open and fill it in**. Sign in to job sites in that window: it remembers you. If it isn't open, the Apply tab says so and nothing happens.
+
+While **Chrome for Apply** is open, any device in your Tailscale network can control it, which is how the server fills in forms. Use it only for applying, and close it when you're done. To let only the server reach it, add a rule in Tailscale's access controls that allows port 9222 on the laptop only from the server.
 
 ## First steps in the app
 

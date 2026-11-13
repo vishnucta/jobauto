@@ -34,7 +34,7 @@ function when(date: Date, timeZone: string | undefined): string {
 export async function loadApplyTab(
   application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[] },
   profile: { basics: Basics },
-  settings: Pick<SettingsData, "applyAnswers">,
+  settings: Pick<SettingsData, "applyAnswers" | "applyBrowserAddress">,
   timeZone: string | undefined,
 ): Promise<ApplyTabData> {
   const [posting, rows, jobs] = await Promise.all([
@@ -70,5 +70,6 @@ export async function loadApplyTab(
     hasResume: application.documents.some((document) => document.kind === DocumentKind.RESUME),
     hasLetter: application.documents.some((document) => document.kind === DocumentKind.COVER_LETTER),
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),
+    browserAddress: settings.applyBrowserAddress,
   };
 }
