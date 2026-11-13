@@ -21,6 +21,7 @@ import {
   PostingSource,
   SidebarStyle,
   RecruiterStatus,
+  ContactKind,
   StartupStatus,
   ThemeAlign,
   ThemeFont,
@@ -320,11 +321,14 @@ const agentCandidate = z.object({
 /** A recruiter the user keeps track of, with the history of what happened. */
 const recruiter = z.object({
   id: text,
+  /** Absent in files from before contact kinds (jobauto fork): those are agencies. */
+  kind: z.enum(ContactKind).optional(),
   name: text,
   contactName: text,
   email: text,
   website: text,
   speciality: text,
+  relation: text.optional(),
   notes: text,
   source: text,
   status: z.enum(RecruiterStatus),

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 
 import { logServerError } from "@/lib/log";
 
-import { agencyOf, foldName, FOLLOW_UP_DAYS, sameAgency, SNOOZE_DAYS, STARTER_RECRUITERS, type RecruiterStatusName, type RecruiterView } from "./types";
+import { agencyOf, foldName, FOLLOW_UP_DAYS, sameAgency, SNOOZE_DAYS, STARTER_RECRUITERS, type ContactKindName, type RecruiterStatusName, type RecruiterView } from "./types";
 
 // The recruiters the user keeps track of. Each change that matters leaves a
 // line in the recruiter's history, so "when did I write?" has an answer.
@@ -17,11 +17,13 @@ type Row = Recruiter & { events: RecruiterEvent[] };
 function viewOf(row: Row): RecruiterView {
   return {
     id: row.id,
+    kind: row.kind,
     name: row.name,
     contactName: row.contactName,
     email: row.email,
     website: row.website,
     speciality: row.speciality,
+    relation: row.relation,
     notes: row.notes,
     source: row.source,
     status: row.status,
@@ -46,11 +48,14 @@ export async function getRecruiter(id: string): Promise<RecruiterView | null> {
 }
 
 export type RecruiterFields = {
+  /** An agency unless given. */
+  kind?: ContactKindName;
   name: string;
   contactName: string;
   email: string;
   website: string;
   speciality: string;
+  relation?: string;
   notes: string;
 };
 

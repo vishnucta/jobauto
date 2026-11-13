@@ -1176,19 +1176,32 @@ enum RecruiterStatus {
   NOT_INTERESTED
 }
 
+/// Who a contact on Recruiters is (jobauto fork): an agency or recruiter, a
+/// hiring manager at an employer, or someone she knows there (a former
+/// colleague or an alum) who could refer her.
+enum ContactKind {
+  AGENCY
+  HIRING_MANAGER
+  REFERRAL
+}
+
 /// A recruiter or agency the user keeps track of: who, how to reach them, where
 /// the conversation stands. Dossier sends nothing: a message is drafted, and
-/// the user sends it from their own mail.
+/// the user sends it from their own mail. Hiring managers and people who
+/// could refer her are kept here too (kind).
 model Recruiter {
   id          String           @id @default(cuid())
-  /// The agency, or the recruiter when there is no agency.
+  kind        ContactKind      @default(AGENCY)
+  /// The agency, or the recruiter when there is no agency; the employer for a hiring manager or a referral.
   name        String
   contactName String           @default("")
   /// Only an address the user typed or the agency publishes, never guessed.
   email       String           @default("")
   website     String           @default("")
-  /// What they place, e.g. "Finance & accounting, Hamburg".
+  /// What they place, e.g. "Finance & accounting, Hamburg"; for a hiring manager or a referral, their team or role.
   speciality  String           @default("")
+  /// How she knows them, e.g. "We worked together at AvaTrade"; for referrals and hiring managers.
+  relation    String           @default("")
   notes       String           @default("")
   /// Where it came from: "you" or "starter list".
   source      String           @default("you")

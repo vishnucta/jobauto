@@ -35,7 +35,7 @@ describe("the Recruiters actions", () => {
   });
 
   it("say what is wrong with a name, an email or a website, and save nothing", async () => {
-    expect(await addRecruiter({ ...fields, name: "  " })).toMatchObject({ ok: false, fieldErrors: { name: ["Give the agency or recruiter a name."] } });
+    expect(await addRecruiter({ ...fields, name: "  " })).toMatchObject({ ok: false, fieldErrors: { name: ["Give the agency, recruiter or employer a name."] } });
     expect(await addRecruiter({ ...fields, email: "not an address" })).toMatchObject({ ok: false, fieldErrors: { email: ["That doesn't look like an email address."] } });
     expect(await addRecruiter({ ...fields, website: "javascript:alert(1)" })).toMatchObject({ ok: false, fieldErrors: { website: ["A website starts with https://"] } });
     expect(await prisma().recruiter.count()).toBe(0);

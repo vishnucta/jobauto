@@ -26,11 +26,13 @@ const days = (count: number) => new Date(Date.parse(TODAY) + count * 86_400_000)
 
 const recruiter = (patch: Partial<RecruiterView>): RecruiterView => ({
   id: "r1",
+  kind: "AGENCY",
   name: "Selby Jennings",
   contactName: "",
   email: "",
   website: "",
   speciality: "Financial services",
+  relation: "",
   notes: "",
   source: "you",
   status: "NOT_CONTACTED",
@@ -160,15 +162,28 @@ describe("the Recruiters screen", () => {
     renderScreen();
     await userEvent.click(screen.getByRole("button", { name: "Add a recruiter" }));
     const form = screen.getByRole("form", { name: "New recruiter" });
-    vi.mocked(addRecruiter).mockResolvedValueOnce({ ok: false, error: "Some details aren't valid. Check the highlighted fields.", fieldErrors: { name: ["Give the agency or recruiter a name."] } });
+    vi.mocked(addRecruiter).mockResolvedValueOnce({ ok: false, error: "Some details aren't valid. Check the highlighted fields.", fieldErrors: { name: ["Give the agency, recruiter or employer a name."] } });
     await userEvent.click(within(form).getByRole("button", { name: "Add recruiter" }));
-    expect(await within(form).findByText("Give the agency or recruiter a name.")).toBeInTheDocument();
+    expect(await within(form).findByText("Give the agency, recruiter or employer a name.")).toBeInTheDocument();
     expect(toast).toHaveBeenCalledWith("Some details aren't valid. Check the highlighted fields.");
 
     await userEvent.type(within(form).getByLabelText("Agency or recruiter"), "Randstad");
     await userEvent.click(within(form).getByRole("button", { name: "Add recruiter" }));
-    expect(addRecruiter).toHaveBeenLastCalledWith({ name: "Randstad", contactName: "", email: "", website: "", speciality: "", notes: "" });
+    expect(addRecruiter).toHaveBeenLastCalledWith({ kind: "AGENCY", name: "Randstad", contactName: "", email: "", website: "", speciality: "", relation: "", notes: "" });
     await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  });
+
+  it("adds someone who could refer her, with how she knows them", async () => {
+    renderScreen();
+    await userEvent.click(screen.getByRole("button", { name: "Add a recruiter" }));
+    const form = screen.getByRole("form", { name: "New recruiter" });
+    await userEvent.selectOptions(within(form).getByLabelText("Who"), "REFERRAL");
+    expect(within(form).queryByLabelText("Agency or recruiter")).not.toBeInTheDocument();
+    await userEvent.type(within(form).getByLabelText("Employer"), "Acme Bank");
+    await userEvent.type(within(form).getByLabelText("Their name"), "Sam");
+    await userEvent.type(within(form).getByLabelText("How you know them"), "We worked together at EY");
+    await userEvent.click(within(form).getByRole("button", { name: "Add contact" }));
+    expect(addRecruiter).toHaveBeenLastCalledWith({ kind: "REFERRAL", name: "Acme Bank", contactName: "Sam", email: "", website: "", speciality: "", relation: "We worked together at EY", notes: "" });
   });
 
   it("saves details, and removes a recruiter only after asking", async () => {
