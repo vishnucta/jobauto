@@ -16,12 +16,15 @@ import { searchesWithin } from "./sources";
 export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.SERPAPI, PostingSource.ADZUNA, PostingSource.JOOBLE, PostingSource.FREEHIRE, PostingSource.ARBEITSAGENTUR] as const;
 export type JobSource = (typeof JOB_SOURCES)[number];
 
-/** Where a posting can come from: a job source, or an AI client that found it itself (add_found_jobs). */
-export const POSTING_SOURCES = [...JOB_SOURCES, PostingSource.CLIENT] as const;
+/** Where a posting can come from: a job source, an AI client that found it itself (add_found_jobs), or a careers page the user follows. */
+export const POSTING_SOURCES = [...JOB_SOURCES, PostingSource.CLIENT, PostingSource.CAREERS] as const;
 export type PostingOrigin = PostingSource;
 
 /** Whether postings from here can be searched again, paged or fetched through a job source. */
-export const isJobSource = (source: PostingOrigin): source is JobSource => source !== PostingSource.CLIENT;
+export const isJobSource = (source: PostingOrigin): source is JobSource => source !== PostingSource.CLIENT && source !== PostingSource.CAREERS;
+
+/** The sources whose searches Dossier didn't run but were added to it: by an AI client, or from careers pages. */
+export const isAddedSource = (source: PostingOrigin) => source === PostingSource.CLIENT || source === PostingSource.CAREERS;
 
 /** Where a JSearch key comes from: OpenWeb Ninja directly, or the RapidAPI marketplace. */
 export const JSEARCH_HOSTS = ["openwebninja", "rapidapi"] as const;
@@ -164,7 +167,7 @@ export type StoredSearch = {
   id: string;
   /** The sources that answered, in Settings' order; [CLIENT] for an AI client's. */
   sources: PostingOrigin[];
-  /** For a CLIENT search: the AI client that added it. */
+  /** For a CLIENT search: the AI client that added it; for a CAREERS one, the employers whose pages it's from. */
   addedBy: string;
   query: SearchQuery;
   /** "today at 14:32", "yesterday at 09:05", "on Thu 1 Oct at 18:20", in the user's time zone. */

@@ -216,6 +216,7 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     // Recruiters, and their history with them, and the agencies removed from the list.
     await tx.recruiter.deleteMany();
     await tx.recruiterBlock.deleteMany();
+    await tx.employer.deleteMany();
     // Mail fetched from Gmail (E15-3).
     await tx.emailMessage.deleteMany();
     // Applications take their history, documents, chat and notes along.

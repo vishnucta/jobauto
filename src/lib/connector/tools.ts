@@ -36,6 +36,7 @@ import { registerInboxTools } from "./tools/inbox";
 import { registerPostingTools } from "./tools/postings";
 import { registerProfileTools } from "./tools/profile";
 import { registerRecruiterTools } from "./tools/recruiters";
+import { registerCareersTools } from "./tools/careers";
 import { registerSettingsTools } from "./tools/settings";
 import { registerTaskTools } from "./tools/tasks";
 import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writtenLetterSchema, writtenMatchSchema, writtenResumeSchema } from "./write";
@@ -449,6 +450,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
   registerApplyTools(context);
   registerPostingTools(context);
   registerRecruiterTools(context);
+  registerCareersTools(context);
   registerTaskTools(context);
   registerAgentTools(context);
   registerInboxTools(context);

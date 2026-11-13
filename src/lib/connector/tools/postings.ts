@@ -39,7 +39,7 @@ import { failure, postingLine, started, text, type ToolContext } from "../kit";
 
 const LISTS = ["saved", "dismissed", "searches"] as const;
 /** The From filter's sources, as the URL spells them (?from=client). */
-const FROM = ["jsearch", "serpapi", "adzuna", "jooble", "freehire", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
+const FROM = ["jsearch", "serpapi", "adzuna", "jooble", "freehire", "arbeitsagentur", "client", "careers"] as const satisfies readonly Lowercase<PostingOrigin>[];
 const CHANGES = ["save", "unsave", "dismiss", "restore"] as const;
 
 /** What each change does, as the button on a posting does it. */
@@ -120,7 +120,12 @@ function skippedWhere(known: KnownJob) {
       return { reason: "dismissed before", posting_id: known.postingId };
     case "search":
       return {
-        reason: known.source === "CLIENT" ? `already added by ${known.addedBy || "an AI client"}` : `already found by ${SOURCE_INFO[known.source].name}`,
+        reason:
+          known.source === "CLIENT"
+            ? `already added by ${known.addedBy || "an AI client"}`
+            : known.source === "CAREERS"
+              ? `already found on ${known.addedBy ? `${known.addedBy}'s careers page` : "a careers page"}`
+              : `already found by ${SOURCE_INFO[known.source].name}`,
         search_id: known.searchId,
         number: known.number,
       };
@@ -142,7 +147,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         "With a search_id: the postings that search found, numbered, without asking the job source again.",
       inputSchema: z.object({
         view: z.enum(LISTS).optional().describe("Only this list: saved, dismissed or searches. Without it, all three."),
-        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur, or client for what AI clients added"),
+        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur, client for what AI clients added, or careers for new jobs on the careers pages followed"),
         search_id: z.string().min(1).max(100).optional().describe("A past search, to list the postings it found instead"),
         from: z.number().int().min(1).optional().describe("Where each list (or the search) starts. Defaults to 1."),
         limit: z.number().int().min(1).max(100).optional().describe("At most this many per list. Defaults to 20."),

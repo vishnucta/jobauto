@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 import type { PostingFit } from "@/lib/fit";
 import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
 import type { JobView } from "@/lib/jobs/runner";
-import { byScore, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
+import { byScore, isAddedSource, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 import { arbeitsagenturPage, describeSourceProblem, searchesWithin, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 
 import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
@@ -50,8 +50,8 @@ export type PostingResultsProps = {
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** "Found by an AI client" on a posting Claude, Gemini… added itself, so Saved shows it apart from the job source's. */
-const foundBy = (posting: FoundPosting) => (posting.source === "CLIENT" ? "Found by an AI client" : "");
+/** "Found by an AI client" on a posting Claude, Gemini… added itself, so Saved shows it apart from the job source's; "From its careers page" on one from an employer she follows. */
+const foundBy = (posting: FoundPosting) => (posting.source === "CLIENT" ? "Found by an AI client" : posting.source === "CAREERS" ? "From its careers page" : "");
 
 /** "Also on SerpApi": the other sources a search of several found the same job on. */
 const alsoOn = (posting: FoundPosting) => (posting.alsoOn?.length ? `Also on ${posting.alsoOn.map((source) => SOURCE_INFO[source].name).join(" and ")}` : "");
@@ -228,7 +228,7 @@ export function PostingResults(props: PostingResultsProps) {
         <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 text-meta text-muted", (mode === "saved" || mode === "dismissed") && visible.length === 0 && "hidden")}>
           <span>
             {props.mode === "search"
-              ? `${plural(postings.length, "posting", "postings")} from ${searchSourcesName(props.search.sources, props.search.addedBy)}${more ? ", more to come" : ""} · ${props.search.sources.includes("CLIENT") ? "added" : "searched"} ${props.search.ranAt}`
+              ? `${plural(postings.length, "posting", "postings")} from ${searchSourcesName(props.search.sources, props.search.addedBy)}${more ? ", more to come" : ""} · ${props.search.sources.some(isAddedSource) ? "added" : "searched"} ${props.search.ranAt}`
               : mode === "found"
                 ? `${plural(postings.length, "posting", "postings")} from your past searches, each job once · ${plural(postings.filter((posting) => posting.state.score).length, "scored", "scored")}`
                 : mode === "saved"

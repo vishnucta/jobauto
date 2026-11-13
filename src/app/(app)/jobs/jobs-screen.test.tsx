@@ -474,7 +474,7 @@ describe("past searches (E14-10)", () => {
 
 describe("the Saved and Dismissed views (E14-7)", () => {
   it("has tabs for the search, past searches, the kept postings and the recruiters, with how many each holds", () => {
-    renderScreen({ counts: { searches: 4, saved: 3, dismissed: 1, recruiters: 5 } });
+    renderScreen({ counts: { searches: 4, saved: 3, dismissed: 1, recruiters: 5, employers: 2 } });
     const tabs = within(screen.getByRole("navigation", { name: "Find jobs views" })).getAllByRole("link");
     expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("href"), tab.getAttribute("aria-current")])).toEqual([
       ["Search", "/jobs", "page"],
@@ -482,6 +482,7 @@ describe("the Saved and Dismissed views (E14-7)", () => {
       ["Saved3", "/jobs?view=saved", null],
       ["Dismissed1", "/jobs?view=dismissed", null],
       ["Recruiters5", "/recruiters", null],
+      ["Careers pages2", "/careers", null],
     ]);
   });
 

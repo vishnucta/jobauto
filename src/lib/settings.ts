@@ -199,6 +199,8 @@ export const settingsSchema = z.object({
   alertProblem: z.string().nullable().catch(null),
   /** The job agent alerts about postings scored at least this. */
   alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
+  /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
+  careersCheckedOn: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh
   // only runs while it's in use, and what the last refresh found. They belong
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).

@@ -73,6 +73,7 @@ describe("the Recruiters screen", () => {
       ["Saved0", "/jobs?view=saved", null],
       ["Dismissed0", "/jobs?view=dismissed", null],
       ["Recruiters3", "/recruiters", "page"],
+      ["Careers pages", "/careers", null],
     ]);
   });
 

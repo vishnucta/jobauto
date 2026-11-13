@@ -714,8 +714,9 @@ model Note {
 // ─── Job search (E14) ────────────────────────────────────────────────────────
 
 /// Where a posting came from: the job sources Find jobs can search (E14-1 to
-/// E14-3), or CLIENT for postings an AI client (Claude, Gemini…) found on its
-/// own and added through the connector's add_found_jobs.
+/// E14-3), CLIENT for postings an AI client (Claude, Gemini…) found on its
+/// own and added through the connector's add_found_jobs, or CAREERS for new
+/// jobs on the careers pages of the employers the user follows (Employer).
 enum PostingSource {
   JSEARCH
   SERPAPI
@@ -724,6 +725,7 @@ enum PostingSource {
   ARBEITSAGENTUR
   FREEHIRE
   CLIENT
+  CAREERS
 }
 
 /// A posting from Find jobs that the user kept (E14-5): saved, dismissed, or
@@ -967,6 +969,37 @@ model Startup {
 model StartupBlock {
   hash      String   @id
   createdAt DateTime @default(now())
+}
+
+// ─── Careers pages (jobauto fork) ────────────────────────────────────────────
+
+/// An employer whose own careers page Find jobs follows: once a day, and on
+/// Check now, the jobs on it are read from its job system's public feed,
+/// and those new to Dossier are added as a search from the CAREERS source.
+/// Jobs show there days before the job boards have them.
+model Employer {
+  id            String    @id @default(cuid())
+  name          String
+  /// The careers page as the user gave it; always http(s).
+  careersUrl    String
+  /// The job system read (src/lib/careers/boards.ts), e.g. "personio", or "page" for job data on the page itself.
+  ats           String
+  /// Words one of which a job's title must hold, comma-separated; empty takes every job.
+  keywords      String    @default("")
+  /// Places one of which a job's place must name, comma-separated, e.g. "Hamburg, Remote"; empty takes every place.
+  places        String    @default("")
+  enabled       Boolean   @default(true)
+  notes         String    @default("")
+  lastCheckedAt DateTime?
+  /// At the last check: the jobs that matched the words and places, and how many of them were new.
+  lastMatched   Int       @default(0)
+  lastNew       Int       @default(0)
+  /// Why the last check failed, in words; null once one works again.
+  problem       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([name])
 }
 
 // ─── Google: Gmail and Calendar (E15) ────────────────────────────────────────

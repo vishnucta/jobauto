@@ -73,6 +73,8 @@ export const INSTALL_SETTINGS: readonly string[] = [
   // A phone alert topic is as good as a password (alerts.ts).
   "alertAddress",
   "alertProblem",
+  // When this server last checked the careers pages.
+  "careersCheckedOn",
   // The apply assistant's laptop Chrome is an address in this server's network.
   "applyBrowserAddress",
   // An import must never open the MCP connector's addresses on this server (#221), or let another app sign in (#281).
@@ -330,6 +332,24 @@ const recruiter = z.object({
   events: z.array(z.object({ id: text, text, at: date })).default([]),
 });
 
+/** An employer whose careers page is followed (jobauto fork), with what its last check found. */
+const employer = z.object({
+  id: text,
+  name: text,
+  careersUrl: text,
+  ats: text,
+  keywords: text,
+  places: text,
+  enabled: z.boolean(),
+  notes: text,
+  lastCheckedAt: optionalDate,
+  lastMatched: z.number().int().min(0),
+  lastNew: z.number().int().min(0),
+  problem: text.nullable(),
+  createdAt: date,
+  updatedAt: date,
+});
+
 const agentSearch = agentSearchInputSchema.extend({ id: text.min(1), createdAt: date, updatedAt: date });
 const agentCandidateSearch = z.object({
   id: text.min(1), candidateId: text.min(1), searchId: text.min(1).nullable(), searchName: text, createdAt: date,
@@ -451,6 +471,8 @@ export const exportSchema = z.object({
   /** Recruiters with their history, and the agencies the user removed; absent in upstream's files and in the fork's from before version 6. */
   recruiters: z.array(recruiter).default([]),
   recruiterBlocks: z.array(z.object({ key: text, createdAt: date })).default([]),
+  /** The careers pages followed (jobauto fork); absent in files from before them. */
+  employers: z.array(employer).default([]),
 });
 export type DossierExport = z.infer<typeof exportSchema>;
 
@@ -472,7 +494,7 @@ export async function buildExport(
   { includeApiKey = false, now = new Date() }: { includeApiKey?: boolean; now?: Date } = {},
 ): Promise<DossierExport> {
   return db.$transaction(async (tx) => {
-    const [fields, skills, languages, experience, projects, education, certifications, customSections, publications, references, facts, themes, settings, applications, postings, searches, agentCandidates, agentSearches, agentCandidateSearches, startups, startupBlocks, recruiters, recruiterBlocks] = await Promise.all([
+    const [fields, skills, languages, experience, projects, education, certifications, customSections, publications, references, facts, themes, settings, applications, postings, searches, agentCandidates, agentSearches, agentCandidateSearches, startups, startupBlocks, recruiters, recruiterBlocks, employers] = await Promise.all([
       tx.profileField.findMany({ select: { key: true, value: true }, orderBy: { key: "asc" } }),
       tx.skill.findMany({ select: { id: true, name: true, sort: true, group: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
       tx.language.findMany({ select: { id: true, name: true, level: true, sort: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
@@ -511,6 +533,7 @@ export async function buildExport(
       tx.startupBlock.findMany({ orderBy: { createdAt: "asc" } }),
       tx.recruiter.findMany({ orderBy: { createdAt: "asc" }, include: { events: { orderBy: { at: "asc" } } } }),
       tx.recruiterBlock.findMany({ orderBy: { createdAt: "asc" } }),
+      tx.employer.findMany({ orderBy: { createdAt: "asc" } }),
     ]);
 
     // Keys only when asked for, decrypted; one that's unreadable here too (DOSSIER_SECRET changed) has nothing to export.
@@ -562,6 +585,7 @@ export async function buildExport(
       startupBlocks,
       recruiters,
       recruiterBlocks,
+      employers,
     };
   });
 }

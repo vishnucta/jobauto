@@ -33,12 +33,13 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const from = sourceFilterFromParams(params);
   const typed = queryFromParams(params);
   const searchId = typeof params.search === "string" ? params.search : undefined;
-  const [config, timeZone, postingCounts, searches, recruiters, profile, scoreInClaude] = await Promise.all([
+  const [config, timeZone, postingCounts, searches, recruiters, employers, profile, scoreInClaude] = await Promise.all([
     loadJobSearchConfig(),
     userTimeZone(),
     countPostings(),
     countSearches(),
     prisma.recruiter.count(),
+    prisma.employer.count(),
     loadProfile(),
     isAiUsable().then(handsOffToClaude),
   ]);
@@ -72,7 +73,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       history={history}
       byScore={byScore}
       found={found}
-      counts={{ ...postingCounts, searches, recruiters }}
+      counts={{ ...postingCounts, searches, recruiters, employers }}
       today={now.toISOString()}
     />
   );

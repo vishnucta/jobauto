@@ -130,14 +130,27 @@ export const SOURCE_INFO: Record<PostingOrigin, SourceInfo> = {
     // Dossier doesn't search it, so there's no distance filter to speak of; its searches read as before (searchesWithin).
     radius: false,
   },
+  // Not a source to choose either: new jobs on the careers pages of the employers the user follows (src/lib/careers).
+  CAREERS: {
+    name: "Careers pages",
+    description: "New jobs on the careers pages of the employers you follow, read from their job systems once a day.",
+    tag: "Employers you follow",
+    keyUrl: null,
+    quotaPeriod: null,
+    attribution: null,
+    attributionLink: null,
+    countries: null,
+    radius: false,
+  },
 };
 
 /** FreeHire's public catalogue; DOSSIER_FREEHIRE_URL can name a self-hosted one instead. */
 export const FREEHIRE_URL = "https://freehire.me";
 
-/** "JSearch and SerpApi", or "AI client · Gemini CLI": where a kept search's postings came from, naming the client that added them. */
+/** "JSearch and SerpApi", "AI client · Gemini CLI" or "Careers pages · Acme": where a kept search's postings came from, naming who added them. */
 export function searchSourcesName(sources: readonly PostingOrigin[], addedBy = ""): string {
-  if (sources.includes("CLIENT")) return addedBy ? `${SOURCE_INFO.CLIENT.name} · ${addedBy}` : SOURCE_INFO.CLIENT.name;
+  const added = sources.find((source) => source === "CLIENT" || source === "CAREERS");
+  if (added) return addedBy ? `${SOURCE_INFO[added].name} · ${addedBy}` : SOURCE_INFO[added].name;
   const names = sources.map((source) => SOURCE_INFO[source].name);
   return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
@@ -161,7 +174,7 @@ export function sourceCovers(source: JobSource, country: string): boolean {
  * there first. A search no job source ran (an AI client's) reads as before.
  */
 export function searchesWithin(sources: readonly PostingOrigin[]): boolean {
-  const searched = sources.filter((source) => source !== "CLIENT");
+  const searched = sources.filter((source) => source !== "CLIENT" && source !== "CAREERS");
   return searched.length === 0 || searched.some((source) => SOURCE_INFO[source].radius);
 }
 
