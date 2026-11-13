@@ -5,7 +5,6 @@ import { useMemo } from "react";
 import { useTrackSave } from "@/components/save-tracker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useAutosave } from "@/hooks/use-autosave";
 import { formatDateRange, type EntryOrder, type ProfileData, type ProjectItem } from "@/lib/profile";
 
@@ -19,6 +18,7 @@ import {
   setProjectSkill,
   sortEntriesByDate,
 } from "./actions";
+import { BulletsField } from "./bullets-field";
 import { EntryList } from "./entry-list";
 import { MonthYearField } from "./month-year-field";
 import type { UpdateProfile } from "./skills-section";
@@ -77,14 +77,7 @@ function ProjectForm({
           onChange={(event) => set({ current: event.target.checked })}
         />
       </div>
-      <Textarea
-        className="col-span-2"
-        label="What you did"
-        placeholder="One point per line: what you built, how, and what came of it."
-        rows={4}
-        value={entry.bullets}
-        onChange={(event) => set({ bullets: event.target.value })}
-      />
+      <BulletsField placeholder="One point per line: what you built, how, and what came of it." value={entry.bullets} onChange={(bullets) => set({ bullets })} />
     </div>
   );
 }

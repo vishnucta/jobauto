@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { resetData, sql } from "./support";
 
@@ -25,6 +25,114 @@ test("drags a card to another column", async ({ page }) => {
   await expect(page.getByText("In screening. They're taking a look.")).toBeVisible();
   await page.reload();
   await expect(column(page, "Screening")).toContainText("Kestrel Maps");
+});
+
+// Reordering within a column (public issue 60). Sent holds these two, newest first.
+const ONBOARDING = "Product Designer, Onboarding";
+const MOBILE = "Product Designer, Mobile";
+const titles = (page: Page, name: string) => column(page, name).getByRole("listitem").getByRole("link").allTextContents();
+const card = (page: Page, name: string, title: string) => column(page, name).getByRole("listitem").filter({ hasText: title });
+
+/** Drags a locator's middle to a point, pausing there like a person so the drop lands where it looks. */
+async function drag(page: Page, from: Locator, to: { x: number; y: number }) {
+  const box = (await from.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2 + 10, { steps: 4 });
+  await page.mouse.move(to.x, to.y, { steps: 15 });
+  await page.waitForTimeout(200);
+  await page.mouse.up();
+}
+const middle = async (locator: Locator) => {
+  const box = (await locator.boundingBox())!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+
+test("drags a card within its column and keeps the order, without changing when it was updated", async ({ page }) => {
+  const updated = () => sql(`SELECT id, "updatedAt" FROM "Application" ORDER BY id`);
+  const before = await updated();
+  await page.goto("/applications");
+  await expect.poll(() => titles(page, "Sent")).toEqual([ONBOARDING, MOBILE]);
+
+  await drag(page, card(page, "Sent", MOBILE), await middle(card(page, "Sent", ONBOARDING)));
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+
+  await page.reload();
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+  expect(await updated()).toEqual(before);
+});
+
+test("reorders a card from the keyboard, with focus back on its menu button", async ({ page }) => {
+  await page.goto("/applications");
+  const button = page.getByRole("button", { name: /^Actions for Product Designer, Onboarding, Meridian Bank/ });
+  await button.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "Move up" })).toHaveAttribute("aria-disabled", "true");
+  await page.getByRole("menuitem", { name: "Move down" }).focus();
+  await page.keyboard.press("Enter");
+
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+  await expect(button).toBeFocused();
+  await page.reload();
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+});
+
+test("puts a card dropped on another column's card on top of it", async ({ page }) => {
+  await page.goto("/applications");
+  await drag(page, card(page, "Sent", ONBOARDING), await middle(column(page, "Interview").getByRole("listitem").first()));
+  await expect.poll(async () => (await titles(page, "Interview"))[0]).toBe(ONBOARDING);
+  await expect(column(page, "Interview").getByRole("listitem")).toHaveCount(2);
+
+  await page.reload();
+  await expect.poll(async () => (await titles(page, "Interview"))[0]).toBe(ONBOARDING);
+});
+
+test("takes a moved card back to its place with Undo", async ({ page }) => {
+  await sql(`UPDATE "Application" SET "boardSort" = CASE WHEN company = 'Kestrel Maps' THEN 0 ELSE 1 END WHERE status = 'SENT'`);
+  await page.goto("/applications");
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+
+  await drag(page, card(page, "Sent", ONBOARDING), await middle(column(page, "Interview").getByRole("listitem").first()));
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE]);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => titles(page, "Sent")).toEqual([MOBILE, ONBOARDING]);
+});
+
+test("moves a card to an empty column from near its top", async ({ page }) => {
+  await sql(`DELETE FROM "Application" WHERE status = 'SCREENING'`);
+  await page.goto("/applications");
+  const to = (await column(page, "Screening").boundingBox())!;
+  await drag(page, card(page, "Sent", ONBOARDING), { x: to.x + to.width / 2, y: to.y + 40 });
+  await expect(column(page, "Screening")).toContainText(ONBOARDING);
+});
+
+test("moves a card dropped with the pointer between two columns", async ({ page }) => {
+  await page.goto("/applications");
+  const screening = (await column(page, "Screening").boundingBox())!;
+  await drag(page, card(page, "Sent", ONBOARDING), { x: screening.x + screening.width + 7, y: screening.y + 200 });
+  await expect(column(page, "Sent")).not.toContainText(ONBOARDING);
+});
+
+test("keeps the whole card menu within reach in a short window", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 640 });
+  await page.goto("/applications");
+  await page.getByRole("button", { name: /^Actions for Product Designer, Mobile, Kestrel Maps/ }).click();
+  const remove = page.getByRole("menuitem", { name: "Delete…" });
+  await remove.scrollIntoViewIfNeeded();
+  await expect(remove).toBeInViewport({ ratio: 1 });
+});
+
+test("leaves everything alone when a card is dropped off the columns", async ({ page }) => {
+  const statuses = () => sql(`SELECT id, status, "boardSort" FROM "Application" ORDER BY id`);
+  const before = await statuses();
+  await page.goto("/applications");
+  await expect.poll(() => titles(page, "Sent")).toEqual([ONBOARDING, MOBILE]);
+
+  // Below the columns' tops, over the sidebar.
+  await drag(page, card(page, "Sent", ONBOARDING), { x: 60, y: 880 });
+  await page.waitForTimeout(500);
+  await expect.poll(() => titles(page, "Sent")).toEqual([ONBOARDING, MOBILE]);
+  expect(await statuses()).toEqual(before);
 });
 
 test("moves a card from the keyboard", async ({ page }) => {

@@ -45,7 +45,7 @@ export async function saveGoogleSettingChanges({ workTimeZone, workDays, ...chan
   if (changes.workStart && changes.workEnd && changes.workStart >= changes.workEnd) throw new ActionError("The working day has to end after it starts.");
   await saveSettings({
     ...changes,
-    ...(workDays ? { workDays: [...new Set(workDays)].sort() } : {}),
+    ...(workDays ? { workDays: [...new Set(workDays)].sort((a, b) => a - b) } : {}),
     ...(workTimeZone === undefined ? {} : { workTimeZone: workTimeZone || null }),
   });
 }

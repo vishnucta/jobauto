@@ -3,12 +3,14 @@ import "server-only";
 import OpenAI from "openai";
 import type { ReasoningEffort } from "openai/resources/shared";
 
+import type { UsageSink } from "@/lib/usage";
+
 import { AiError } from "../errors";
 import type { ChatAnswer, ChatCall } from "../provider";
 import { OpenAICompatibleProvider } from "./openai-compatible";
 
 /** Offered before a key is saved. The free plan has these; Large needs a paid one. */
-export const MISTRAL_FALLBACK_MODELS = ["ministral-8b-latest", "mistral-medium-latest", "mistral-small-latest"];
+export const MISTRAL_FALLBACK_MODELS = ["ministral-8b-latest", "mistral-small-2603", "mistral-small-latest"];
 
 /** What Mistral's model list says about a model, besides OpenAI's fields. */
 export type MistralModel = Pick<OpenAI.Models.Model, "id"> & {
@@ -32,8 +34,9 @@ export class MistralProvider extends OpenAICompatibleProvider {
     private readonly apiKey: string | null,
     model: string | null,
     timeoutMs: number,
+    onUsage?: UsageSink,
   ) {
-    super("MISTRAL", baseURL, apiKey, model, timeoutMs);
+    super("MISTRAL", baseURL, apiKey, model, timeoutMs, onUsage);
   }
 
   protected override async chat(call: ChatCall): Promise<ChatAnswer> {
@@ -82,7 +85,8 @@ export function mistralModelNames(cards: MistralModel[]): string[] {
     const names = [card.id, ...(card.aliases ?? [])];
     for (const name of names) named.add(name);
     const latest = names.filter((name) => name.endsWith("-latest"));
-    chosen.add((latest.length > 0 ? latest : names).reduce((shortest, name) => (name.length < shortest.length ? name : shortest)));
+    const pool = latest.length > 0 ? latest : names;
+    chosen.add(pool.reduce((shortest, name) => (name.length < shortest.length ? name : shortest), pool[0]));
   }
-  return [...chosen].sort();
+  return [...chosen].sort((a, b) => a.localeCompare(b));
 }

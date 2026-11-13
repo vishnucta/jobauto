@@ -35,7 +35,7 @@ describe("BasicsSection", () => {
     render(<Harness />);
     for (const label of [
       "Full name", "Headline", "Email", "Phone (optional)", "Date of birth (optional)", "Website (optional)",
-      "Street address (optional)", "City", "Country", "LinkedIn (optional)", "A few lines about you",
+      "Street address (optional)", "City", "Country", "LinkedIn (optional)",
     ]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }

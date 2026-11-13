@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
+import { FitDetails } from "@/components/fit-details";
 import { ScoreBadge } from "@/components/score-badge";
 import { linksAttribution, SourceAttribution } from "@/components/source-attribution";
 import { toast, toastResult } from "@/components/toast";
@@ -10,10 +11,10 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { useJob } from "@/hooks/use-job";
 import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
-import { fitBand, type PostingFit } from "@/lib/fit";
+import type { PostingFit } from "@/lib/fit";
 import type { JobView } from "@/lib/jobs/runner";
 import { byScore, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
-import { arbeitsagenturPage, describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
+import { arbeitsagenturPage, describeSourceProblem, searchesWithin, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 
 import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
 import { useStartApplication } from "./use-start-application";
@@ -173,6 +174,7 @@ export function PostingResults(props: PostingResultsProps) {
   };
 
   const searched = props.mode === "search" ? props.search.query : null;
+  const radius = props.mode === "search" && searchesWithin(props.search.sources);
   const empty =
     props.mode !== "search" && props.empty
       ? props.empty
@@ -184,7 +186,9 @@ export function PostingResults(props: PostingResultsProps) {
             ? "You've dismissed every posting here."
             : !searched
               ? "Your past searches found no postings yet."
-              : `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`;
+              : radius
+                ? `No postings for “${searched.keywords}”${searched.place ? ` within ${searched.radiusKm} km of ${searched.place}` : ""}. Try a bigger radius or fewer words.`
+                : `No postings for “${searched.keywords}”${searched.place ? ` in ${searched.place}` : ""}. Try fewer words.`;
 
   return (
     <div className="flex flex-wrap items-start gap-6 px-10 pb-16">
@@ -433,36 +437,6 @@ function StateBadges({ state }: { state: PostingState }) {
   );
 }
 
-/** A posting's score (#208): its band, why it fits, and what gives pause. */
-function Fit({ fit }: { fit: PostingFit }) {
-  return (
-    <div className="flex items-start gap-3.5 rounded-card border border-line-card bg-paper px-4 py-3.5">
-      <ScoreBadge score={fit.score} />
-      <div className="flex min-w-0 flex-col gap-1.5 text-sm">
-        <p className="font-medium">
-          {fitBand(fit.score)} · {fit.score} of 100
-        </p>
-        {fit.reasons.length > 0 && (
-          <ul aria-label="Why it fits" className="flex list-disc flex-col gap-0.5 pl-5 text-muted">
-            {fit.reasons.map((reason, index) => (
-              <li key={index}>{reason}</li>
-            ))}
-          </ul>
-        )}
-        {fit.redFlags.length > 0 && (
-          <div className="text-meta text-warning">
-            <p className="font-medium">Worth knowing</p>
-            <ul className="flex list-disc flex-col gap-0.5 pl-5">
-              {fit.redFlags.map((flag, index) => (
-                <li key={index}>{flag}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 type Text = { status: "ready"; text: string } | { status: "loading" } | { status: "partial"; text: string };
 
@@ -579,7 +553,7 @@ function PostingDetail({
           {scoring.step ?? "Starting…"}
         </p>
       ) : (
-        state.score && <Fit fit={state.score} />
+        state.score && <FitDetails fit={state.score} />
       )}
 
       {/* Only the text scrolls, so the title and actions stay in view; focusable, so it scrolls from the keyboard too. */}

@@ -124,7 +124,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
                 first.
               </p>
             )}
-            {!data.hasResume && <p className="text-sm text-muted">This application has no resume to attach yet.</p>}
+            {!data.hasResume && <p className="text-sm text-muted">This application has no resume to attach yet. Write it on the Resume tab first.</p>}
             {job && !filling ? (
               <ProgressSteps steps={APPLY_STEPS} current={current} className="mt-1" />
             ) : (

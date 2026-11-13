@@ -55,9 +55,19 @@ describe("the fact guard (E6-6)", () => {
   });
 
   it("flags acronyms and credentials the profile doesn't have", () => {
-    expect(check("An MBA and a certified scrum master")).toEqual(["MBA", "certified"]);
+    const uncertified = sourcesFor({ ...profile, certifications: [] }, extracted, sample.ledgerly.posting, 11);
+    expect(unverifiedFacts("An MBA and a certified scrum master", uncertified)).toEqual(["MBA", "certified"]);
+    // Jane is certified in accessibility (#293).
+    expect(check("A Certified Accessibility Specialist since 2022")).toEqual([]);
     expect(check("An MSc in Design for Interaction from TU Delft")).toEqual([]);
     expect(check("Knows WCAG 2.2 well")).toEqual([]);
+  });
+
+  it("takes what the candidate's own sections say as true (#298)", () => {
+    const item = { id: "i1", title: "Chartered MBA, 2009", subtitle: "", startYear: null, startMonth: null, endYear: null, endMonth: null, current: false, details: "", link: "", onResumes: true };
+    const backed = sourcesFor({ ...profile, customSections: [{ id: "s1", title: "Honours", format: "LINES", items: [item] }] }, extracted, sample.ledgerly.posting, 11);
+    expect(unverifiedFacts("An MBA since 2009", backed)).toEqual([]);
+    expect(check("An MBA since 2009")).toEqual(["MBA", "2009"]);
   });
 
   it("flags years the profile doesn't have", () => {
@@ -107,6 +117,21 @@ describe("the fact guard in German", () => {
   it("guards a German resume's units without marking its nouns", () => {
     const units = guardUnits([{ id: "summary", label: "Summary", text: german }], inLanguage(sources, "German"));
     expect(units[0].unverified).toBeUndefined();
+  });
+});
+
+describe("the fact guard on runaway output", () => {
+  it("reads text ending in thousands of blank lines quickly", () => {
+    const started = performance.now();
+    expect(check(`Led the redesign at Northwind Logistics.${"\n".repeat(100_000)}`)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("reads words with a long run of marks inside quickly", () => {
+    const started = performance.now();
+    expect(factSources([`a${".".repeat(100_000)}b.`]).words.size).toBe(1);
+    check(`A${"-".repeat(100_000)}b`);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 

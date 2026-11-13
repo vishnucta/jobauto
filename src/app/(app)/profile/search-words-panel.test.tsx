@@ -18,6 +18,8 @@ const role = (patch: Partial<Fixture["experience"][number]> = {}): Fixture["expe
   role: "Financial Analyst",
   company: "AvaTrade",
   location: "",
+  descriptor: "",
+  volunteering: false,
   bullets: "",
   skillIds: ["s1", "s2"],
   startYear: 2014,
@@ -31,8 +33,8 @@ const role = (patch: Partial<Fixture["experience"][number]> = {}): Fixture["expe
 const profile = (patch: Partial<Fixture> = {}): Fixture => ({
   basics: { name: "Prearna", headline: "Financial Analyst — Regulatory Reporting & Reconciliation", city: "Hamburg", country: "Germany" } as Fixture["basics"],
   skills: [
-    { id: "s1", name: "Audit Support" },
-    { id: "s2", name: "Data Analysis" },
+    { id: "s1", name: "Audit Support", group: "" },
+    { id: "s2", name: "Data Analysis", group: "" },
   ],
   experience: [role()],
   ...patch,
@@ -101,7 +103,7 @@ describe("the Search words panel", () => {
   it("changes with the profile", () => {
     const { rerender } = render(<SearchWordsPanel profile={profile()} />);
     expect(words("From your skills")).not.toContain("Treasury");
-    rerender(<SearchWordsPanel profile={profile({ skills: [{ id: "s1", name: "Treasury" }, { id: "s2", name: "Data Analysis" }] })} />);
+    rerender(<SearchWordsPanel profile={profile({ skills: [{ id: "s1", name: "Treasury", group: "" }, { id: "s2", name: "Data Analysis", group: "" }] })} />);
     expect(words("From your skills")).toContain("Treasury");
     rerender(<SearchWordsPanel profile={profile({ experience: [role({ role: "Controller" })] })} />);
     expect(words("Job titles")[0]).toBe("Controller");

@@ -14,6 +14,7 @@ vi.mock("./actions", () => ({
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
 
 const initial: DocumentSettings = {
+  documentsToWrite: "both",
   paper: "A4",
   dateFormat: "DAY_MONTH_YEAR",
   defaultTone: "WARM",
@@ -22,7 +23,6 @@ const initial: DocumentSettings = {
   customLanguages: ["Farsi"],
   fileNamePattern: "{name} – {company} – {doc}",
   includeRefs: false,
-  pageLimit: "1",
 };
 const preview = { name: "Jane Doe", company: "Ledgerly", role: "Senior Product Designer" };
 const open = () => render(<DocumentsSection initial={initial} preview={preview} />);
@@ -42,7 +42,7 @@ describe("Documents settings (E10-3)", () => {
     expect(screen.getByLabelText("Date format")).toHaveDisplayValue("27 September 2026");
     expect(screen.getByLabelText("Cover letter tone")).toHaveDisplayValue("Warm");
     expect(screen.getByRole("switch", { name: "Include references" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByLabelText("Resume length")).toHaveDisplayValue("One page");
+    expect(screen.getByLabelText("Documents to write")).toHaveDisplayValue("Resume and cover letter");
   });
 
   it("offers the posting's language, the 21 built-in ones and the user's own", () => {
@@ -66,18 +66,13 @@ describe("Documents settings (E10-3)", () => {
     expect(updateSettings).toHaveBeenLastCalledWith({ includeRefs: true });
   });
 
-  it("limits resumes to one page, two pages or no limit (SET-9)", async () => {
+  it("chooses which documents New application writes (#367)", async () => {
     const user = userEvent.setup();
     open();
-    const select = screen.getByLabelText("Resume length") as HTMLSelectElement;
-    expect([...select.options].map((option) => option.text)).toEqual(["One page", "Up to two pages", "No limit"]);
-    expect(select).toHaveAccessibleDescription(
-      "A tailored resume that runs longer is trimmed, oldest roles first, and I'll tell you what was cut.",
-    );
-    await user.selectOptions(select, "Up to two pages");
-    expect(updateSettings).toHaveBeenLastCalledWith({ pageLimit: "2" });
-    await user.selectOptions(select, "No limit");
-    expect(updateSettings).toHaveBeenLastCalledWith({ pageLimit: "none" });
+    const select = screen.getByLabelText("Documents to write") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.text)).toEqual(["Resume and cover letter", "Resume only", "Cover letter only"]);
+    await user.selectOptions(select, "Resume only");
+    expect(updateSettings).toHaveBeenLastCalledWith({ documentsToWrite: "resume" });
   });
 
   it("picks the base resume's language from the built-in ones, English by default", async () => {

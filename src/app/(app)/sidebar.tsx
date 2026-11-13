@@ -27,6 +27,7 @@ export function Sidebar({
   userName,
   update,
   currentVersion,
+  desktop,
   collapsed,
   colorScheme,
   counts,
@@ -34,6 +35,8 @@ export function Sidebar({
   userName: string;
   update: Release | null;
   currentVersion: string;
+  /** Running inside the desktop app, on this computer: there's no password, so nothing to sign out of. */
+  desktop: boolean;
   /** Collapsed to its icons, as last left. */
   collapsed: boolean;
   /** The scheme the switch chose last, if any. */
@@ -71,7 +74,7 @@ export function Sidebar({
 
       {update && (
         <div className="px-2 pb-2 group-data-collapsed/sidebar:px-1">
-          <UpdateNotice release={update} currentVersion={currentVersion} />
+          <UpdateNotice release={update} currentVersion={currentVersion} desktop={desktop} />
         </div>
       )}
 
@@ -91,18 +94,20 @@ export function Sidebar({
         </span>
         <span className="flex min-w-0 flex-1 flex-col group-data-collapsed/sidebar:hidden">
           <span className="truncate text-xs font-medium">{userName}</span>
-          <span className="truncate text-[11px] text-muted">Self-hosted · v{currentVersion}</span>
+          <span className="truncate text-[11px] text-muted">{desktop ? "On this computer" : "Self-hosted"} · v{currentVersion}</span>
         </span>
-        <form action={signOut}>
-          <button
-            type="submit"
-            aria-label="Sign out"
-            title="Sign out"
-            className="grid size-[26px] place-items-center rounded-control text-muted hover:bg-hover hover:text-ink"
-          >
-            <LogOut size={15} aria-hidden="true" />
-          </button>
-        </form>
+        {!desktop && (
+          <form action={signOut}>
+            <button
+              type="submit"
+              aria-label="Sign out"
+              title="Sign out"
+              className="grid size-[26px] place-items-center rounded-control text-muted hover:bg-hover hover:text-ink"
+            >
+              <LogOut size={15} aria-hidden="true" />
+            </button>
+          </form>
+        )}
       </div>
     </SidebarFrame>
   );

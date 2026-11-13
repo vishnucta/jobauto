@@ -25,6 +25,7 @@ export async function applyImportedProfile(db: PrismaClient, profile: ImportedPr
         await tx.experience.deleteMany();
         await tx.project.deleteMany();
         await tx.education.deleteMany();
+        await tx.certification.deleteMany();
         await tx.publication.deleteMany();
         await tx.reference.deleteMany();
         await tx.language.deleteMany();
@@ -83,6 +84,17 @@ export async function applyImportedProfile(db: PrismaClient, profile: ImportedPr
         const match = degrees.find((degree) => sameName(degree.degree, fields.degree) && sameName(degree.school, fields.school));
         if (match) await tx.education.update({ where: { id: match.id }, data: filled(fields) });
         else await tx.education.create({ data: { ...fields, sort: nextEducationSort() } });
+      }
+
+      // Certifications are in an order set by hand: the file's go after the ones there, in its order (#293).
+      const certifications = await tx.certification.findMany();
+      let certificationSort = ((await tx.certification.aggregate({ _max: { sort: true } }))._max.sort ?? -1) + 1;
+      for (const { year, month, expiryYear, expiryMonth, ...fields } of profile.certifications.map(withoutFlags)) {
+        const match = certifications.find((entry) => sameName(entry.name, fields.name));
+        // A date the file doesn't give keeps the one that's there.
+        const dates = { ...(year === null ? {} : { year, month }), ...(expiryYear === null ? {} : { expiryYear, expiryMonth }) };
+        if (match) await tx.certification.update({ where: { id: match.id }, data: { ...filled(fields), ...dates } });
+        else await tx.certification.create({ data: { ...fields, ...dates, sort: certificationSort++ } });
       }
 
       // Publications are in an order set by hand: the file's go after the ones there, in its order (#218).

@@ -42,7 +42,7 @@ export const connectorDraftJob = defineJob({
     const reading = await readPostingJob.run({ posting }, context);
     const settings = await loadSettings();
     const documents = await writeDocumentsJob.run(
-      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note },
+      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note, write: "both" },
       context,
     );
     const applicationId = await createApplicationFromDocuments({

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AiProvider } from "@/generated/prisma/enums";
+import { recordUsage } from "@/lib/usage-data";
 
 import { loadAiConfig, type AiConfig } from "./config";
 import { AiError } from "./errors";
@@ -16,25 +17,28 @@ import { OpenAICompatibleProvider } from "./providers/openai-compatible";
 export { AiError } from "./errors";
 export type { AIProvider, ChatMessage, CompletionRequest, JsonCompletionRequest } from "./provider";
 
-/** A provider for `config`. A saved key that can't be read stops hosted providers with a clear message. */
+/**
+ * A provider for `config`, keeping each answer's tokens for the Usage screen.
+ * A saved key that can't be read stops hosted providers with a clear message.
+ */
 export function createProvider(config: AiConfig): AIProvider {
   const { provider, baseUrl, model, apiKey, apiKeyProblem, timeoutMs } = config;
   if (apiKeyProblem && providerOption(provider).apiKey) throw AiError.config(apiKeyProblem);
   switch (provider) {
     case AiProvider.LOCAL:
-      return new LocalProvider(baseUrl, model, timeoutMs);
+      return new LocalProvider(baseUrl, model, timeoutMs, recordUsage);
     case AiProvider.OPENAI:
-      return new OpenAICompatibleProvider("OPENAI", baseUrl, apiKey, model, timeoutMs);
+      return new OpenAICompatibleProvider("OPENAI", baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.ANTHROPIC:
-      return new AnthropicProvider(baseUrl, apiKey, model, timeoutMs);
+      return new AnthropicProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.MISTRAL:
-      return new MistralProvider(baseUrl, apiKey, model, timeoutMs);
+      return new MistralProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.GROQ:
-      return new OpenAICompatibleProvider("GROQ", baseUrl, apiKey, model, timeoutMs);
+      return new OpenAICompatibleProvider("GROQ", baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.DEEPSEEK:
-      return new DeepSeekProvider(baseUrl, apiKey, model, timeoutMs);
+      return new DeepSeekProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
     case AiProvider.LMSTUDIO:
-      return new LmStudioProvider(baseUrl, apiKey, model, timeoutMs);
+      return new LmStudioProvider(baseUrl, apiKey, model, timeoutMs, recordUsage);
   }
 }
 

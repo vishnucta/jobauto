@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRun } from "@/lib/settings";
 import { saveSettings } from "@/lib/settings-data";
+import { EMPTY_QUERY } from "@/lib/job-search/search";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { nextAgentRun, resetInterruptedDrafts, scheduledRunDue, startDueRun } from "./schedule";
@@ -77,7 +78,7 @@ describe("the limits (E16-4)", () => {
 
   it("allows 3 runs in any 24 hours", () => {
     const three = [run("2026-10-20T11:00:00Z"), run("2026-10-20T08:00:00Z"), run("2026-10-19T13:00:00Z")];
-    expect(runLimitProblem(three, now, { manual: false })).toBe("The agent has run 3 times in the past 24 hours, as many as it may. Try again in 1 hour.");
+    expect(runLimitProblem(three, now, { manual: false })).toBe("The agent needs 1 source request, but may use only 3 in 24 hours. Next eligible: Tue 20 Oct, 13:00 (UTC).");
     expect(runLimitProblem(three, new Date("2026-10-20T13:00:01Z"), { manual: false })).toBeNull();
     expect(runLimitProblem(three.slice(0, 2), now, { manual: false })).toBeNull();
   });
@@ -89,6 +90,7 @@ describe("the schedule (E16-4)", () => {
     const due = new Date("2026-10-20T06:00:00Z");
     expect(await startDueRun(due)).toBeNull();
     await saveSettings({ agentEnabled: true });
+    await prisma().agentSearch.create({ data: { name: "Designer", query: { ...EMPTY_QUERY, keywords: "Designer", country: "nl" } } });
     expect(await startDueRun(due)).toBe("agent-job");
     expect(startJob).toHaveBeenCalledWith(expect.objectContaining({ type: "agent-scan" }), { manual: false }, { key: "agent" });
 

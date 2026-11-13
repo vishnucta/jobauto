@@ -12,8 +12,15 @@ export const AGENDA_DAYS = 7;
 
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** Whether a string is a day, e.g. from the address bar. */
-export const isDay = (value: unknown): value is Day => typeof value === "string" && DAY.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+/**
+ * Whether a string is a day, e.g. from the address bar. It has to come back
+ * unchanged, as Date.parse rolls "2026-02-30" over into March.
+ */
+export const isDay = (value: unknown): value is Day => {
+  if (typeof value !== "string" || !DAY.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+};
 
 const parts = (day: Day) => {
   const [, year, month, date] = DAY.exec(day)!;

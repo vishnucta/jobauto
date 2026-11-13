@@ -5,26 +5,58 @@ import { z } from "zod";
 
 import { approveCandidate, dismissCandidate, restoreCandidate, startCandidateDraft } from "@/lib/agent/draft";
 import { startAgentRun } from "@/lib/agent/jobs";
+import { agentSearchInputSchema } from "@/lib/agent/search";
+import { deleteAgentSearch, listAgentSearches, moveAgentSearch, saveAgentSearch, setAgentSearchEnabled } from "@/lib/agent/searches";
 import { agentSettingsChangeSchema, updateAgentSettings } from "@/lib/agent/settings";
-import { action } from "@/lib/action";
+import { action, ActionError } from "@/lib/action";
 import { safeLink } from "@/lib/job-search/search";
 
 // The Agent screen's actions (E16). Nothing here ever sends anything:
 // approving only makes a draft a normal Draft application.
 
 /**
- * Settings → Job agent (E16-7): each change saves at once. Turning the agent
- * on needs a search with keywords and a country.
+ * Shared settings save at once. Search edits use the collection actions below.
  */
 export const saveAgentSettings = action(agentSettingsChangeSchema, async (changes) => {
   await updateAgentSettings(changes);
   revalidatePath("/agent");
+  revalidatePath("/settings");
   return null;
 });
 
+const searchId = z.string().min(1).max(100);
+export const setRecurringSearchEnabled = action(z.object({ id: searchId, enabled: z.boolean() }).strict(), async ({ id, enabled }) => {
+  const search = await setAgentSearchEnabled(id, enabled);
+  revalidatePath("/agent");
+  revalidatePath("/settings");
+  return search;
+});
+export const saveRecurringSearch = action(
+  agentSearchInputSchema.extend({ id: searchId.optional() }).strict(),
+  async ({ id, ...input }) => {
+    if (input.enabled && !input.query.country) throw new ActionError(`Choose a country for “${input.name}”.`);
+    const search = await saveAgentSearch(input, id);
+    revalidatePath("/agent");
+    revalidatePath("/settings");
+    return search;
+  },
+);
+export const deleteRecurringSearch = action(z.object({ id: searchId }).strict(), async ({ id }) => {
+  await deleteAgentSearch(id);
+  revalidatePath("/agent");
+  revalidatePath("/settings");
+  return null;
+});
+export const moveRecurringSearch = action(z.object({ id: searchId, direction: z.enum(["up", "down"]) }).strict(), async ({ id, direction }) => {
+  await moveAgentSearch(id, direction);
+  revalidatePath("/agent");
+  revalidatePath("/settings");
+  return listAgentSearches();
+});
+
 /**
- * Run now (E16-4): one more run, at most once an hour after the previous
- * one and within the daily limit. A run already queued or running is
+ * Run all now: at most once an hour after the previous run and only when
+ * the whole enabled batch fits the rolling request quota. An unfinished job is
  * reused rather than started again.
  */
 export const runAgentNow = action(z.object({}), async () => {

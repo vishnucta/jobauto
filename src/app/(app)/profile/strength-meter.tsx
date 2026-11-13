@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 
-import { profileStrength, type ProfileData } from "@/lib/profile";
+import { paidRoles, profileStrength, type ProfileData } from "@/lib/profile";
 
 /** "Profile strength" with a progress bar and an encouraging hint (PRO-9). */
 export function StrengthMeter({ profile }: { profile: ProfileData }) {
@@ -10,7 +10,7 @@ export function StrengthMeter({ profile }: { profile: ProfileData }) {
   const hintId = useId();
   const { percent, hint } = profileStrength({
     basics: profile.basics,
-    experience: profile.experience.length,
+    experience: paidRoles(profile.experience).length,
     education: profile.education.length,
     skills: profile.skills.length,
   });

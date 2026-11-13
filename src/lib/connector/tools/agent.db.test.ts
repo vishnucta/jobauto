@@ -53,7 +53,8 @@ beforeEach(async () => {
   await resetDatabase(prisma());
   await seedBuiltIns(prisma());
   await seedDemo(prisma(), { now: new Date("2026-10-23T09:00:00Z") });
-  await saveSettings({ connectorEnabledAt: "2026-10-23T09:00:00.000Z", agentEnabled: true, agentQuery: query });
+  await saveSettings({ connectorEnabledAt: "2026-10-23T09:00:00.000Z", agentEnabled: true });
+  await prisma().agentSearch.create({ data: { name: "My search", query } });
   Object.assign(site, { emails: [], noApplicationsFrom: "" });
   const clientId = await registerClient({ name: "Claude", redirectUris: [CLAUDE] });
   const verifier = "v".repeat(50);
@@ -144,8 +145,17 @@ describe("the job agent's tools", () => {
 
     const agent = await tool("get_job_agent");
     expect(agent.json).toMatchObject({
-      settings: { enabled: true, keywords: "Data scientist", place: "Berlin", country: "de", radius_km: 25, min_score: 70, auto_draft: false, time_zone: "Europe/Berlin" },
-      searches_for: "Data scientist · Berlin, 25 km · via JSearch",
+      settings: {
+        enabled: true,
+        keywords: "Data scientist",
+        place: "Berlin",
+        country: "de",
+        radius_km: 25,
+        searches: [{ name: "My search", enabled: true, searches_for: "Data scientist · Berlin, 25 km" }],
+        min_score: 70,
+        auto_draft: false,
+        time_zone: "Europe/Berlin",
+      },
       recent_runs: [{ result: "2 new postings are waiting for a look." }],
       drafts: [{ find_id: draft.id, application_id: ledgerly.id, link: `https://dossier.example/applications/${ledgerly.id}` }],
       finds: [{ title: "Posting better", score: 88 }, { find_id: good.id, reasons: ["Python"], red_flags: ["On-call rota"], drafting_task_id: job.id }],
@@ -165,12 +175,15 @@ describe("the job agent's tools", () => {
   });
 
   it("changes the agent's settings, and turns it on only with keywords and a country", async () => {
-    await saveSettings({ agentEnabled: false, agentQuery: { ...query, keywords: "" } });
-    expect(await tool("update_job_agent", { enabled: true })).toMatchObject({ isError: true, text: "Type what the agent should look for before turning it on." });
+    // Without a search, update_job_agent's search fields make the first one.
+    await saveSettings({ agentEnabled: false });
+    await prisma().agentSearch.deleteMany();
+    expect(await tool("update_job_agent", { enabled: true })).toMatchObject({ isError: true, text: "Add what to look for in Settings → Job agent first." });
     expect(await tool("update_job_agent", { enabled: true, keywords: "Designer", country: "" })).toMatchObject({
       isError: true,
-      text: "Choose a country for the search before turning the agent on.",
+      text: "Choose a country for “My search”.",
     });
+    expect(await prisma().agentSearch.count()).toBe(0);
 
     const saved = await tool("update_job_agent", { enabled: true, keywords: "Product designer", country: "Germany", place: "", hour: 9, min_score: 80, auto_draft: true, max_drafts: 2 });
     expect(saved.json).toMatchObject({
@@ -178,7 +191,13 @@ describe("the job agent's tools", () => {
       settings: { enabled: true, keywords: "Product designer", place: "", country: "de", hour: 9, min_score: 80, auto_draft: true, max_drafts: 2 },
       link: "https://dossier.example/agent",
     });
-    expect(await loadSettings()).toMatchObject({ agentEnabled: true, agentQuery: { ...query, keywords: "Product designer", place: "" }, agentHour: 9, agentMinScore: 80, agentMaxScores: 15 });
+    expect(await loadSettings()).toMatchObject({ agentEnabled: true, agentHour: 9, agentMinScore: 80, agentMaxScores: 15 });
+    expect(await prisma().agentSearch.findMany()).toMatchObject([{ name: "My search", enabled: true, query: { ...query, keywords: "Product designer", place: "" } }]);
+
+    // A search there already keeps its name and its level; only the fields given change.
+    await prisma().agentSearch.updateMany({ data: { name: "Design", query: { ...query, keywords: "Product designer", place: "", experience: "senior" } } });
+    await tool("update_job_agent", { place: "Hamburg" });
+    expect(await prisma().agentSearch.findMany()).toMatchObject([{ name: "Design", query: { ...query, keywords: "Product designer", place: "Hamburg", experience: "senior" } }]);
 
     expect(await tool("update_job_agent", { country: "Atlantis" })).toMatchObject({ isError: true, text: "Dossier doesn't know that country. Give its name or ISO code, e.g. 'Germany' or 'de'." });
     expect(await tool("update_job_agent", {})).toMatchObject({ isError: true, text: "Say what to change, or give run_now: true to run it now." });

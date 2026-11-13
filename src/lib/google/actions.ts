@@ -94,7 +94,10 @@ export const checkInbox = action(z.object({}), async (_, { toast }) => {
   const result = await google(checkInboxNow);
   refreshEverything();
   if (!result) toast("Already checking. It'll be done in a moment.");
-  else toast(result.kept === 0 ? "Nothing new about your applications." : `${result.kept} new ${result.kept === 1 ? "email" : "emails"} about your applications.`);
+  else {
+    const news = result.kept === 0 ? "Nothing new about your applications." : `${result.kept} new ${result.kept === 1 ? "email" : "emails"} about your applications.`;
+    toast(result.unread ? `${news} ${result.unread} couldn't be read from Gmail; the next check tries again.` : news);
+  }
   return result;
 });
 

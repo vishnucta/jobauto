@@ -7,7 +7,7 @@ import { fetchPosting } from "@/lib/posting-fetch";
 import type { JobSourceAdapter, RequestContext } from "./adapter";
 import { JobSearchError, jobSearchError } from "./errors";
 import { requestJson } from "./http";
-import { POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
+import { experienceAskedFor, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
 import { arbeitsagenturPage } from "./sources";
 import { fromMarkdown } from "./text";
 
@@ -72,7 +72,7 @@ function salaryOf(offer: Offer): string {
 }
 
 export function postingFromOffer(offer: Offer): FoundPosting {
-  const posted = offer.datumErsteVeroeffentlichung ? Date.parse(`${offer.datumErsteVeroeffentlichung.slice(0, 10)}T00:00:00Z`) : NaN;
+  const posted = offer.datumErsteVeroeffentlichung ? Date.parse(`${offer.datumErsteVeroeffentlichung.slice(0, 10)}T00:00:00Z`) : Number.NaN;
   return {
     source: "ARBEITSAGENTUR",
     externalId: offer.referenznummer.slice(0, 500),
@@ -94,7 +94,8 @@ function searchUrl(query: SearchQuery, page: number, baseUrl?: string): URL {
   const url = new URL(`${baseUrl ?? BASE}${PATHS.search}`);
   url.searchParams.set("was", query.keywords);
   // Jobs, as the agency's own search starts with; not training places or internships.
-  url.searchParams.set("angebotsart", "1");
+  // 1 is a job; 34 an internship or traineeship (public issue 59).
+  url.searchParams.set("angebotsart", experienceAskedFor(query) === "intern" ? "34" : "1");
   url.searchParams.set("page", String(page));
   url.searchParams.set("size", String(PAGE_SIZE));
   if (query.place) {

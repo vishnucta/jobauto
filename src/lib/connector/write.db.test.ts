@@ -18,11 +18,6 @@ vi.mock("@/lib/profile-data", async () => {
   const { demoProfile } = await import("@/lib/demo-profile");
   return { loadProfile: async () => demoProfile() };
 });
-// Trimming renders PDFs; here nothing needs cutting.
-vi.mock("@/lib/page-limit", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/page-limit")>()),
-  fitResumeToPages: vi.fn(async () => ({ trimmed: [], fits: true })),
-}));
 
 const prisma = () => db.client!;
 const profile = demoProfile();

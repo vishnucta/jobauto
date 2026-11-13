@@ -68,6 +68,10 @@ type Row = {
   match: Match | null;
   followThemeLayout: boolean;
   showPhoto: boolean | null;
+  /** Its own sections (#297); left out, it follows the base resume's. */
+  sections?: unknown;
+  /** What it was sent with (#299); left out, it's drawn from the profile. */
+  frozen?: unknown;
   documents: { id: string; units: Unit[]; theme: (typeof modern) | null }[];
 };
 const row = (overrides: Partial<Row> = {}): Row => ({
@@ -97,8 +101,12 @@ function resumeLines(content: ResumeContent, labels: DocumentLabels = ENGLISH_LA
   const main = [
     ...(content.summary ? [labels.profile, content.summary] : []),
     ...(content.experience.length ? [labels.experience, ...content.experience.flatMap((role) => entry(role.role, role.company, role.dates, role.bullets))] : []),
+    ...(content.volunteering.length ? [labels.volunteering, ...content.volunteering.flatMap((role) => entry(role.role, role.company, role.dates, role.bullets))] : []),
     ...(content.projects.length ? [labels.projects, ...content.projects.flatMap((project) => entry(project.name, project.link, project.dates, project.bullets))] : []),
     ...(content.education.length ? [labels.education, ...content.education.flatMap((entry) => [`${entry.degree}, ${entry.school} ${entry.dates}`, entry.notes])] : []),
+    ...(content.certifications.length
+      ? [labels.certifications, ...content.certifications.flatMap((entry) => [`${entry.name}, ${entry.issuer} ${entry.date}`, [...entry.details, entry.link].filter(Boolean).join(" - ")])]
+      : []),
     ...(content.publications.length ? [labels.publications, ...content.publications.map((entry) => entry.citation)] : []),
   ];
   return [content.name, content.headline, ...(split ? [] : [content.contacts.join("  -  ")]), ...(split ? [...sidebar, ...main] : [...main, ...sidebar])]
@@ -127,7 +135,7 @@ describe("checkResume", () => {
   it("reads a single-column resume as a parser would, and keeps the document's text out of the report", async () => {
     const report = await check();
     expect(renderPdf).toHaveBeenCalledWith("/print/resume/app1");
-    expect(report).toMatchObject({ document: "resume", fileName: "Jane Doe – Ledgerly – Resume.pdf", pages: 1, maxPages: 2, requirements: null });
+    expect(report).toMatchObject({ document: "resume", fileName: "Jane Doe – Ledgerly – Resume.pdf", pages: 1, requirements: null });
     expect(report.reads.map((entry) => [entry.id, entry.level])).toEqual([
       ["text-layer", "ok"],
       ["contact", "ok"],
@@ -138,8 +146,8 @@ describe("checkResume", () => {
     ]);
     expect(item(report, "text-layer").detail).toMatch(/^Every heading, title and bullet is in the PDF's text layer \(\d+ checked\)\.$/);
     expect(item(report, "contact").detail).toBe("Email and phone number found in the text layer.");
-    expect(item(report, "headings").detail).toBe("Profile, Experience, Projects, Education, Publications, Skills, Languages");
-    expect(item(report, "pages").detail).toBe("1 page, limit 2");
+    expect(item(report, "headings").detail).toBe("Profile, Experience, Projects, Education, Certifications, Publications, Skills, Languages");
+    expect(item(report, "pages").detail).toBe("1 page");
     expect(report.text.map((entry) => [entry.id, entry.level, entry.title])).toEqual([
       ["characters", "ok", "Plain characters"],
       ["language", "ok", "Written in English"],
@@ -197,18 +205,45 @@ describe("checkResume", () => {
     expect(base.text.map((entry) => entry.id)).toEqual(["characters", "dates"]);
   });
 
-  it("warns when the resume runs over the page limit, and counts pages without one", async () => {
+  it("counts the pages, with no limit to hold them to (Resume length is gone, #83)", async () => {
     fake.text = resumeLines(tailored).join("\n");
     vi.mocked(renderPdf).mockResolvedValue(TWO_PAGES);
+    // A Resume length row left from before changes nothing.
     vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([{ key: "pageLimit", value: "1" }]));
-    const over = await check();
-    expect(over).toMatchObject({ pages: 2, maxPages: 1 });
-    expect(item(over, "pages")).toEqual({ id: "pages", level: "warn", title: "Over the page limit", detail: "2 pages, limit 1", fix: { kind: "settings", section: "documents" } });
+    const report = await check();
+    expect(report.pages).toBe(2);
+    expect(report).not.toHaveProperty("maxPages");
+    expect(item(report, "pages")).toEqual({ id: "pages", level: "ok", title: "No page limit", detail: "2 pages" });
+  });
 
-    vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([{ key: "pageLimit", value: "none" }]));
-    const free = await check();
-    expect(free.maxPages).toBeNull();
-    expect(item(free, "pages")).toEqual({ id: "pages", level: "ok", title: "No page limit", detail: "2 pages" });
+  it("follows the resume's sections: their order, the ones taken off and the headings it renames", async () => {
+    const order = ["summary", "experience", "volunteering", "education", "certifications", "projects", "publications", "references", "skills", "languages"];
+    vi.mocked(prisma.application.findUnique).mockResolvedValue(row({ sections: { order, off: ["publications"], titles: { experience: "Relevant experience" } } }) as never);
+    const printed = resumeLines({ ...tailored, publications: [] }).map((line) => (line === "Experience" ? "Relevant experience" : line));
+    vi.mocked(renderPdf).mockResolvedValue(pdfWith(printed));
+    const report = await check();
+    expect(item(report, "text-layer").level).toBe("ok");
+    expect(item(report, "headings").detail).toBe("Profile, Relevant experience, Education, Certifications, Projects, Skills, Languages");
+
+    // The base resume follows the order in Settings.
+    vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([{ key: "resumeSections", value: JSON.stringify({ order, off: ["publications"] }) }]));
+    vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines({ ...resumeContent(profile), publications: [] })));
+    const base = await check("base");
+    expect(item(base, "text-layer").level).toBe("ok");
+    expect(item(base, "headings").detail).toBe("Profile, Experience, Education, Certifications, Projects, Skills, Languages");
+  });
+
+  it("reads a sent application against the copy it was sent with (#299), not the profile as it is now", async () => {
+    const { photo, ...rest } = profile;
+    const sent = { ...rest, experience: profile.experience.map((role, index) => (index === 2 ? { ...role, role: "Web Designer" } : role)) };
+    const frozen = { profile: sent, themes: { RESUME: null, COVER_LETTER: null }, paper: "A4", dateFormat: "DAY_MONTH_YEAR", includeReferences: false, followedBase: true };
+    vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines(resumeContent({ ...sent, photo }, { units }, ENGLISH_LABELS))));
+    vi.mocked(prisma.application.findUnique).mockResolvedValue(row({ frozen }) as never);
+    expect(item(await check(), "text-layer").level).toBe("ok");
+
+    // The same PDF checked against today's profile misses today's title: the check reads the copy.
+    vi.mocked(prisma.application.findUnique).mockResolvedValue(row() as never);
+    expect(item(await check(), "text-layer").detail).toBe("The PDF's text layer is missing the title of the Studio Brik role. A parser reads that layer, not the picture of the page.");
   });
 
   it("warns when the file name doesn't carry the name, and takes the first name", async () => {
@@ -428,7 +463,7 @@ describe("checkResume", () => {
     vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines(resumeContent(profile, { units: germanUnits }, labels), labels)));
     const agreed = await check();
     expect(item(agreed, "language")).toEqual({ id: "language", level: "ok", title: "Written in German", detail: "The headings, dates and text agree." });
-    expect(item(agreed, "headings")).toMatchObject({ level: "ok", detail: "Profil, Berufserfahrung, Projekte, Ausbildung, Publikationen, Kenntnisse, Sprachen" });
+    expect(item(agreed, "headings")).toMatchObject({ level: "ok", detail: "Profil, Berufserfahrung, Projekte, Ausbildung, Zertifizierungen, Publikationen, Kenntnisse, Sprachen" });
 
     // A built-in language without its own headings prints the English ones, and says so.
     vi.mocked(prisma.application.findUnique).mockResolvedValue(row({ language: "Hebrew" }) as never);

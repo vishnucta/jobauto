@@ -125,11 +125,12 @@ describe("demo seed", () => {
     await seedDemo(db, { now });
     const ledgerly = await db.application.findFirstOrThrow({
       where: { company: "Ledgerly" },
-      include: { documents: { orderBy: { kind: "asc" } }, messages: true },
+      include: { documents: true, messages: true },
     });
     expect(matchScore(matchSchema.parse(ledgerly.match))).toEqual({ hit: 5, total: 7 });
 
-    const [resume, letter] = ledgerly.documents.map((document) => unitsSchema.parse(document.units));
+    const units = (kind: string) => unitsSchema.parse(ledgerly.documents.find((document) => document.kind === kind)?.units);
+    const [resume, letter] = [units("RESUME"), units("COVER_LETTER")];
     expect(resume.map((unit) => unit.label)).toEqual([
       "Summary",
       "Northwind Logistics role",
@@ -139,6 +140,7 @@ describe("demo seed", () => {
       "Skills",
       "MSc Design for Interaction",
       "BA Communication Design",
+      "Certification “Certified Accessibility Specialist”",
       "Publication “Doe, J., & Vermeer, K. (2016). Trust in…”",
       "Languages",
     ]);

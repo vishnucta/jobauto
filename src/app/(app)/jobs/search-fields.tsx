@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { Country } from "@/lib/job-search/countries";
-import { JOB_SOURCES, POSTED_WITHIN, RADII_KM, type JobSource, type RadiusKm, type SearchQuery, type SourceState } from "@/lib/job-search/search";
-import { SOURCE_INFO, sourceCovers } from "@/lib/job-search/sources";
+import { EXPERIENCE_LEVELS, JOB_SOURCES, POSTED_WITHIN, RADII_KM, type JobSource, type RadiusKm, type SearchQuery, type SourceState } from "@/lib/job-search/search";
+import { searchesWithin, SOURCE_INFO, sourceCovers } from "@/lib/job-search/sources";
 
 // A search's fields, as Find jobs asks them (E14-6) and Settings → Job agent
 // saves its search (E16-7).
@@ -47,7 +47,7 @@ export function searchCost(sources: readonly JobSource[]): string {
   return `Uses 1 search ${metered.length === 1 ? "from" : "each from"} ${named(metered)}`;
 }
 
-/** What, Where, Country, Within and Posted, for a grid; Remote only is RemoteOnlyField, Source is SourcePicker. */
+/** What, Where, Country, Within, Posted and Level, for a grid; Remote only is RemoteOnlyField, Source is SourcePicker. */
 export function SearchFields({
   value,
   onChange,
@@ -66,6 +66,9 @@ export function SearchFields({
   onBlur?: () => void;
 }) {
   const uncovered = uncoveredCountry(source, value, countries);
+  // Within is off only when none of the sources filters by distance (FreeHire on its own).
+  const sources = listOf(source);
+  const noRadius = sources.length > 0 && !searchesWithin(sources);
   return (
     <>
       <Input
@@ -89,8 +92,8 @@ export function SearchFields({
       <Select
         label="Within"
         value={String(value.radiusKm)}
-        disabled={!value.place.trim()}
-        hint={value.place.trim() ? undefined : "Add a place first"}
+        disabled={noRadius || !value.place.trim()}
+        hint={noRadius ? `${named(sources)} ${sources.length === 1 ? "has" : "have"} no distance filter` : value.place.trim() ? undefined : "Add a place first"}
         onChange={(event) => onChange({ radiusKm: Number(event.target.value) as RadiusKm })}
       >
         {RADII_KM.map((km) => (
@@ -101,6 +104,18 @@ export function SearchFields({
       </Select>
       <Select label="Posted" value={value.postedWithin} onChange={(event) => onChange({ postedWithin: event.target.value as SearchQuery["postedWithin"] })}>
         {POSTED_WITHIN.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
+      <Select
+        label="Level"
+        hint="Read from each posting's title and the years it asks for"
+        value={value.experience ?? "any"}
+        onChange={(event) => onChange({ experience: event.target.value as SearchQuery["experience"] })}
+      >
+        {EXPERIENCE_LEVELS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

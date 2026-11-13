@@ -8,6 +8,8 @@ import "./regenerate-unit";
 import "./refine";
 import "./write-email";
 import "./translate-documents";
+import "./write-document";
+import "./score-resume";
 import "./zip-pdfs";
 import "./import-profile";
 import "./draft-reply";

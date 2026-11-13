@@ -35,6 +35,10 @@ describe("buildExport (E10-4)", () => {
     // Projects with their skills (PRO-13).
     expect(file.profile.projects.map((entry) => entry.name)).toEqual(["Tidewater design tokens"]);
     expect(file.profile.projects.flatMap((entry) => entry.skillIds).length).toBe(await prisma().projectSkill.count());
+    // Certifications in their order, with their dates and switch (#293).
+    expect(file.profile.certifications).toEqual([
+      expect.objectContaining({ name: "Certified Accessibility Specialist", year: 2022, month: 6, expiryYear: 2028, credentialId: "IDI-20481", onResumes: true, sort: 0 }),
+    ]);
     // Publications in their order, with their switch (#218).
     expect(file.profile.publications).toEqual([expect.objectContaining({ citation: expect.stringMatching(/^\*\*Doe, J\.\*\*/), onResumes: true, sort: 0 })]);
     expect(file.profile.references.length).toBe(await prisma().reference.count());

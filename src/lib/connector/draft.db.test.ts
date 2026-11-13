@@ -46,10 +46,6 @@ vi.mock("@/lib/jobs/write-documents", async () => {
     },
   };
 });
-vi.mock("@/lib/page-limit", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/page-limit")>()),
-  fitResumeToPages: vi.fn(async () => ({ trimmed: [], fits: true })),
-}));
 
 const prisma = () => db.client!;
 

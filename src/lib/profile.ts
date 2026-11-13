@@ -1,4 +1,4 @@
-import { LanguageLevel } from "@/generated/prisma/enums";
+import { LanguageLevel, type CustomSectionFormat } from "@/generated/prisma/enums";
 import type { ProfilePhoto } from "@/lib/photo";
 
 /** Proficiency levels in the order the language select lists them (PRD PRO-4). */
@@ -107,13 +107,18 @@ export function fieldsFromBasics(basics: Basics): Record<ProfileKey, string | nu
   return { ...(fields as Record<BasicsField, string | null>), showAge: basics.showAge ? "true" : null };
 }
 
-export type SkillItem = { id: string; name: string };
+/** `group` is the group it's printed under on resumes, empty for none (#280). */
+export type SkillItem = { id: string; name: string; group: string };
 export type LanguageItem = { id: string; name: string; level: LanguageLevel };
 export type ExperienceItem = DateSpan & {
   id: string;
   role: string;
   company: string;
   location: string;
+  /** One line about the company or the role (#257), shown as written. */
+  descriptor: string;
+  /** Volunteering (#294): under its own heading on resumes, and not years of paid experience. */
+  volunteering: boolean;
   bullets: string;
   skillIds: string[];
 };
@@ -126,6 +131,19 @@ export type ProjectItem = DateSpan & {
   skillIds: string[];
 };
 export type EducationItem = DateSpan & { id: string; degree: string; school: string; notes: string };
+/** A certification (#293): when it was obtained, when it runs out (null when it doesn't), and where to verify it. */
+export type CertificationItem = {
+  id: string;
+  name: string;
+  issuer: string;
+  year: number | null;
+  month: number | null;
+  expiryYear: number | null;
+  expiryMonth: number | null;
+  credentialId: string;
+  link: string;
+  onResumes: boolean;
+};
 /** A publication (#218): the citation as written, with **bold** and *italic*, and where to read it. */
 export type PublicationItem = { id: string; citation: string; link: string; onResumes: boolean };
 export type ReferenceItem = {
@@ -136,6 +154,17 @@ export type ReferenceItem = {
   email: string;
   phone: string;
 };
+/** One item of a custom section (#298); its section's format decides which fields show. */
+export type CustomItem = DateSpan & { id: string; title: string; subtitle: string; details: string; link: string; onResumes: boolean };
+/** The formats a custom section can have, as the screens that pick one call them. */
+export const CUSTOM_SECTION_FORMATS = [
+  { value: "ENTRIES", label: "Entries", hint: "Each item has a title, where or with whom, dates, bullets and a link, like a role." },
+  { value: "LINES", label: "Lines", hint: "Each item is free text with an optional link, like a publication. One long line makes a paragraph." },
+  { value: "INLINE", label: "Inline", hint: "Items share one line, like “Climbing · Chess · Film photography”." },
+] as const satisfies readonly { value: CustomSectionFormat; label: string; hint: string }[];
+
+/** A section the user made (#298), such as Awards. */
+export type CustomSection = { id: string; title: string; format: CustomSectionFormat; items: CustomItem[] };
 /** A fact the user tells the AI (PRO-14): about themselves, or for one application. */
 export type FactItem = { id: string; text: string };
 export type ProfileData = {
@@ -148,8 +177,12 @@ export type ProfileData = {
   projects: ProjectItem[];
   education: EducationItem[];
   /** In the order set by hand, with the ones kept off resumes too. */
+  certifications: CertificationItem[];
+  /** In the order set by hand, with the ones kept off resumes too. */
   publications: PublicationItem[];
   references: ReferenceItem[];
+  /** Sections the user made (#298), oldest first, with their items in the order set by hand. */
+  customSections: CustomSection[];
   /** "Facts about me": never on a document, only given to the AI. */
   facts: FactItem[];
 };
@@ -159,7 +192,23 @@ export function factTexts(facts: { text: string }[]): string[] {
   return facts.map((fact) => fact.text.trim()).filter(Boolean);
 }
 
+/** The certifications a resume shows: those with "Show on resumes" on and a name. */
+export function resumeCertifications(certifications: readonly CertificationItem[]): CertificationItem[] {
+  return certifications.filter((entry) => entry.onResumes && entry.name.trim() !== "");
+}
+
+/** How a certification's part of a tailored resume is called: `Certification “Certified Accessibility Specialist”`. */
+export const certificationLabel = (name: string) => `Certification “${name.trim() || "Untitled"}”`;
+
 /** The publications a resume shows: those with "Show on resumes" on and a citation. */
+/** The custom sections with only what resumes show: an item with nothing in it or kept off them isn't. A section left empty stays out too. */
+export function resumeCustomSections(sections: readonly CustomSection[]): CustomSection[] {
+  return sections.flatMap((section) => {
+    const items = section.items.filter((item) => item.onResumes && (item.title.trim() !== "" || (section.format === "ENTRIES" && item.details.trim() !== "")));
+    return items.length > 0 ? [{ ...section, items }] : [];
+  });
+}
+
 export function resumePublications(publications: readonly PublicationItem[]): PublicationItem[] {
   return publications.filter((entry) => entry.onResumes && entry.citation.trim() !== "");
 }
@@ -183,7 +232,8 @@ export function ageOn(dob: string, today: Date): number | null {
 
 /**
  * Profile strength (PRO-9): filled required Basics fields ÷ 6 × 40, plus 30
- * for any experience, 15 for any education and 15 for any skills. Optional
+ * for any paid role (volunteering alone doesn't count, #294), 15 for any
+ * education and 15 for any skills. Optional
  * sections and fields don't count (#216), so it reaches 100% without them.
  */
 export function profileStrength(profile: {
@@ -235,11 +285,16 @@ export function sameName(a: string, b: string): boolean {
   return a.trim().localeCompare(b.trim(), undefined, { sensitivity: "accent" }) === 0;
 }
 
-/** Months of experience in the profile, counting overlapping roles once. */
+/** The paid roles: experience without volunteering (#294). */
+export function paidRoles<T extends { volunteering: boolean }>(experience: readonly T[]): T[] {
+  return experience.filter((entry) => !entry.volunteering);
+}
+
+/** Months of paid experience in the profile, counting overlapping roles once; volunteering doesn't count (#294). */
 export function experienceMonths(profile: Pick<ProfileData, "experience">, today: Date): number {
   const now = today.getFullYear() * 12 + today.getMonth();
   const months = new Set<number>();
-  for (const entry of profile.experience) {
+  for (const entry of paidRoles(profile.experience)) {
     if (entry.startYear === null) continue;
     const start = entry.startYear * 12 + (entry.startMonth ?? 1) - 1;
     const end = entry.current

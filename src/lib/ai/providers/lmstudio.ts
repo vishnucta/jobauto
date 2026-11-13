@@ -2,6 +2,8 @@ import "server-only";
 
 import type { ReasoningEffort } from "openai/resources/shared";
 
+import type { UsageSink } from "@/lib/usage";
+
 import { AiError, toAiError } from "../errors";
 import type { ChatAnswer, ChatCall } from "../provider";
 import { keyGuardedFetch } from "./guarded-fetch";
@@ -43,9 +45,10 @@ export class LmStudioProvider extends OpenAICompatibleProvider {
     private readonly apiKey: string | null,
     model: string | null,
     timeoutMs: number,
+    onUsage?: UsageSink,
   ) {
     const root = address.replace(/\/+$/, "").replace(/(\/api)?\/v1$/, "");
-    super("LMSTUDIO", `${root}/v1`, apiKey, model, timeoutMs);
+    super("LMSTUDIO", `${root}/v1`, apiKey, model, timeoutMs, onUsage);
     this.root = root;
     this.api = apiKey ? keyGuardedFetch() : fetch;
   }
@@ -65,6 +68,11 @@ export class LmStudioProvider extends OpenAICompatibleProvider {
     return call.effort === "low" ? "none" : undefined;
   }
 
+  /** The room for thinking is made in chat(), to fit the context models are loaded with. */
+  protected override thinkingRoom(): number {
+    return 0;
+  }
+
   protected override async fetchModels(signal: AbortSignal): Promise<string[]> {
     try {
       const models = await this.models(signal);
@@ -73,7 +81,7 @@ export class LmStudioProvider extends OpenAICompatibleProvider {
       return models
         .filter((model) => model.type === "llm")
         .map((model) => model.key)
-        .sort();
+        .sort((a, b) => a.localeCompare(b));
     } catch (error) {
       throw this.plainly(error, this.model ?? "");
     }

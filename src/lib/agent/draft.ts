@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
 
 import { DISMISSED_TRIM, stringsOf } from "./candidates";
+import { lockAgentSearches } from "./searches";
 
 // A candidate's draft (E16-5): written the way New application writes one,
 // kept off Applications until it's approved (#195), and never sent.
@@ -86,7 +87,7 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
     await context.step(`Writing the draft for ${name}`);
     const settings = await loadSettings();
     const documents = await writeDocumentsJob.run(
-      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "" },
+      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: "both" },
       context,
     );
     // Keep the whole text, so a retry doesn't fetch it again.
@@ -182,11 +183,14 @@ export async function dismissCandidate(candidateId: string): Promise<{ undo: Dis
   const hadDraft = Boolean(candidate.applicationId) || candidate.status !== AgentCandidateStatus.SCORED;
   await dismissPosting(foundFromCandidate(candidate));
   await prisma.$transaction(async (tx) => {
-    // Locked, so a draft that's just being created either lands first and is deleted here, or finds it dismissed and isn't made.
-    await tx.$queryRaw`SELECT 1 FROM "AgentCandidate" WHERE id = ${candidateId} FOR UPDATE`;
+    // Serialized with attribution, so a scan can't put labels back after the dismissal (public PR 61).
+    await lockAgentSearches(tx);
+    // Locked (by a write that changes nothing), so a draft that's just being created either lands first and is deleted here, or finds it dismissed and isn't made.
+    await tx.$executeRaw`UPDATE "AgentCandidate" SET id = id WHERE id = ${candidateId}`;
     const current = await tx.agentCandidate.findUniqueOrThrow({ where: { id: candidateId }, select: { applicationId: true } });
     if (current.applicationId) await tx.application.deleteMany({ where: { id: current.applicationId } });
     await tx.agentCandidate.update({ where: { id: candidateId }, data: { status: AgentCandidateStatus.DISMISSED, ...DISMISSED_TRIM } });
+    await tx.agentCandidateSearch.deleteMany({ where: { candidateId } });
   });
   const { id, place, remote, salary, postedAt, url, via, description, complete, reasons, redFlags } = candidate;
   return { undo: hadDraft ? null : { id, place, remote, salary, postedAt, url, via, description, complete, reasons, redFlags } };

@@ -14,6 +14,7 @@ import {
 
 const row = (id: string, extra: Partial<Sortable> = {}): Sortable & { id: string } => ({
   id,
+  score: null,
   role: "Designer",
   company: "Acme",
   status: "SENT",
@@ -57,6 +58,12 @@ describe("filters", () => {
 });
 
 describe("sortRows (E9-3)", () => {
+  it("sorts by the resume's score, best first, with unscored ones last either way (#370)", () => {
+    const rows = [row("a", { score: 60 }), row("b"), row("c", { score: 90 })];
+    expect(sortRows(rows, { key: "score", reversed: false }).map((entry) => entry.id)).toEqual(["c", "a", "b"]);
+    expect(sortRows(rows, { key: "score", reversed: true }).map((entry) => entry.id)).toEqual(["a", "c", "b"]);
+  });
+
   it("sorts the latest update first by default", () => {
     const rows = [row("old", { updatedAt: new Date(2026, 7, 1) }), row("new", { updatedAt: new Date(2026, 8, 20) })];
     expect(ids(sortRows(rows, DEFAULT_SORT))).toEqual(["new", "old"]);

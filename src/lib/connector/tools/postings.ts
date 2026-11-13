@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { isAiUsable } from "@/lib/ai/config";
+import { scoringProblem } from "@/lib/scoring";
+import { loadScoringConfig } from "@/lib/scoring/config";
 import { countryName } from "@/lib/job-search/countries";
 import {
   DEFAULT_RADIUS_KM,
@@ -37,7 +39,7 @@ import { failure, postingLine, started, text, type ToolContext } from "../kit";
 
 const LISTS = ["saved", "dismissed", "searches"] as const;
 /** The From filter's sources, as the URL spells them (?from=client). */
-const FROM = ["jsearch", "serpapi", "adzuna", "jooble", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
+const FROM = ["jsearch", "serpapi", "adzuna", "jooble", "freehire", "arbeitsagentur", "client"] as const satisfies readonly Lowercase<PostingOrigin>[];
 const CHANGES = ["save", "unsave", "dismiss", "restore"] as const;
 
 /** What each change does, as the button on a posting does it. */
@@ -140,7 +142,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         "With a search_id: the postings that search found, numbered, without asking the job source again.",
       inputSchema: z.object({
         view: z.enum(LISTS).optional().describe("Only this list: saved, dismissed or searches. Without it, all three."),
-        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, jooble, arbeitsagentur, or client for what AI clients added"),
+        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur, or client for what AI clients added"),
         search_id: z.string().min(1).max(100).optional().describe("A past search, to list the postings it found instead"),
         from: z.number().int().min(1).optional().describe("Where each list (or the search) starts. Defaults to 1."),
         limit: z.number().int().min(1).max(100).optional().describe("At most this many per list. Defaults to 20."),
@@ -321,7 +323,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
     {
       title: "Have Dossier score a posting",
       description:
-        "Has Dossier's own AI model score how well one posting fits the profile, as the Score button in Find jobs does, only when an AI provider is set up in Dossier's settings. " +
+        "Has Dossier's own AI model score how well one posting fits the profile, as the Score button in Find jobs does, with the scorer chosen in Settings → Scoring (Dossier's AI model, or Jev). " +
         "Without one, score it yourself and save it with save_job_scores. Follow it with check_task.",
       inputSchema: z.object({
         search_id: z.string().min(1).max(100).optional().describe("The search the posting is from"),
@@ -331,9 +333,13 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
     async ({ search_id, number, posting_id }) => {
-      if (!(await isAiUsable())) {
+      // Settings → Scoring decides: the AI model, or Jev with its own key (#274).
+      const scoring = await loadScoringConfig();
+      if (scoring.scorer === "AI" && !(await isAiUsable())) {
         return failure("Dossier has no AI model of its own set up. Score it yourself: get_profile and get_posting, then save_job_scores.");
       }
+      const problem = await scoringProblem(scoring);
+      if (problem) return failure(problem);
       if (!posting_id && !(search_id && number)) return failure("Give search_id and number, or posting_id.");
       const search = search_id && !posting_id ? await loadSearch(search_id) : null;
       if (search_id && !posting_id && !search) return failure(SEARCH_GONE);

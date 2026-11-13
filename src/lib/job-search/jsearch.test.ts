@@ -12,7 +12,10 @@ const ninja = { key: "ak_test", host: "openwebninja" as const };
 const rapid = { key: "rapid-test", host: "rapidapi" as const };
 
 beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("JSearch search", () => {
   it("asks OpenWeb Ninja's search-v2 with the key, place, country, radius and recency", async () => {
@@ -27,6 +30,20 @@ describe("JSearch search", () => {
       date_posted: "week",
       radius: "50",
     });
+  });
+
+  it("asks for the level as far as JSearch can filter it (public issue 59)", async () => {
+    const requests = stubFetch(() => json(jsearchV2Page));
+    await jsearch.search({ ...query, experience: "intern" }, ninja, null);
+    await jsearch.search({ ...query, experience: "junior" }, ninja, null);
+    await jsearch.search({ ...query, experience: "mid" }, ninja, null);
+    await jsearch.search({ ...query, experience: "lead" }, ninja, null);
+    expect(requests.map(({ url }) => [url.searchParams.get("employment_types"), url.searchParams.get("job_requirements")])).toEqual([
+      ["INTERN", null],
+      [null, "under_3_years_experience"],
+      [null, null],
+      [null, "more_than_3_years_experience"],
+    ]);
   });
 
   it("asks RapidAPI's search-v2 with its own headers, and pages by cursor", async () => {
@@ -107,7 +124,7 @@ describe("JSearch search", () => {
     stubFetch(() => json({ data: [jsearchV2LastPage.data.jobs[0]] }));
     await expect(jsearch.search(query, rapid, null)).rejects.toMatchObject({
       problem: "changed",
-      detail: "JSEARCH: /search-v2: unexpected answer",
+      detail: "JSEARCH: /search-v2: unexpected answer (keys: data)",
     });
   });
 
@@ -158,7 +175,28 @@ describe("JSearch search", () => {
     stubFetch(() => json({ data: { results: [] } }));
     const error = await jsearch.search(query, ninja, null).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(JobSearchError);
-    expect(error).toMatchObject({ problem: "changed", detail: "JSEARCH: /jsearch/search-v2: unexpected answer" });
+    expect(error).toMatchObject({ problem: "changed", detail: "JSEARCH: /jsearch/search-v2: unexpected answer (keys: data)" });
+  });
+
+  it("names the keys of an answer it can't read, never their values (#231)", async () => {
+    stubFetch(() => json({ status: "ERROR", message: "Invalid query: product designer in Hamburg" }));
+    await expect(jsearch.search(query, ninja, null)).rejects.toMatchObject({
+      problem: "changed",
+      detail: "JSEARCH: /jsearch/search-v2: unexpected answer (keys: status, message)",
+    });
+    stubFetch(() => json(["product designer in Hamburg"]));
+    await expect(jsearch.search(query, ninja, null)).rejects.toMatchObject({ detail: "JSEARCH: /jsearch/search-v2: unexpected answer" });
+  });
+
+  it("gives a search 45 seconds, then says it isn't answering, as before (#231)", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
+    stubFetch((_, signal) => Promise.reject(signal?.reason ?? new Error("aborted")));
+    await expect(jsearch.search(query, ninja, null)).rejects.toMatchObject({
+      problem: "unavailable",
+      message: "JSearch isn't answering right now. Try again in a minute.",
+      detail: "JSEARCH: /jsearch/search-v2: timed out",
+    });
+    expect(timeout).toHaveBeenCalledWith(45_000);
   });
 
   it("says the source isn't answering when it can't be reached", async () => {
@@ -180,10 +218,12 @@ describe("JSearch details and test", () => {
     expect(requests).toHaveLength(1);
   });
 
-  it("tests the key with one small search", async () => {
+  it("tests the key with one small search, as patient as a search", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
     const requests = stubFetch(() => json(jsearchV2LastPage));
     await jsearch.test(ninja);
     expect(requests).toHaveLength(1);
     expect(requests[0].url.searchParams.get("query")).toBe("developer");
+    expect(timeout).toHaveBeenCalledWith(45_000);
   });
 });

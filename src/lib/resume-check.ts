@@ -7,6 +7,7 @@ import { readJson } from "@/lib/application-documents";
 import { documentLabels, ENGLISH_LABELS, type DocumentLabels } from "@/lib/document-labels";
 import { detectLanguageName, knownLanguage } from "@/lib/document-language";
 import { updateDocuments } from "@/lib/document-units";
+import { frozenProfile, readFrozenCopy } from "@/lib/frozen-copy";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
 import { normalText } from "@/lib/job-search/search";
 import { renderDocumentPdf } from "@/lib/pdf/documents";
@@ -14,13 +15,14 @@ import { countPdfPages } from "@/lib/pdf/pages";
 import { prisma } from "@/lib/prisma";
 import { sameName, type ProfileData } from "@/lib/profile";
 import { loadProfile } from "@/lib/profile-data";
-import { resumeContent, type ResumeContent } from "@/lib/resume-content";
-import { maxPages, type SettingsData } from "@/lib/settings";
+import { resumeContent, sectionsWithContent, type ResumeContent } from "@/lib/resume-content";
+import { customKey, inSidebar, sectionHeading, sectionLayoutSchema, shownSections, type SectionLayout } from "@/lib/resume-sections";
+import type { SettingsData } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
 import { countriesNamed, DACH, placeOf, reach } from "@/lib/startups/place";
 import { loadTheme, THEME_FIELDS } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, hasSidebar } from "@/lib/themes";
-import { isBulletUnit, isPublicationUnit, plainText } from "@/lib/unit-text";
+import { isBulletUnit, isVerbatimUnit, plainText } from "@/lib/unit-text";
 
 // The ATS check of a resume PDF: whether an applicant-tracking system's
 // parser would read it as the page shows it. The resume is printed as
@@ -53,7 +55,6 @@ export type ResumeCheck = {
   document: "base" | "resume";
   fileName: string;
   pages: number;
-  maxPages: number | null;
   /** Whether a parser gets the text: the text layer, contact details, columns, headings, pages, file name and photo. */
   reads: CheckItem[];
   /** The posting's requirements, for a tailored resume with some; null for the base resume. The counts leave the job title out. */
@@ -102,6 +103,8 @@ type Inputs = {
   settings: SettingsData;
   /** Whether the printed layout has a sidebar: a tailored resume's folds into one column unless it follows the theme's (APP-4). */
   split: boolean;
+  /** The sections' order, which are off and what they're called (#297, #339): the application's own, or the base resume's. */
+  sections: SectionLayout;
   /** The document's language by name; "" for an application without one recorded. */
   language: string;
   /** A tailored resume's parts; the base resume prints the profile. */
@@ -118,7 +121,8 @@ type Inputs = {
 /**
  * What the check needs, loaded the way the print pages load it, or why
  * there's nothing to check. Not loadDocuments(): its notFound() is for
- * pages, and the connector asks here too.
+ * pages, and the connector asks here too. So what loadDocuments() does for
+ * a sent application's copy (#299) and for the sections is done here too.
  */
 async function loadInputs(doc: "base" | "resume", applicationId: string): Promise<Inputs | { error: string }> {
   const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
@@ -129,6 +133,7 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
       profile,
       settings,
       split: hasSidebar(baseTheme.layout),
+      sections: settings.resumeSections,
       language: settings.resumeLanguage ?? "English",
       includeReferences: settings.includeRefs,
       place: "",
@@ -147,6 +152,8 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
       match: true,
       followThemeLayout: true,
       showPhoto: true,
+      frozen: true,
+      sections: true,
       documents: { where: { kind: DocumentKind.RESUME }, select: { units: true, theme: { select: THEME_FIELDS } } },
     },
   });
@@ -154,16 +161,20 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
   const row = application.documents[0];
   const units = row && readJson(unitsSchema, row.units);
   if (!row || !units) return { error: NO_RESUME };
-  const theme = row.theme ?? baseTheme;
+  // Once it was sent, it's drawn from what it was sent with (#299).
+  const copy = readFrozenCopy(application.frozen);
+  const theme = copy?.themes.RESUME ?? row.theme ?? baseTheme;
   const extracted = readJson(extractedSchema, application.extracted);
+  const sections = readJson(sectionLayoutSchema, application.sections) ?? settings.resumeSections;
   return {
     document: "resume",
-    profile,
+    profile: copy ? frozenProfile(copy, profile) : profile,
     settings,
     split: application.followThemeLayout && hasSidebar(theme.layout),
+    sections,
     language: application.language,
     units,
-    includeReferences: settings.includeRefs && extracted?.asksForReferences === true,
+    includeReferences: (copy ? copy.includeReferences : settings.includeRefs && extracted?.asksForReferences === true) || sections.withReferences === true,
     showPhoto: application.showPhoto,
     place: [application.location, application.mode].join(" "),
     posting: { role: application.role.trim() || extracted?.role?.trim() || "", extracted, match: readJson(matchSchema, application.match) },
@@ -185,21 +196,20 @@ export async function checkResume(doc: "base" | "resume", applicationId = ""): P
 
   const labels = documentLabels(inputs.language);
   const content = resumeContent(inputs.profile, { units: inputs.units, includeReferences: inputs.includeReferences, showPhoto: inputs.showPhoto }, labels);
-  const headings = printedHeadings(content, labels, inputs.split);
-  const limit = maxPages(inputs.settings.pageLimit);
+  const shown = shownSections(inputs.sections, sectionsWithContent(content));
+  const headings = printedHeadings(content, labels, inputs, shown);
   const photo = photoItem(inputs, content);
 
   return {
     document: inputs.document,
     fileName: rendered.fileName,
     pages: pages || read.totalPages,
-    maxPages: limit,
     reads: [
-      textLayerItem(expectedTexts(content, headings), fold(raw)),
+      textLayerItem(expectedTexts(content, headings, shown), fold(raw)),
       contactItem(inputs.profile, raw),
       columnsItem(inputs),
       headingsItem(inputs, headings, labels),
-      pagesItem(pages || read.totalPages, limit),
+      pagesItem(pages || read.totalPages),
       fileNameItem(rendered.fileName, inputs.profile),
       ...(photo ? [photo] : []),
     ],
@@ -213,19 +223,29 @@ export async function checkResume(doc: "base" | "resume", applicationId = ""): P
   };
 }
 
-/** The section headings the resume prints (src/components/documents/resume-document.tsx), main column first. */
-function printedHeadings(content: ResumeContent, labels: DocumentLabels, split: boolean): string[] {
-  const headings = [
-    content.summary && labels.profile,
-    content.experience.length > 0 && labels.experience,
-    content.projects.length > 0 && labels.projects,
-    content.education.length > 0 && labels.education,
-    content.publications.length > 0 && labels.publications,
-    content.references.length > 0 && labels.references,
-    split && content.contacts.length > 0 && labels.contact,
-    content.skills && labels.skills,
-    content.languages && labels.languages,
-  ];
+/**
+ * The section headings the resume prints (src/components/documents/resume-document.tsx),
+ * main column first: the sections it shows, in its order, by what it calls them (#297, #339).
+ */
+function printedHeadings(content: ResumeContent, labels: DocumentLabels, { split, sections, profile }: Inputs, shown: string[]): string[] {
+  const usual: Record<string, string> = {
+    summary: labels.profile,
+    experience: labels.experience,
+    volunteering: labels.volunteering,
+    projects: labels.projects,
+    education: labels.education,
+    certifications: labels.certifications,
+    publications: labels.publications,
+    references: labels.references,
+    skills: labels.skills,
+    languages: labels.languages,
+    // A section of the user's own prints its heading as written (#298).
+    ...Object.fromEntries(content.customSections.map((section) => [customKey(section.id), section.title])),
+  };
+  const heading = (key: string) => sectionHeading(sections, key, usual[key] ?? "");
+  // A sidebar keeps Skills, Languages and the inline sections, after the contact details, wherever they are in the order.
+  const side = (key: string) => split && inSidebar(key, profile.customSections);
+  const headings = [...shown.filter((key) => !side(key)).map(heading), split && content.contacts.length > 0 && labels.contact, ...shown.filter(side).map(heading)];
   return headings.filter((heading): heading is string => typeof heading === "string" && heading !== "");
 }
 
@@ -240,8 +260,9 @@ type Expected = {
   loose?: boolean;
 };
 
-/** What the text layer must hold, each named for the report: the headings, every title and the start of every bullet. */
-function expectedTexts(content: ResumeContent, headings: string[]): Expected[] {
+/** What the text layer must hold, each named for the report: the headings, and every title and the start of every bullet in the sections shown. */
+function expectedTexts(content: ResumeContent, headings: string[], shown: string[]): Expected[] {
+  const on = (key: string) => shown.includes(key);
   const start = (bullet: string) =>
     UNSPACED.test(bullet) ? fold(bullet).replace(/ /g, "").slice(0, BULLET_CHARACTERS) : fold(bullet).split(" ").slice(0, BULLET_WORDS).join(" ");
   const entry = (name: string, title: string, bullets: string[]): Expected[] => [
@@ -252,9 +273,11 @@ function expectedTexts(content: ResumeContent, headings: string[]): Expected[] {
     { label: "your name", text: content.name },
     { label: "the headline", text: content.headline },
     ...headings.map((heading) => ({ label: `the ${heading} heading`, text: heading, loose: true })),
-    ...content.experience.flatMap((role) => entry(`${role.company || role.role} role`, role.role, role.bullets)),
-    ...content.projects.flatMap((project) => entry(`${project.name} project`, project.name, project.bullets)),
-    ...content.education.map((entry) => ({ label: `the ${entry.degree || entry.school} entry`, text: entry.degree || entry.school })),
+    ...(on("experience") ? content.experience : []).flatMap((role) => entry(`${role.company || role.role} role`, role.role, role.bullets)),
+    ...(on("volunteering") ? content.volunteering : []).flatMap((role) => entry(`${role.company || role.role} role`, role.role, role.bullets)),
+    ...(on("projects") ? content.projects : []).flatMap((project) => entry(`${project.name} project`, project.name, project.bullets)),
+    ...(on("education") ? content.education : []).map((entry) => ({ label: `the ${entry.degree || entry.school} entry`, text: entry.degree || entry.school })),
+    ...(on("certifications") ? content.certifications : []).map((entry) => ({ label: `the ${entry.name} certification`, text: entry.name })),
   ]
     .filter((expected) => fold(expected.text) !== "")
     .map((expected) => (UNSPACED.test(expected.text) ? { ...expected, loose: true } : expected));
@@ -322,11 +345,9 @@ function headingsItem({ document, language }: Inputs, headings: string[], labels
   return { id: "headings", level: "ok", title: "Standard headings", detail: list };
 }
 
-function pagesItem(pages: number, limit: number | null): CheckItem {
-  const count = `${pages} ${pages === 1 ? "page" : "pages"}`;
-  if (limit === null) return { id: "pages", level: "ok", title: "No page limit", detail: count };
-  if (pages > limit) return { id: "pages", level: "warn", title: "Over the page limit", detail: `${count}, limit ${limit}`, fix: { kind: "settings", section: "documents" } };
-  return { id: "pages", level: "ok", title: "Within the page limit", detail: `${count}, limit ${limit}` };
+/** The pages it printed. Resume length is gone (#83): nothing holds a resume to a number of pages, so they're only counted. */
+function pagesItem(pages: number): CheckItem {
+  return { id: "pages", level: "ok", title: "No page limit", detail: `${pages} ${pages === 1 ? "page" : "pages"}` };
 }
 
 /** Whether the file name says whose resume it is, by the profile's name or first name (SET-8). */
@@ -462,7 +483,7 @@ function charactersItem(raw: string, { document, units }: Inputs): CheckItem {
   if (document === "base") {
     return { id: "characters", level: "fail", title, detail: `${list}. The base resume prints the profile's text, so fix them on the Profile screen.` };
   }
-  if (!(units ?? []).some((unit) => !isPublicationUnit(unit.id) && FIXABLE.test(unit.text))) {
+  if (!(units ?? []).some((unit) => !isVerbatimUnit(unit.id) && FIXABLE.test(unit.text))) {
     return { id: "characters", level: "fail", title, detail: `${list}. They print from your profile (the headline, a title or a publication), so fix them on the Profile screen.` };
   }
   return {
@@ -516,13 +537,14 @@ function datesItem(raw: string, labels: DocumentLabels): CheckItem {
  * or an invisible character a model left behind goes. Nothing else changes:
  * a bullet keeps its "1.", and only a line the normaliser empties, or a
  * bullet character it uncovers, goes.
- * Publications stay word for word (#218).
+ * Publications, certifications and sections of the user's own stay word
+ * for word (#218, #293, #298).
  */
 export async function cleanDocumentText(applicationId: string): Promise<void> {
   await updateDocuments(applicationId, async (documents) => {
     for (const kind of [DocumentKind.RESUME, DocumentKind.COVER_LETTER]) {
       for (const unit of documents[kind] ?? []) {
-        if (!isPublicationUnit(unit.id)) unit.text = plainCharacters(unit.text, isBulletUnit(unit.id));
+        if (!isVerbatimUnit(unit.id)) unit.text = plainCharacters(unit.text, isBulletUnit(unit.id));
       }
     }
   });

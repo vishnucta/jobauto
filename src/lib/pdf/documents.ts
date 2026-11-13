@@ -5,7 +5,9 @@ import { resolveFileName } from "@/lib/file-name";
 import { prisma } from "@/lib/prisma";
 import { loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
+import { FIT_LEVELS } from "@/lib/themes";
 
+import { countPdfPages, printBasePath } from "./pages";
 import { renderPdf } from "./render";
 
 // The documents Dossier makes PDFs of (RES-5, APP-12): the base resume, and
@@ -29,10 +31,10 @@ export async function renderDocumentPdf(doc: PdfDocument, applicationId = ""): P
   const date = new Date();
 
   if (doc === "base") {
-    return {
-      pdf: await renderPdf("/print/base"),
-      fileName: resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, date }),
-    };
+    // "Fit to one page" (public issue 69): squeezed a step at a time until it fits, as the preview does.
+    let pdf = await renderPdf(printBasePath());
+    for (let fit = 1; settings.fitBaseResume && fit <= FIT_LEVELS && countPdfPages(pdf) > 1; fit++) pdf = await renderPdf(printBasePath(fit));
+    return { pdf, fileName: resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, date }) };
   }
 
   const application = APPLICATION_ID.test(applicationId)

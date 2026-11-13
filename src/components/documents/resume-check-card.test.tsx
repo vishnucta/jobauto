@@ -10,11 +10,10 @@ const report: ResumeCheck = {
   document: "resume",
   fileName: "Jane Doe – Ledgerly – Resume.pdf",
   pages: 2,
-  maxPages: 1,
   reads: [
     { id: "text-layer", level: "ok", title: "Text reads as text", detail: "Every heading, title and bullet is in the PDF's text layer (31 checked)." },
     { id: "columns", level: "warn", title: "Two columns", detail: "Parsers that sort text by its position mix the columns.", fix: { kind: "single-column" } },
-    { id: "pages", level: "warn", title: "Over the page limit", detail: "2 pages, limit 1", fix: { kind: "settings", section: "documents" } },
+    { id: "file-name", level: "warn", title: "File name without your name", detail: "Recruiters keep many files: put {name} or {first} in the pattern in Settings → Documents.", fix: { kind: "settings", section: "documents" } },
     { id: "photo", level: "warn", title: "Photo on the resume", detail: "Where this posting is (United Kingdom), a photo is unusual.", fix: { kind: "photo" } },
   ],
   requirements: {
@@ -70,7 +69,7 @@ describe("ResumeCheckCard", () => {
     expect(onFix).toHaveBeenLastCalledWith({ kind: "clean-up" });
     await user.click(screen.getByRole("button", { name: "Set the language to German" }));
     expect(onFix).toHaveBeenLastCalledWith({ kind: "language", language: "German" });
-    expect(within(row("Over the page limit")).getByRole("link", { name: "Open Settings → Documents" })).toHaveAttribute("href", "/settings?section=documents");
+    expect(within(row("File name without your name")).getByRole("link", { name: "Open Settings → Documents" })).toHaveAttribute("href", "/settings?section=documents");
     expect(within(row("Dates in one style")).queryByRole("button")).not.toBeInTheDocument();
   });
 

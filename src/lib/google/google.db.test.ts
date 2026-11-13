@@ -24,14 +24,20 @@ vi.mock("@/lib/time-zone", () => ({ userTimeZone: async () => "Europe/Berlin", l
 
 import { encryptSecret, GOOGLE_TOKEN } from "@/lib/secrets";
 
+import { googleConnection, saveGoogleAccount } from "./account";
 import { sendApplicationEmail, sendReply } from "./send";
 import { syncInbox } from "./sync";
 
 const prisma = () => db.client!;
 const b64 = (text: string) => Buffer.from(text).toString("base64url");
 
-/** `history`: when Gmail added it; before the mailbox's 200 unless given. `deleted`: listed, but gone when fetched. */
-type Mail = { id: string; threadId: string; from: string; subject: string; text: string; labels?: string[]; date?: string; history?: number; deleted?: boolean };
+/**
+ * `history`: when Gmail added it; before the mailbox's 200 unless given.
+ * `deleted`: listed, but gone when fetched. `refuse`: how many times Gmail
+ * answers 403 for its rate limit before giving it (Infinity: always);
+ * `forbid`: 403 for a missing permission.
+ */
+type Mail = { id: string; threadId: string; from: string; subject: string; text: string; labels?: string[]; date?: string; history?: number; deleted?: boolean; refuse?: number; forbid?: boolean };
 const gmailMessage = ({ id, threadId, from, subject, text, labels = ["INBOX"], date = "2026-10-17T13:02:00Z" }: Mail) => ({
   id,
   threadId,
@@ -70,9 +76,19 @@ function fakeGoogle(url: string, init?: RequestInit): Response {
   }
   const id = /messages\/([^/?]+)/.exec(path)?.[1];
   const mail = mailbox.find((entry) => entry.id === id);
+  const refused = (reason: string) =>
+    new Response(JSON.stringify({ error: { code: 403, message: reason, errors: [{ reason, domain: "usageLimits" }] } }), { status: 403, headers: { "content-type": "application/json", "retry-after": "0" } });
+  if (mail?.forbid) return refused("insufficientPermissions");
+  if (mail?.refuse) {
+    mail.refuse -= 1;
+    return refused("rateLimitExceeded");
+  }
   if (mail && !mail.deleted) return json(gmailMessage(mail));
   return new Response("not found", { status: 404 });
 }
+
+/** Earlier tests leave an hour-long access token in memory; without it, the refresh token is asked for. */
+const forgetAccessTokens = () => (globalThis as { googleTokens?: Map<string, unknown> }).googleTokens?.clear();
 
 const scopes = "openid email https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly";
 
@@ -99,7 +115,7 @@ beforeEach(async () => {
     },
   });
   provider.current = new MockProvider({
-    reply: () => ({ kind: "INTERVIEW", summary: "Invites you to a call.", questions: ["What is your notice period?"], confirmedTime: null }),
+    reply: () => ({ kind: "INTERVIEW", summary: "Invites you to a call.", questions: ["What is your notice period?"], confirmedTime: null, unrelated: false }),
   });
 });
 
@@ -131,7 +147,7 @@ describe("the inbox check (E15-3)", () => {
       { id: "m4", threadId: "t4", from: "Deals <deals@shop.example>", subject: "Sale", text: "50% off", labels: ["INBOX", "CATEGORY_PROMOTIONS"] },
     ];
     const result = await syncInbox();
-    expect(result).toEqual({ fetched: 4, kept: 2, read: 2 });
+    expect(result).toEqual({ fetched: 4, kept: 2, read: 2, unread: 0 });
 
     const kept = await prisma().emailMessage.findMany({ where: { direction: "INCOMING" }, orderBy: { gmailId: "asc" } });
     expect(kept.map((email) => [email.gmailId, email.applicationId, email.kind, email.suggestedStatus])).toEqual([
@@ -145,7 +161,7 @@ describe("the inbox check (E15-3)", () => {
 
     // The next check carries on from the history: only what's new since.
     mailbox.push({ id: "m6", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "Wednesday 14:00 works.", history: 250 });
-    expect(await syncInbox()).toEqual({ fetched: 1, kept: 1, read: 1 });
+    expect(await syncInbox()).toEqual({ fetched: 1, kept: 1, read: 1, unread: 0 });
     expect((await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).historyId).toBe("300");
   });
 
@@ -156,8 +172,92 @@ describe("the inbox check (E15-3)", () => {
       { id: "spam", threadId: "t8", from: "Spam <win@prize.example>", subject: "You won", text: "Click", labels: ["SPAM"], history: 250, deleted: true },
       { id: "m7", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "Thursday?", history: 250 },
     ];
-    expect(await syncInbox()).toEqual({ fetched: 2, kept: 1, read: 1 });
+    expect(await syncInbox()).toEqual({ fetched: 2, kept: 1, read: 1, unread: 0 });
     expect(await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).toMatchObject({ historyId: "300", syncProblem: null });
+  });
+
+  it("asks again when Gmail refuses a message for its rate limit, and leaves one it keeps refusing for the next check (public issue 68)", async () => {
+    await sendApplicationEmail("nw");
+    await syncInbox();
+    mailbox = [
+      { id: "m7", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "Thursday?", history: 250, refuse: 2 },
+      { id: "m8", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "Or Friday?", history: 260, refuse: Infinity },
+    ];
+    expect(await syncInbox()).toEqual({ fetched: 2, kept: 1, read: 1, unread: 1 });
+    expect(await prisma().emailMessage.findFirst({ where: { gmailId: "m7" } })).toMatchObject({ applicationId: "nw", kind: "INTERVIEW" });
+    // The history stays where it was, so m8 is listed again next time, and Settings says so.
+    expect(await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).toMatchObject({
+      historyId: "200",
+      syncProblem: "1 message couldn't be read from Gmail. The next check tries again.",
+    });
+    mailbox[1].refuse = 0;
+    expect(await syncInbox()).toEqual({ fetched: 1, kept: 1, read: 1, unread: 0 });
+    expect(await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).toMatchObject({ historyId: "300", syncProblem: null });
+
+    // A 403 for a missing permission still stops the check, as before.
+    mailbox.push({ id: "m9", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "Hi", history: 350, forbid: true });
+    await expect(syncInbox()).rejects.toThrow("Google refused that. Check the permissions in Settings → Google.");
+    expect(await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).toMatchObject({ syncProblem: "Google refused that. Check the permissions in Settings → Google." });
+  });
+
+  it("stops asking Google once it refuses the saved access, until the account is connected again (#136)", async () => {
+    forgetAccessTokens();
+    let tokenCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        if (!String(url).startsWith("https://oauth2.googleapis.com/token")) return fakeGoogle(String(url), init);
+        tokenCalls += 1;
+        return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 });
+      }),
+    );
+    await expect(syncInbox()).rejects.toThrow("Google no longer accepts Dossier's access.");
+    expect(await googleConnection()).toMatchObject({ status: "connected", signInProblem: expect.stringContaining("Connect your Google account again") });
+    await expect(syncInbox()).rejects.toThrow("Google no longer accepts Dossier's access.");
+    expect(tokenCalls).toBe(1);
+
+    await saveGoogleAccount({ email: "jane@gmail.com", refreshToken: "new-refresh", scopes });
+    expect(await googleConnection()).toMatchObject({ signInProblem: null, syncProblem: null });
+  });
+
+  it("pauses, but keeps, saved access it can't read, since the old DOSSIER_SECRET reads it again (#136)", async () => {
+    forgetAccessTokens();
+    const other = encryptSecret(GOOGLE_TOKEN, "refresh", "o".repeat(40));
+    await prisma().googleAccount.update({ where: { id: "google" }, data: { refreshTokenEnc: other } });
+    expect(await googleConnection()).toMatchObject({ signInProblem: expect.stringContaining("DOSSIER_SECRET changed") });
+    await expect(syncInbox()).rejects.toThrow("can't be read");
+    expect(await prisma().googleAccount.findUniqueOrThrow({ where: { id: "google" } })).toMatchObject({ refreshTokenEnc: other });
+  });
+
+  it("unlinks a mail matched by the company's name or domain that the AI finds unrelated, and keeps a thread's reply linked (public issue 65)", async () => {
+    await sendApplicationEmail("nw");
+    provider.current = new MockProvider({
+      reply: (call) => {
+        const other = String(call.messages[0].content).includes("200061456");
+        return { kind: other ? "REJECTION" : "INTERVIEW", summary: other ? "Declines the support role." : "Invites you.", questions: [], confirmedTime: null, unrelated: other };
+      },
+    });
+    mailbox = [
+      { id: "m1", threadId: "thread-new", from: "Anna Keller <a.keller@northwind.example>", subject: "Re: Application", text: "We won't go ahead with Technical Support Engineering 200061456." },
+      { id: "m2", threadId: "t2", from: "Careers <careers@northwind.example>", subject: "Your application", text: "Technical Support Engineering 200061456: we won't go ahead." },
+      { id: "m3", threadId: "t2", from: "Careers <careers@northwind.example>", subject: "Re: Your application", text: "Best wishes." },
+    ];
+    expect(await syncInbox()).toEqual({ fetched: 3, kept: 3, read: 3, unread: 0 });
+    const kept = await prisma().emailMessage.findMany({ where: { direction: "INCOMING" }, orderBy: { gmailId: "asc" } });
+    expect(kept.map((email) => [email.gmailId, email.applicationId, email.kind, email.suggestedStatus])).toEqual([
+      // In the thread Dossier wrote in: linked whatever it says.
+      ["m1", "nw", "REJECTION", "REJECTED"],
+      // By the domain only, and about another role: waits for a look, with the rest of its thread.
+      ["m2", null, "REJECTION", null],
+      ["m3", null, "INTERVIEW", null],
+    ]);
+  });
+
+  it("leaves out drafts, even in a known thread", async () => {
+    await sendApplicationEmail("nw");
+    mailbox = [{ id: "d1", threadId: "thread-new", from: "Jane Doe <jane@gmail.com>", subject: "Re: Application", text: "Hi Anna,", labels: ["DRAFT"] }];
+    expect(await syncInbox()).toEqual({ fetched: 1, kept: 0, read: 0, unread: 0 });
+    expect(await prisma().emailMessage.findFirst({ where: { gmailId: "d1" } })).toBeNull();
   });
 
   it("keeps unmatched inbox mail for a look when set to read everything", async () => {

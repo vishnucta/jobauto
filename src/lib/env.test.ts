@@ -24,6 +24,12 @@ function problems(source: Record<string, string | undefined>): string[] {
 }
 
 describe("parseEnv", () => {
+  it("reads DOSSIER_API_URL without its trailing slash, and only an http or https address", () => {
+    expect(parseEnv(valid).DOSSIER_API_URL).toBeUndefined();
+    expect(parseEnv({ ...valid, DOSSIER_API_URL: "http://api.localhost:3000/v1/" }).DOSSIER_API_URL).toBe("http://api.localhost:3000/v1");
+    expect(problems({ ...valid, DOSSIER_API_URL: "ftp://example.com" })).toEqual(["DOSSIER_API_URL must be an http:// or https:// URL."]);
+  });
+
   it("accepts the required variables and fills in defaults", () => {
     expect(parseEnv(valid)).toEqual({
       ...valid,
@@ -77,6 +83,13 @@ describe("parseEnv", () => {
       expect.stringMatching(/^DOSSIER_PASSWORD is not set\. Set it to/),
       expect.stringMatching(/^DOSSIER_SECRET is not set\. .*openssl rand/),
       expect.stringMatching(/^DATABASE_URL is not set\. /),
+    ]);
+  });
+
+  it("takes an SQLite file as the database, by its full path", () => {
+    expect(parseEnv({ ...valid, DATABASE_URL: "file:/data/dossier.db" }).DATABASE_URL).toBe("file:/data/dossier.db");
+    expect(problems({ ...valid, DATABASE_URL: "file:./dossier.db" })).toEqual([
+      "DATABASE_URL must give the SQLite file's full path, e.g. file:/data/dossier.db.",
     ]);
   });
 
@@ -134,6 +147,7 @@ describe("job search variables (E14-4)", () => {
         DOSSIER_JSEARCH_HOST: "rapidapi",
         DOSSIER_ADZUNA_APP_ID: "app",
         DOSSIER_ADZUNA_KEY: "adz",
+        DOSSIER_FREEHIRE_URL: "https://jobs.example/",
       }),
     ).toMatchObject({
       DOSSIER_JOBS_SOURCE: "jsearch",
@@ -141,7 +155,9 @@ describe("job search variables (E14-4)", () => {
       DOSSIER_JSEARCH_HOST: "rapidapi",
       DOSSIER_ADZUNA_APP_ID: "app",
       DOSSIER_ADZUNA_KEY: "adz",
+      DOSSIER_FREEHIRE_URL: "https://jobs.example",
     });
+    expect(parseEnv({ ...valid, DOSSIER_JOBS_SOURCE: "freehire" }).DOSSIER_JOBS_SOURCE).toBe("freehire");
   });
 
   it("reads whether the Bundesagentur für Arbeit is offered, and refuses choosing it while it's off (#223)", () => {
@@ -155,7 +171,7 @@ describe("job search variables (E14-4)", () => {
 
   it("rejects sources and hosts it doesn't know, without echoing keys", () => {
     expect(problems({ ...valid, DOSSIER_JOBS_SOURCE: "linkedin", DOSSIER_JSEARCH_HOST: "google", DOSSIER_JSEARCH_KEY: "ak_secret" })).toEqual([
-      'DOSSIER_JOBS_SOURCE must be one of jsearch, serpapi, adzuna, jooble, arbeitsagentur, off (got "linkedin").',
+      'DOSSIER_JOBS_SOURCE must be one of jsearch, serpapi, adzuna, jooble, arbeitsagentur, freehire, off (got "linkedin").',
       'DOSSIER_JSEARCH_HOST must be openwebninja or rapidapi (got "google").',
     ]);
   });

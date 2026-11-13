@@ -26,12 +26,18 @@ const base = {
 };
 
 describe("tailoringSummary (E7-6)", () => {
+  it("says a custom section was kept word for word (#298)", () => {
+    const summary = tailoringSummary({ ...base, resume: [...base.resume, { id: "custom-line:i1", label: "Best Paper", text: "Best Paper" }] });
+    expect(summary.list).toContain("Kept your own sections word for word");
+  });
+
   it("says what changed, worked out from the documents and the profile", () => {
     const summary = tailoringSummary(base);
     expect(summary.intro).toBe("Here's what I tailored for Ledgerly:");
     expect(summary.list).toEqual([
       "Rewrote your summary for the Senior Product Designer role",
       "Reworded your Northwind Logistics and Fieldnote roles for this job",
+      "Kept your certification word for word",
       "Kept your publication word for word",
       "Ordered your skills by what Ledgerly asks for",
       "Left out references, since the posting doesn't ask for them",
@@ -58,6 +64,22 @@ describe("tailoringSummary (E7-6)", () => {
       letter: [],
     });
     expect(untouched.list).toEqual(["Left out references, since the posting doesn't ask for them"]);
+  });
+
+  it("reads skills in groups by their names, and claims no reordering for the profile's own order (#280)", () => {
+    const grouped = { ...profile, skills: profile.skills.map((skill) => ({ ...skill, group: skill.name === "Figma" ? "Tools" : "" })) };
+    const { list } = tailoringSummary({
+      ...base,
+      profile: grouped,
+      match: { items: [] },
+      resume: [
+        { id: "summary", label: "Summary", text: profile.basics.summary },
+        ...profile.experience.map((entry) => ({ id: `experience:${entry.id}`, label: "", text: entry.bullets })),
+        { id: "skills", label: "Skills", text: "Interaction design · Design systems · Prototyping · User research · HTML & CSS · Workshop facilitation\nTools: Figma" },
+      ],
+      letter: [],
+    });
+    expect(list).toEqual(["Left out references, since the posting doesn't ask for them"]);
   });
 
   it("mentions skills left out, the note, and details to check", () => {

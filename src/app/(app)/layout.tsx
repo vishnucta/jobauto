@@ -1,16 +1,23 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { after } from "next/server";
 
 import { countAgentQueue } from "@/lib/agent/view";
+import { checkAnnouncementsIfDue } from "@/lib/announcements/check";
+import { currentAnnouncement } from "@/lib/announcements/visible";
 import { verifySession } from "@/lib/auth/session";
+import { isDesktopApp } from "@/lib/desktop";
 import { inboxCount } from "@/lib/google/inbox-data";
 import { loadProfileName } from "@/lib/profile-data";
+import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
+import { opensSetupGuide } from "@/lib/setup-guide";
 import { COLOR_SCHEME_COOKIE, parseColorScheme, parseSidebarCollapsed, SIDEBAR_COOKIE } from "@/lib/ui-preferences";
 import { rememberBrowserTimeZone, userTimeZone } from "@/lib/time-zone";
 import { checkForUpdatesDaily, updateNotice } from "@/lib/update-check";
 import { appVersion } from "@/lib/version";
 
+import { AnnouncementNotice } from "./announcement-notice";
 import { Sidebar } from "./sidebar";
 
 /**
@@ -28,7 +35,12 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   after(() => rememberBrowserTimeZone(zone));
 
   const [name, settings, jar] = await Promise.all([loadProfileName(), loadSettings(), cookies()]);
+  // A fresh install starts with the setup guide, once (E21).
+  if (settings.setupGuide === null && opensSetupGuide({ guide: null, name, applications: await prisma.application.count() })) redirect("/welcome");
+  // The backend's notices, if it's time to ask (it costs a page nothing until then).
+  after(() => checkAnnouncementsIfDue(settings));
   const userName = name.trim() || "New user";
+  const announcement = currentAnnouncement(settings);
   // Replies waiting for an answer or a link, on the Inbox item; the job agent's finds and drafts on its own (E16-6).
   const [waiting, agent] = await Promise.all([inboxCount().catch(() => 0), countAgentQueue().catch(() => 0)]);
 
@@ -44,6 +56,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
         userName={userName}
         update={updateNotice(settings)}
         currentVersion={appVersion}
+        desktop={isDesktopApp()}
         collapsed={parseSidebarCollapsed(jar.get(SIDEBAR_COOKIE)?.value)}
         counts={{ ...(waiting > 0 ? { "/inbox": waiting } : {}), ...(agent > 0 ? { "/agent": agent } : {}) }}
         colorScheme={parseColorScheme(jar.get(COLOR_SCHEME_COOKIE)?.value)}
@@ -60,6 +73,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           {children}
         </main>
       </div>
+      {/* A new notice starts over, once the one before was dismissed. */}
+      {announcement && <AnnouncementNotice key={announcement.id} announcement={announcement} />}
     </div>
   );
 }

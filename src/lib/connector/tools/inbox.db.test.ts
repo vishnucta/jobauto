@@ -115,7 +115,7 @@ beforeEach(async () => {
   await resetDatabase(prisma());
   await saveSettings({ connectorEnabledAt: "2026-10-23T09:00:00.000Z" });
   fake.aiReady = true;
-  fake.provider = new MockProvider({ reply: () => ({ kind: "OFFER", summary: "Makes you an offer.", questions: [], confirmedTime: null }) });
+  fake.provider = new MockProvider({ reply: () => ({ kind: "OFFER", summary: "Makes you an offer.", questions: [], confirmedTime: null, unrelated: false }) });
   mailbox = [];
   sent = [];
   calls = [];
@@ -419,7 +419,7 @@ describe("the inbox's tools", () => {
     expect(await email("e2")).toMatchObject({ replyDraft: "Hi, tell me more." });
 
     // Read as an acknowledgement, it would need no answer; with an answer drafted, it still needs one.
-    fake.provider = new MockProvider({ reply: () => ({ kind: "ACKNOWLEDGEMENT", summary: "Got your message.", questions: [], confirmedTime: null }) });
+    fake.provider = new MockProvider({ reply: () => ({ kind: "ACKNOWLEDGEMENT", summary: "Got your message.", questions: [], confirmedTime: null, unrelated: false }) });
     expect((await tool("update_email", { email_id: "e2", change: "read_again" })).json).toMatchObject({ ai_read: { kind: "acknowledgement" }, handled: false });
     expect((await tool("read_email", { email_id: "e2" })).json.answer).toEqual({ handled: false, draft: "Hi, tell me more." });
   });

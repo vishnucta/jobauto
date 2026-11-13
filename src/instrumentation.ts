@@ -5,10 +5,20 @@ export async function register() {
     const { checkEnvOnStartup } = await import("@/lib/env");
     checkEnvOnStartup();
 
+    const { logServerError } = await import("@/lib/log");
+
+    // A restart lifts a block on sign-ins from new browsers (#334).
+    const { liftBlockOnEveryone } = await import("@/lib/auth/login-throttle");
+    const { prisma } = await import("@/lib/prisma");
+    await liftBlockOnEveryone(prisma).catch((error: unknown) => logServerError("startup", error));
+
     // AI jobs left running by the previous process can't finish (E6-7).
     const { recoverInterruptedJobs } = await import("@/lib/jobs/runner");
-    const { logServerError } = await import("@/lib/log");
     await recoverInterruptedJobs().catch((error: unknown) => logServerError("startup", error));
+
+    // Applications sent before 1.12 keep what they show now (#299).
+    const { freezeSentApplications } = await import("@/lib/frozen-copy");
+    await freezeSentApplications().catch((error: unknown) => logServerError("startup", error));
 
     // Finished jobs, with what they were given and wrote, are deleted after a while.
     const { startJobSweep } = await import("@/lib/jobs/retention");

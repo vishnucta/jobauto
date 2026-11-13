@@ -59,19 +59,37 @@ test("changes an application's theme from its Resume tab", async ({ page }) => {
   expect(await pdf()).not.toContain("Garamond");
 
   await page.goto(`/applications/${ledgerly.id}`);
-  await page.getByRole("button", { name: "Theme: Editorial" }).click();
+  await page.getByRole("button", { name: "Editorial theme" }).click();
   await page.getByRole("menuitemradio", { name: "Classic" }).click();
-  await expect(page.getByRole("button", { name: "Theme: Classic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Classic theme" })).toBeVisible();
   const name = page.getByRole("article", { name: "Resume" }).getByRole("heading", { level: 1 });
   await expect(name).toHaveCSS("font-family", /Garamond/);
 
   await page.reload();
   await page.getByRole("tab", { name: "Cover letter" }).click();
-  await expect(page.getByRole("button", { name: "Theme: Classic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Classic theme" })).toBeVisible();
   const documents = await sql(`SELECT kind, "themeId" FROM "Document" WHERE "applicationId" = $1 AND kind <> 'EMAIL' ORDER BY kind`, [ledgerly.id]);
   expect(documents).toEqual([
     { kind: "RESUME", themeId: "classic" },
     { kind: "COVER_LETTER", themeId: "classic" },
   ]);
   expect(await pdf()).toContain("Garamond");
+});
+
+// Chromium can't embed a variable font in a PDF and draws its glyphs as Type 3
+// outlines instead, which other viewers and parsers misread (public issues 64
+// and 67): every theme font is a static face, and a synthesised weight would
+// bring Type 3 back too, so each built-in theme's PDF is checked for it.
+test("prints every built-in theme with real, embedded text, never Type 3 fonts", async ({ page }) => {
+  const themes = await sql<{ id: string }>(`SELECT id FROM "Theme" WHERE "builtIn" ORDER BY id`);
+  expect(themes.length).toBeGreaterThanOrEqual(12);
+  for (const { id } of themes) {
+    await sql(`INSERT INTO "Setting" (key, value, "updatedAt") VALUES ('baseThemeId', $1, now()) ON CONFLICT (key) DO UPDATE SET value = $1`, [id]);
+    const response = await page.request.get("/api/pdf?doc=base");
+    expect(response.ok(), id).toBe(true);
+    const pdf = (await response.body()).toString("latin1");
+    expect(pdf, `${id}: a Type 3 font`).not.toMatch(/\/Type3\b/);
+    expect(pdf, `${id}: no embedded TrueType`).toMatch(/\/CIDFontType2\b/);
+  }
+  await sql(`UPDATE "Setting" SET value = 'editorial' WHERE key = 'baseThemeId'`);
 });

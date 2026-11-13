@@ -33,7 +33,7 @@ import { checkResume, type CheckItem } from "@/lib/resume-check";
 import { loadSettings } from "@/lib/settings-data";
 import { loadThemes } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, hasSidebar, type ThemeData } from "@/lib/themes";
-import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
+import { cleanUnitText, isCertificationUnit, isPublicationUnit, isVerbatimUnit, unitName } from "@/lib/unit-text";
 
 import { failure, started, text, type ToolContext } from "../kit";
 
@@ -145,10 +145,10 @@ function noSuchPart(view: DocumentView, kind: DocumentKind, id: string): CallToo
   return failure(`There's no part "${id}" in the ${NAMES[kind]}. Its parts are ${view.parts.map((part) => part.id).join(", ")}.`);
 }
 
-/** Whether the AI writes a part, so it can write it again: the page offers Regenerate and Ask AI only then (E8-11, #218). */
+/** Whether the AI writes a part, so it can write it again: the page offers Regenerate and Ask AI only then (E8-11, #218, #293, #298). */
 function writtenByAi(kind: DocumentKind, id: string): boolean {
   if (kind === DocumentKind.EMAIL) return WRITTEN_EMAIL_UNITS.has(id);
-  if (kind === DocumentKind.RESUME) return !isPublicationUnit(id);
+  if (kind === DocumentKind.RESUME) return !isVerbatimUnit(id);
   return !isFrameUnit(id) || WRITTEN_FRAME_UNITS.has(id);
 }
 
@@ -238,10 +238,12 @@ const checkLine = ({ id, level, title, detail, fix }: CheckItem) => ({ id, level
 /**
  * What the fact guard (E6-6) can't back in a part Claude wrote, with "Never
  * invent experience" on. Parts are checked as the chat's edits are: not the
- * letter's frame and sign-off, the email's recipient or a publication.
+ * letter's frame and sign-off, the email's recipient, or what the resume
+ * copies from the profile word for word (a publication, certification or
+ * custom section).
  */
 async function unbacked(view: DocumentView, kind: DocumentKind, id: string, text: string): Promise<string[] | undefined> {
-  const checked = kind === DocumentKind.EMAIL ? id !== "to" : id !== SIGN_OFF_UNIT && !isFrameUnit(id) && !isPublicationUnit(id);
+  const checked = kind === DocumentKind.EMAIL ? id !== "to" : id !== SIGN_OFF_UNIT && !isFrameUnit(id) && !isVerbatimUnit(id);
   if (!view.settings.strict || !checked) return undefined;
   const facts = await loadFactTexts(view.application.id);
   // The email's recipient counts too: its greeting names them.
@@ -315,7 +317,8 @@ async function editDocument(input: EditInput, link: string): Promise<CallToolRes
         return failure(`Give the index of what to put back, from 0 to ${leftOut.length - 1}, as get_document's left_out lists them.`);
       }
       const item = await putBack(input.application_id, input.index);
-      return text({ put_back: describeCut(item), note: byPageLimit(item) ? "The resume may run over its page limit now." : undefined, link });
+      // The page limit is gone (#234): what it left out of an older resume makes it longer when it's back.
+      return text({ put_back: describeCut(item), note: byPageLimit(item) ? "It was left out to fit the page limit, so the resume runs longer now." : undefined, link });
     }
     case "restore_version": {
       if (!input.version_id) return failure("Give the version_id of the version to bring back, from get_document.");
@@ -498,8 +501,11 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         if (typeof view === "string") return failure(view);
         const part = part_id ? view.parts.find((entry) => entry.id === part_id) : undefined;
         if (part_id && !part) return noSuchPart(view, kind, part_id);
-        // As on the page, only the parts the AI writes: a publication is the user's own citation (#218).
-        if (part && kind === DocumentKind.RESUME && isPublicationUnit(part.id)) return failure("A publication stays as the user wrote it. Change it with edit_document instead.");
+        // As on the page, only the parts the AI writes: a publication, certification or custom section is the user's own (#218, #293, #298).
+        if (part && kind === DocumentKind.RESUME && isVerbatimUnit(part.id)) {
+          const what = isPublicationUnit(part.id) ? "A publication" : isCertificationUnit(part.id) ? "A certification" : "A section the user made";
+          return failure(`${what} stays as the user wrote it. Change it with edit_document instead.`);
+        }
         if (part && !writtenByAi(kind, part.id)) return failure("This part isn't written by the AI. Change it with edit_document instead.");
         // A letter part an older letter only shows (E8-11) is stored before it's rewritten.
         const shown = part && !view.units.some((unit) => unit.id === part.id) ? part.text : undefined;
@@ -679,7 +685,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
     {
       title: "Check a resume for applicant tracking systems",
       description:
-        "Checks a resume's PDF the way an applicant tracking system's parser reads it: whether it reads correctly (the text, contact details and headings are in the text layer; one column; within the page limit; the file named after the user), " +
+        "Checks a resume's PDF the way an applicant tracking system's parser reads it: whether it reads correctly (the text, contact details and headings are in the text layer; one column; its pages counted; the file named after the user), " +
         "whether it names the posting's requirements and job title, and whether its text is clean (no ligature glyphs, odd hyphens or invisible characters; written in the language its headings and dates follow). " +
         "Prints the PDF as Download PDF does (one Chromium render, no quota) and answers with verdicts, labels and counts only, never the document's text or contact details. " +
         "An item's fix names what puts it right: single-column, photo and language through set_document_look; theme, a single-column base theme with set_base_theme; " +
@@ -713,7 +719,6 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
           document,
           file_name: report.fileName,
           pages: report.pages,
-          max_pages: report.maxPages,
           reads: report.reads.map(checkLine),
           // The job title comes first, with index -1; the counts leave it out.
           requirements: report.requirements

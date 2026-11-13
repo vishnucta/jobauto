@@ -1,19 +1,32 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changeStatus } from "@/components/change-status";
+import { toast } from "@/components/toast";
 import type { ApplicationRow } from "@/lib/applications-data";
 import { DEFAULT_SORT } from "@/lib/applications-list";
 
+import { reorderBoard } from "./actions";
 import { ApplicationsScreen } from "./applications-screen";
 
-vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({
+  rememberListView: vi.fn(async () => ({ ok: true, data: null })),
+  reorderBoard: vi.fn(async () => ({ ok: true, data: null })),
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => null }));
 vi.mock("@/components/change-status", () => ({ changeStatus: vi.fn(async () => true) }));
+vi.mock("@/components/toast", () => ({
+  toast: vi.fn(),
+  toastResult: (result: { ok: boolean; error?: string }) => {
+    if (!result.ok) toast(result.error!);
+    return result;
+  },
+}));
 
 const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow => ({
   id,
+  score: null,
   company: "Ledgerly",
   role: "Senior Product Designer",
   location: "Amsterdam",
@@ -25,6 +38,7 @@ const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow =>
   sent: "20 Sep",
   updated: "2 days ago",
   updatedAt: Date.UTC(2026, 8, 26),
+  boardSort: null,
   ...extra,
 });
 
@@ -78,6 +92,54 @@ describe("the board (E9-2)", () => {
     open();
     expect(within(column("Draft")).getByText("Apply by 3 Oct 2026")).toBeInTheDocument();
     expect(within(column("Sent")).queryByText(/^Apply by/)).not.toBeInTheDocument();
+  });
+
+  it("shows a card without a place on top, then the others in their order", () => {
+    open({
+      rows: [
+        row("second", { role: "Second Role", status: "SENT", boardSort: 1, updatedAt: Date.UTC(2026, 8, 25) }),
+        row("first", { role: "First Role", status: "SENT", boardSort: 0, updatedAt: Date.UTC(2026, 8, 1) }),
+        row("new", { role: "New Role", status: "SENT", updatedAt: Date.UTC(2026, 8, 20) }),
+      ],
+    });
+    expect(within(column("Sent")).getAllByRole("listitem").map((card) => within(card).getByRole("link").textContent)).toEqual([
+      "New Role",
+      "First Role",
+      "Second Role",
+    ]);
+  });
+
+  it("offers Move up and Move down only where the card can go", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("button", { name: "Actions for Product Designer, Onboarding, Meridian Bank" }));
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Move down" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("says so when a new order can't be saved", async () => {
+    const user = userEvent.setup();
+    vi.mocked(reorderBoard).mockResolvedValueOnce({ ok: false, error: "Something went wrong." });
+    open();
+    await user.click(screen.getByRole("button", { name: "Actions for Product Designer, Onboarding, Meridian Bank" }));
+    await user.click(screen.getByRole("menuitem", { name: "Move down" }));
+    expect(toast).toHaveBeenCalledWith("Something went wrong.");
+  });
+
+  it("moves a card down from its menu, showing the new order at once and writing it", async () => {
+    const user = userEvent.setup();
+    let finish: (result: { ok: true; data: null }) => void = () => {};
+    vi.mocked(reorderBoard).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    open();
+    // Meridian is first in Sent (newest); moving it down puts Kestrel first.
+    await user.click(screen.getByRole("button", { name: "Actions for Product Designer, Onboarding, Meridian Bank" }));
+    await user.click(screen.getByRole("menuitem", { name: "Move down" }));
+
+    expect(reorderBoard).toHaveBeenCalledWith({ status: "SENT", ids: ["kestrel", "meridian"] });
+    const cards = within(column("Sent")).getAllByRole("listitem");
+    expect(within(cards[0]).getByRole("link").textContent).toBe("Product Designer, Mobile");
+    expect(within(cards[1]).getByRole("link").textContent).toBe("Product Designer, Onboarding");
+    await act(async () => finish({ ok: true, data: null }));
   });
 
   it("moves a card from its Move to menu, showing it in the new column at once", async () => {

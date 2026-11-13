@@ -23,7 +23,7 @@ export function statusesIn(filter: Filter): ApplicationStatus[] {
 }
 
 /** The table's sortable columns. */
-export const SORT_KEYS = ["role", "status", "match", "location", "sent", "updated"] as const;
+export const SORT_KEYS = ["role", "status", "match", "score", "location", "sent", "updated"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 /** A column and whether it's reversed from its natural order, which comes first. */
 export type Sort = { key: SortKey; reversed: boolean };
@@ -36,6 +36,7 @@ export const NATURAL_ORDER: Record<SortKey, "ascending" | "descending"> = {
   role: "ascending",
   status: "ascending",
   match: "descending",
+  score: "descending",
   location: "ascending",
   sent: "descending",
   updated: "descending",
@@ -97,6 +98,8 @@ export type Sortable = {
   status: ApplicationStatus;
   /** Requirements covered, out of all (e.g. 5/7), or null when not matched. */
   match: { hit: number; total: number } | null;
+  /** The tailored resume's score (#370), or null when it hasn't been scored. */
+  score: number | null;
   location: string;
   sentAt: Date | null;
   updatedAt: Date;
@@ -120,6 +123,10 @@ export function sortRows<T extends Sortable>(rows: readonly T[], { key, reversed
         return (statusRank(a.status) - statusRank(b.status)) * direction;
       case "match":
         return (matchRatio(a.match) - matchRatio(b.match)) * direction;
+      case "score":
+        // Not scored stays last, whichever way it's sorted.
+        if (a.score === null || b.score === null) return (a.score === null ? 1 : 0) - (b.score === null ? 1 : 0);
+        return (a.score - b.score) * direction;
       case "location":
         return text(a.location).localeCompare(text(b.location)) * direction;
       case "sent":

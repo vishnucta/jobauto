@@ -5,7 +5,6 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useAutosave } from "@/hooks/use-autosave";
 import type { ProfilePhoto } from "@/lib/photo";
 import { ageOn, isOptionalBasic, type Basics, type BasicsField } from "@/lib/profile";
@@ -101,15 +100,6 @@ export function BasicsSection({
           hint={visited.has(field) ? formatHint(field, basics[field]) : undefined}
         />
       ))}
-      <Textarea
-        className="col-span-2"
-        label="A few lines about you"
-        placeholder="What you do, what you're good at, what you're looking for."
-        rows={4}
-        value={basics.summary}
-        onChange={(event) => set("summary", event.target.value)}
-        onBlur={() => leave("summary")}
-      />
       <Checkbox
         className="col-span-2 pt-1"
         label={

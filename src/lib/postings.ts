@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Posting } from "@/generated/prisma/client";
+import type { Posting, Prisma } from "@/generated/prisma/client";
 import { linkKey, postingKey, type FoundPosting, type PostingOrigin, type PostingState, type ShownPosting } from "@/lib/job-search/search";
 import { stringsOf } from "@/lib/agent/candidates";
 import { prisma } from "@/lib/prisma";
@@ -126,17 +126,17 @@ export async function countPostings(): Promise<{ saved: number; dismissed: numbe
  * counts applications made from the same link before Find jobs, ignoring
  * tracking parameters.
  */
-export async function postingStates(found: readonly (PostingRef & { url: string })[]): Promise<Map<string, PostingState>> {
+export async function postingStates(found: readonly (PostingRef & { url: string })[], db: Prisma.TransactionClient = prisma): Promise<Map<string, PostingState>> {
   if (found.length === 0) return new Map();
   const refs = found.map(({ source, externalId }) => ({ source, externalId }));
   const [stored, applications, scores] = await Promise.all([
-    prisma.posting.findMany({
+    db.posting.findMany({
       where: { OR: found.map(({ source, externalId }) => ({ source, externalId })) },
       select: { id: true, source: true, externalId: true, savedAt: true, dismissedAt: true, applicationId: true },
     }),
     // An agent draft waiting for review isn't applied for yet (#195).
-    prisma.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true }, orderBy: { createdAt: "asc" } }),
-    prisma.postingScore.findMany({ where: { OR: refs } }),
+    db.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true }, orderBy: { createdAt: "asc" } }),
+    db.postingScore.findMany({ where: { OR: refs } }),
   ]);
   const scoreOf = new Map(scores.map((row) => [postingKey(row), { score: row.score, reasons: stringsOf(row.reasons), redFlags: stringsOf(row.redFlags) }]));
   const byKey = new Map(stored.map((posting) => [postingKey(posting), posting]));

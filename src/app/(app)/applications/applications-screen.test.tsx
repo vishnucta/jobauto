@@ -9,11 +9,12 @@ import { rememberListView } from "./actions";
 import { ApplicationsScreen, type ApplicationsScreenProps } from "./applications-screen";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }));
-vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })), reorderBoard: vi.fn(async () => ({ ok: true, data: null })) }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null }));
 
 export const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow => ({
   id,
+  score: null,
   company: "Ledgerly",
   role: "Senior Product Designer",
   location: "Amsterdam",
@@ -25,6 +26,7 @@ export const row = (id: string, extra: Partial<ApplicationRow> = {}): Applicatio
   sent: "20 Sep",
   updated: "2 days ago",
   updatedAt: Date.UTC(2026, 8, 26),
+  boardSort: null,
   ...extra,
 });
 
@@ -51,7 +53,7 @@ describe("the Applications screen (E9-1)", () => {
     expect(screen.getByText(props.summary)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Board" })).toBeChecked();
     expect(screen.getByRole("link", { name: "+ New application" })).toHaveAttribute("href", "/new?fresh=1");
-    expect(screen.getByText("Drag a card to change its status")).toBeInTheDocument();
+    expect(screen.getByText("Drag a card to reorder it or change its status")).toBeInTheDocument();
   });
 
   it("filters with counts, through the URL", async () => {

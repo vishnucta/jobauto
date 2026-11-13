@@ -122,7 +122,7 @@ export async function upsertStartups(found: readonly FoundStartup[], now = new D
     else creates.push({ source: startup.source, externalId: startup.externalId, ...fields });
   }
   for (let index = 0; index < creates.length; index += 200) {
-    await prisma.startup.createMany({ data: creates.slice(index, index + 200), skipDuplicates: true });
+    await prisma.startup.createMany({ data: creates.slice(index, index + 200) });
   }
   for (let index = 0; index < updates.length; index += 50) {
     await prisma.$transaction(updates.slice(index, index + 50));
@@ -260,8 +260,10 @@ export async function linkStartupApplication(id: string, applicationId: string):
 export async function removeStartup(id: string): Promise<boolean> {
   const row = await prisma.startup.findUnique({ where: { id } });
   if (!row) return false;
+  const hashes = blockHashes(startupView(row));
+  const known = new Set((await prisma.startupBlock.findMany({ where: { hash: { in: hashes } }, select: { hash: true } })).map((block) => block.hash));
   await prisma.$transaction([
-    prisma.startupBlock.createMany({ data: blockHashes(startupView(row)).map((entry) => ({ hash: entry })), skipDuplicates: true }),
+    prisma.startupBlock.createMany({ data: hashes.filter((hash) => !known.has(hash)).map((hash) => ({ hash })) }),
     prisma.startup.delete({ where: { id } }),
   ]);
   return true;

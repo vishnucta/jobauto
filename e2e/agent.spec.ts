@@ -10,14 +10,19 @@ test.beforeAll(resetData);
 test.afterAll(async () => {
   await sql(`DELETE FROM "Setting" WHERE key LIKE 'agent%'`);
   await sql(`DELETE FROM "AgentCandidate"`);
+  await sql(`DELETE FROM "AgentSearch"`);
 });
 
 const card = (page: import("@playwright/test").Page, title: string) => page.getByRole("listitem").filter({ has: page.getByRole("heading", { level: 3, name: title }) });
 
 test("finds, scores, drafts and dismisses, and never brings a posting back", async ({ page }) => {
   await page.goto("/settings?section=agent");
+  await page.getByRole("button", { name: "Add search" }).click();
+  await page.getByLabel("Search name").fill("Design roles");
   await page.getByLabel("What").fill("Product designer");
   await page.getByLabel("Country").selectOption("nl");
+  await page.getByRole("button", { name: "Save search" }).click();
+  await expect(page.getByRole("switch", { name: "Design roles" })).toBeVisible();
   await page.getByRole("switch", { name: "Run the job agent" }).click();
   await expect(page.getByRole("switch", { name: "Run the job agent" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText("All changes saved")).toBeVisible();
@@ -26,7 +31,7 @@ test("finds, scores, drafts and dismisses, and never brings a posting back", asy
   const searches = await fakeJobSearches();
   await page.getByRole("link", { name: "Agent", exact: true }).click();
   await expect(page).toHaveURL("/agent");
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Run all now" }).click();
   await expect(page.getByText("2 new postings are waiting for a look.").first()).toBeVisible({ timeout: 30_000 });
   expect(await fakeJobSearches()).toBe(searches + 1);
   const scored = page.getByRole("region", { name: "Scored postings" });
@@ -66,11 +71,11 @@ test("finds, scores, drafts and dismisses, and never brings a posting back", asy
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   await sql(`UPDATE "Setting" SET value = $1 WHERE key = 'agentRuns'`, [JSON.stringify([{ at: twoHoursAgo, manual: true, message: null }])]);
   await page.reload();
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Run all now" }).click();
   await expect(page.getByText("No new postings this time.").first()).toBeVisible({ timeout: 30_000 });
   await expect(scored.getByRole("heading", { level: 3 })).toHaveCount(0);
 
   // …and Run now waits an hour after it.
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Run all now" }).click();
   await expect(page.getByText(/^The agent ran less than an hour ago\. Try again in (\d+ minutes|1 hour)\.$/)).toBeVisible();
 });

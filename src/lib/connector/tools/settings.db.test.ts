@@ -235,7 +235,7 @@ describe("get_settings and update_settings", () => {
     expect(read.json).toMatchObject({
       ai: { ai_provider: "ANTHROPIC", provider_name: "Anthropic", ai_address: "https://api.anthropic.com", ai_model: "claude-opus-5-5", api_key: "set", ready: true, creativity: "BALANCED", never_invent_experience: true },
       job_search: { job_source: "JSEARCH", jsearch_host: "openwebninja", jsearch_key: "set", serpapi_key: "none", adzuna_app_id: "app-1", adzuna_key: "none", jooble_key: "none", arbeitsagentur: { offered: true, understood: false } },
-      documents: { paper: "A4", document_language: "German", resume_language: "English", page_limit: "2", languages: expect.arrayContaining(["English", "German", "Hebrew"]) },
+      documents: { paper: "A4", document_language: "German", resume_language: "English", documents_to_write: "both", languages: expect.arrayContaining(["English", "German", "Hebrew"]) },
       your_data: { nightly_backup: true, last_backup: null, keep_task_data_hours: 24 },
       // Set up, but no account connected yet.
       google: { status: "disconnected", gmail_read: true, gmail_interval: 30, calendar_id: "primary", work_start: "09:00", work_time_zone: "" },
@@ -263,16 +263,16 @@ describe("get_settings and update_settings", () => {
       creativity: "EXPRESSIVE",
       never_invent_experience: false,
       paper: "LETTER",
-      page_limit: "1",
+      documents_to_write: "resume",
       resume_language: "German",
       file_name_pattern: "{name} – {doc}",
       keep_task_data_hours: 168,
       check_for_updates_daily: false,
     });
     expect(changed.json).toMatchObject({
-      saved: ["creativity", "never_invent_experience", "paper", "resume_language", "file_name_pattern", "page_limit", "keep_task_data_hours", "check_for_updates_daily"],
+      saved: ["creativity", "never_invent_experience", "paper", "resume_language", "file_name_pattern", "documents_to_write", "keep_task_data_hours", "check_for_updates_daily"],
       ai: { creativity: "EXPRESSIVE", never_invent_experience: false, show_what_changed: true },
-      documents: { paper: "LETTER", page_limit: "1", resume_language: "German", file_name_pattern: "{name} – {doc}" },
+      documents: { paper: "LETTER", documents_to_write: "resume", resume_language: "German", file_name_pattern: "{name} – {doc}" },
       your_data: { keep_task_data_hours: 168 },
       about: { check_for_updates_daily: false },
       link: "https://dossier.example/settings?section=ai",
@@ -283,7 +283,7 @@ describe("get_settings and update_settings", () => {
       strict: false,
       showDiff: true,
       paper: "LETTER",
-      pageLimit: "1",
+      documentsToWrite: "resume",
       resumeLanguage: "German",
       fileNamePattern: "{name} – {doc}",
       jobRetentionHours: 168,

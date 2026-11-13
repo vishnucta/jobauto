@@ -9,7 +9,7 @@ import { DEFAULT_SORT } from "@/lib/applications-list";
 
 import { ApplicationsScreen } from "./applications-screen";
 
-vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberListView: vi.fn(async () => ({ ok: true, data: null })), reorderBoard: vi.fn(async () => ({ ok: true, data: null })) }));
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null }));
 vi.mock("@/components/change-status", () => ({ changeStatus: vi.fn(async () => true) }));
@@ -21,6 +21,7 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unk
 
 const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow => ({
   id,
+  score: null,
   company: "Quill & Co",
   role: "UX Designer",
   location: "",
@@ -32,6 +33,7 @@ const row = (id: string, extra: Partial<ApplicationRow> = {}): ApplicationRow =>
   sent: "10 Aug",
   updated: "4 weeks ago",
   updatedAt: Date.UTC(2026, 7, 31),
+  boardSort: null,
   ...extra,
 });
 const params = { view: "table" as const, filter: "all" as const, q: "", sort: DEFAULT_SORT, archived: false };

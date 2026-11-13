@@ -31,6 +31,7 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
       aiReady={aiReady}
       writeInClaude={writeInClaude}
       defaultTone={settings.defaultTone}
+      defaultWrite={settings.documentsToWrite}
       defaultLanguage={settings.docLanguage}
       languages={[...DOCUMENT_LANGUAGES.map((language) => language.name), ...settings.customLanguages]}
       fresh={fresh !== undefined}

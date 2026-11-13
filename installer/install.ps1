@@ -398,11 +398,18 @@ try {
     $secret = Random-Hex 32
     $lines = [IO.File]::ReadAllLines((Join-Path $appDir ".env.example"))
     $set = @{ "DOSSIER_PASSWORD" = $hash; "DOSSIER_SECRET" = $secret; "DATABASE_URL" = ('"{0}"' -f $DatabaseUrl); "DOSSIER_DATA_DIR" = $dataDir }
+    # A key's live line if it has one, else its commented-out one: .env.example
+    # also shows DATABASE_URL commented out for SQLite, which stays a comment.
+    $pattern = @{}
+    foreach ($key in $set.Keys) {
+      $live = '^' + [regex]::Escape($key) + '='
+      $pattern[$key] = if ($lines -match $live) { $live } else { '^#?\s*' + [regex]::Escape($key) + '=' }
+    }
     $done = @{}
     $out = foreach ($line in $lines) {
       $written = $false
       foreach ($key in $set.Keys) {
-        if ($line -match ('^#?\s*' + [regex]::Escape($key) + '=')) { "$key=$($set[$key])"; $done[$key] = $true; $written = $true; break }
+        if (-not $done[$key] -and $line -match $pattern[$key]) { "$key=$($set[$key])"; $done[$key] = $true; $written = $true; break }
       }
       if (-not $written) { $line }
     }
@@ -421,7 +428,8 @@ try {
     if ($service -and $service.Status -ne "Running") {
       try { Start-Service $service.Name } catch { Write-Host "PostgreSQL's service ($($service.Name)) isn't running and couldn't be started from here." -ForegroundColor Yellow }
     }
-    Run $yarn @("prisma", "generate") "Preparing the database client"
+    # Both database clients (PostgreSQL and SQLite): the app imports both.
+    Run $yarn @("generate") "Preparing the database client"
     Run $yarn @("prisma", "migrate", "deploy") "Creating or updating the database"
     Run $yarn @("prisma", "db", "seed") "Loading the built-in themes"
   }

@@ -276,10 +276,10 @@ function SearchForm({
       aria-label="Search postings"
       noValidate
       onSubmit={submit}
-      className="mx-10 mb-7 grid grid-cols-1 items-start gap-x-4 gap-y-4 rounded-panel border border-line-card bg-card p-6 sm:grid-cols-2 lg:grid-cols-[2fr_1.4fr_1.2fr_0.9fr_1fr_1.3fr]"
+      className="mx-10 mb-7 grid grid-cols-1 items-start gap-x-4 gap-y-4 rounded-panel border border-line-card bg-card p-6 sm:grid-cols-2 lg:grid-cols-[2fr_1.4fr_1.2fr_0.9fr_1fr_1fr_1.3fr]"
     >
       {suggestions.length > 0 && (
-        <div role="group" aria-label="Search words from your profile" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-6">
+        <div role="group" aria-label="Search words from your profile" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-7">
           <span className="text-meta text-muted">From your profile:</span>
           {suggestions.map((word) => (
             <button
@@ -299,7 +299,7 @@ function SearchForm({
       )}
       <SearchFields value={form} onChange={set} source={selected} countries={countries} errors={errors} />
       <SourcePicker sources={sources} selected={selected} onChange={setSelected} error={errors.sources} />
-      <div className="flex flex-wrap items-center justify-between gap-4 sm:col-span-2 lg:col-span-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 sm:col-span-2 lg:col-span-7">
         <RemoteOnlyField value={form} onChange={set} source={selected.includes("ADZUNA") ? "ADZUNA" : null} />
         <span className="flex flex-wrap items-center gap-4">
           <span className="text-xs text-muted">{searchCost(selected)}</span>

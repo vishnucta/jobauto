@@ -19,6 +19,7 @@ afterAll(() => prisma().$disconnect());
 
 const noDates = { startYear: null, startMonth: null, endYear: null, endMonth: null, current: false };
 const imported: ImportedProfile = {
+  leftOut: [],
   basics: { name: "John Doe", city: "Utrecht" },
   skills: [
     { name: "figma", found: true },
@@ -29,14 +30,18 @@ const imported: ImportedProfile = {
     { name: "German", level: LanguageLevel.B2, levelGiven: false },
   ],
   experience: [
-    { role: "Design Lead", company: "Acme Payments", location: "", bullets: "Led the payout redesign", skills: ["User research"], startYear: 2021, startMonth: 3, endYear: null, endMonth: null, current: true, unverified: [] },
-    { role: "Product designer", company: "fieldnote", location: "Amsterdam", bullets: "", skills: ["figma"], ...noDates, unverified: [] },
+    { role: "Design Lead", company: "Acme Payments", location: "", descriptor: "Payouts for marketplaces", volunteering: false, bullets: "Led the payout redesign", skills: ["User research"], startYear: 2021, startMonth: 3, endYear: null, endMonth: null, current: true, unverified: [] },
+    { role: "Product designer", company: "fieldnote", location: "Amsterdam", descriptor: "", volunteering: true, bullets: "", skills: ["figma"], ...noDates, unverified: [] },
   ],
   projects: [
     { name: "payout simulator", link: "github.com/john/payout-sim", bullets: "", skills: ["User research"], ...noDates, unverified: [] },
     { name: "Design tokens CLI", link: "", bullets: "Built a CLI", skills: ["figma"], startYear: 2024, startMonth: null, endYear: null, endMonth: null, current: true, unverified: [] },
   ],
   education: [{ degree: "MSc Interaction Design", school: "TU Delft", notes: "", startYear: 2015, startMonth: null, endYear: 2017, endMonth: null, current: false, unverified: [] }],
+  certifications: [
+    { name: "certified accessibility specialist", issuer: "", year: null, month: null, expiryYear: 2030, expiryMonth: 1, credentialId: "IDI-99", link: "", unverified: [] },
+    { name: "First aid", issuer: "Red Cross", year: 2019, month: null, expiryYear: null, expiryMonth: null, credentialId: "", link: "", unverified: [] },
+  ],
   publications: [
     { citation: "Doe, J. (2024). Calm payouts.", link: "https://doi.org/10.5555/1", unverified: [] },
     { citation: "Doe, J. (2025). A new one.", link: "", unverified: [] },
@@ -56,6 +61,9 @@ async function existingProfile() {
   await prisma().reference.create({ data: { name: "jane doe", relation: "", company: "Fieldnote", sort: 0 } });
   await prisma().project.create({ data: { name: "Payout simulator", bullets: "My own project bullets", startYear: 2023, sort: 0 } });
   await prisma().publication.create({ data: { citation: "**Doe, J.** (2024). *Calm payouts.*", onResumes: false, sort: 0 } });
+  await prisma().certification.create({
+    data: { name: "Certified Accessibility Specialist", issuer: "Inclusive Design Institute", year: 2022, month: 6, expiryYear: 2028, expiryMonth: 6, onResumes: false, sort: 0 },
+  });
 }
 
 describe("applyImportedProfile (E4-10)", () => {
@@ -78,7 +86,8 @@ describe("applyImportedProfile (E4-10)", () => {
       ["Product designer", "fieldnote"],
       ["Design Lead", "Acme Payments"],
     ]);
-    expect(roles[0]).toMatchObject({ location: "Amsterdam", bullets: "My own bullets", startYear: 2018 });
+    expect(roles[0]).toMatchObject({ location: "Amsterdam", bullets: "My own bullets", startYear: 2018, volunteering: true });
+    expect(roles[1]).toMatchObject({ volunteering: false });
     expect(roles[0].skills.map((link) => link.skill.name)).toEqual(["Figma"]);
     expect(roles[1]).toMatchObject({ bullets: "Led the payout redesign", startYear: 2021, startMonth: 3, current: true });
     expect(roles[1].skills.map((link) => link.skill.name)).toEqual(["User research"]);
@@ -95,6 +104,17 @@ describe("applyImportedProfile (E4-10)", () => {
     expect(await prisma().publication.findMany({ orderBy: { sort: "asc" }, select: { citation: true, link: true, onResumes: true } })).toEqual([
       { citation: "**Doe, J.** (2024). *Calm payouts.*", link: "https://doi.org/10.5555/1", onResumes: false },
       { citation: "Doe, J. (2025). A new one.", link: "", onResumes: true },
+    ]);
+
+    // Certifications (#293) match by name; what the file doesn't give, its obtained date included, is kept, and new ones go after.
+    expect(
+      await prisma().certification.findMany({
+        orderBy: { sort: "asc" },
+        select: { name: true, issuer: true, year: true, month: true, expiryYear: true, expiryMonth: true, credentialId: true, onResumes: true },
+      }),
+    ).toEqual([
+      { name: "certified accessibility specialist", issuer: "Inclusive Design Institute", year: 2022, month: 6, expiryYear: 2030, expiryMonth: 1, credentialId: "IDI-99", onResumes: false },
+      { name: "First aid", issuer: "Red Cross", year: 2019, month: null, expiryYear: null, expiryMonth: null, credentialId: "", onResumes: true },
     ]);
 
     expect(await prisma().education.count()).toBe(1);
@@ -131,5 +151,16 @@ describe("applyImportedProfile (E4-10)", () => {
       "Doe, J. (2024). Calm payouts.",
       "Doe, J. (2025). A new one.",
     ]);
+    expect((await prisma().certification.findMany({ orderBy: { sort: "asc" } })).map((entry) => entry.name)).toEqual(["certified accessibility specialist", "First aid"]);
+  });
+});
+
+describe("sections the user made (#298)", () => {
+  it("stay when the profile is replaced, since a resume can't bring them back", async () => {
+    await prisma().customSection.create({ data: { id: "s1", title: "Awards", items: { create: { title: "Best Paper" } } } });
+    await prisma().experience.create({ data: { role: "Old" } });
+    await applyImportedProfile(prisma(), { basics: {}, skills: [], languages: [], experience: [], projects: [], education: [], certifications: [], publications: [], references: [] } as never, "replace");
+    expect(await prisma().experience.count()).toBe(0);
+    expect(await prisma().customItem.count()).toBe(1);
   });
 });

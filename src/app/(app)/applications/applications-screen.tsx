@@ -8,13 +8,14 @@ import { changeStatus } from "@/components/change-status";
 
 import { PageHeader } from "@/components/page-header";
 import { buttonClassName } from "@/components/ui/button";
+import { toastResult } from "@/components/toast";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ApplicationStatus } from "@/generated/prisma/enums";
 import type { ApplicationRow } from "@/lib/applications-data";
 import { FILTERS, listHref, statusesIn, type Filter, type ListParams, type View } from "@/lib/applications-list";
 import { cn } from "@/lib/cn";
 
-import { rememberListView } from "./actions";
+import { rememberListView, reorderBoard } from "./actions";
 import { Board } from "./board";
 import { Table } from "./table";
 
@@ -32,7 +33,7 @@ export type ApplicationsScreenProps = {
 };
 
 const HINTS: Record<View, string> = {
-  board: "Drag a card to change its status",
+  board: "Drag a card to reorder it or change its status",
   table: "Click a row to open it",
 };
 
@@ -56,15 +57,32 @@ export function ApplicationsScreen({ params, rows, counts, summary, empty, archi
   }
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // A moved card shows in its new column at once; if the move fails, it goes back (LST-4).
-  const [shown, showMove] = useOptimistic(rows, (current, { id, to }: { id: string; to: ApplicationStatus }) =>
-    current.map((row) => (row.id === id ? { ...row, status: to, updated: "Today", updatedAt: Date.now() } : row)),
+  // A moved or reordered card shows in its new place at once; if the
+  // change fails, it goes back (LST-4).
+  const [shown, showMove] = useOptimistic(
+    rows,
+    (
+      current,
+      change: { kind: "status"; id: string; to: ApplicationStatus } | { kind: "reorder"; ordered: ApplicationRow[] },
+    ) =>
+      change.kind === "status"
+        ? current.map((row) => (row.id === change.id ? { ...row, status: change.to, boardSort: null, updated: "Today", updatedAt: Date.now() } : row))
+        : current.map((row) => {
+            const index = change.ordered.findIndex((entry) => entry.id === row.id);
+            return index < 0 ? row : { ...row, boardSort: index };
+          }),
   );
   const [, startMove] = useTransition();
   const move = (row: ApplicationRow, to: ApplicationStatus) =>
     startMove(async () => {
-      showMove({ id: row.id, to });
+      showMove({ kind: "status", id: row.id, to });
       await changeStatus(row.id, to);
+    });
+  // A reordered column shows in its new order at once, then writes it (public issue 60).
+  const reorder = (ordered: ApplicationRow[]) =>
+    startMove(async () => {
+      showMove({ kind: "reorder", ordered });
+      toastResult(await reorderBoard({ status: ordered[0].status, ids: ordered.map((row) => row.id) }));
     });
 
   // Each view, filter or sort gets its own history entry, so Back returns to
@@ -165,7 +183,7 @@ export function ApplicationsScreen({ params, rows, counts, summary, empty, archi
             {rows.length === 0 ? (
               <Nothing>{params.q ? `No applications match “${params.q}”.` : "Nothing in this view yet."}</Nothing>
             ) : board ? (
-              <Board rows={shown} statuses={statusesIn(params.filter)} onMove={move} />
+              <Board rows={shown} statuses={statusesIn(params.filter)} onMove={move} onReorder={reorder} />
             ) : (
               <Table rows={shown} sort={params.sort} onSort={(sort) => go({ sort })} onMove={move} />
             )}

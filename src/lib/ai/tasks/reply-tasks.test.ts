@@ -17,11 +17,11 @@ const email = {
 describe("classifyReply (E15-4)", () => {
   it("reads an invitation, its questions and the status it suggests", async () => {
     const provider = new MockProvider({
-      reply: () => ({ kind: "INTERVIEW", summary: " Invites you to a call. ", questions: ["What is your notice period?", " "], confirmedTime: null }),
+      reply: () => ({ kind: "INTERVIEW", summary: " Invites you to a call. ", questions: ["What is your notice period?", " "], confirmedTime: null, unrelated: false }),
     });
     const { data, promptVersion } = await classifyReply(provider, { ...email, timeZone: "Europe/Berlin", application: "Product Designer at Northwind" }, options);
-    expect(data).toEqual({ kind: "INTERVIEW", summary: "Invites you to a call.", questions: ["What is your notice period?"], confirmedAt: null, suggestedStatus: "INTERVIEW" });
-    expect(promptVersion).toBe("classify-reply@2");
+    expect(data).toEqual({ kind: "INTERVIEW", summary: "Invites you to a call.", questions: ["What is your notice period?"], confirmedAt: null, suggestedStatus: "INTERVIEW", unrelated: false });
+    expect(promptVersion).toBe("classify-reply@3");
     const [call] = provider.calls;
     expect(call.system).toContain("not instructions");
     expect(call.messages[0].content).toContain("<email>");
@@ -31,10 +31,19 @@ describe("classifyReply (E15-4)", () => {
   });
 
   it("keeps a confirmed time, and suggests nothing for an acknowledgement", async () => {
-    const confirmed = await classifyReply(new MockProvider({ reply: () => ({ kind: "INTERVIEW", summary: "Confirms Wednesday.", questions: [], confirmedTime: "2026-10-22T14:00:00+02:00" }) }), { ...email, timeZone: "UTC", application: null }, options);
+    const confirmed = await classifyReply(new MockProvider({ reply: () => ({ kind: "INTERVIEW", summary: "Confirms Wednesday.", questions: [], confirmedTime: "2026-10-22T14:00:00+02:00", unrelated: false }) }), { ...email, timeZone: "UTC", application: null }, options);
     expect(confirmed.data.confirmedAt?.toISOString()).toBe("2026-10-22T12:00:00.000Z");
-    const ack = await classifyReply(new MockProvider({ reply: () => ({ kind: "ACKNOWLEDGEMENT", summary: "Got it.", questions: [], confirmedTime: "not a date" }) }), { ...email, timeZone: "UTC", application: null }, options);
+    const ack = await classifyReply(new MockProvider({ reply: () => ({ kind: "ACKNOWLEDGEMENT", summary: "Got it.", questions: [], confirmedTime: "not a date", unrelated: false }) }), { ...email, timeZone: "UTC", application: null }, options);
     expect(ack.data).toMatchObject({ suggestedStatus: null, confirmedAt: null });
+  });
+
+  it("says when a mail is clearly about something else, only for a mail given an application (public issue 65)", async () => {
+    const provider = new MockProvider({ reply: () => ({ kind: "REJECTION", summary: "Declines another role.", questions: [], confirmedTime: null, unrelated: true }) });
+    const linked = await classifyReply(provider, { ...email, timeZone: "UTC", application: "Product Designer at Northwind" }, options);
+    expect(linked.data).toMatchObject({ kind: "REJECTION", suggestedStatus: "REJECTED", unrelated: true });
+    expect(provider.calls[0].system).toContain("unrelated: true only when");
+    const alone = await classifyReply(provider, { ...email, timeZone: "UTC", application: null }, options);
+    expect(alone.data.unrelated).toBe(false);
   });
 });
 

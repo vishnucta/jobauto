@@ -14,12 +14,22 @@ describe("StrengthMeter", () => {
   it("is a labelled progress bar with the score and the hint", () => {
     render(
       <StrengthMeter
-        profile={{ basics: { ...basics, name: "Jane" }, skills: [], languages: [], experience: [{} as never], projects: [], education: [], publications: [], references: [], facts: [], photo: null }}
+        profile={{ basics: { ...basics, name: "Jane" }, skills: [], languages: [], experience: [{} as never], projects: [], education: [], certifications: [], publications: [], references: [], customSections: [], facts: [], photo: null }}
       />,
     );
     const bar = screen.getByRole("progressbar", { name: "Profile strength" });
     expect(bar).toHaveAttribute("aria-valuenow", "37"); // 1/6 × 40 = 6.7 → plus 30
     expect(bar).toHaveAccessibleDescription("A good start. Experience matters most.");
     expect(screen.getByText("37%")).toBeInTheDocument();
+  });
+
+  it("gives experience its points for a paid role only, not for volunteering alone (#294)", () => {
+    const volunteering = { volunteering: true } as never;
+    render(
+      <StrengthMeter
+        profile={{ basics: { ...basics, name: "Jane" }, skills: [], languages: [], experience: [volunteering], projects: [], education: [], certifications: [], publications: [], references: [], customSections: [], facts: [], photo: null }}
+      />,
+    );
+    expect(screen.getByRole("progressbar", { name: "Profile strength" })).toHaveAttribute("aria-valuenow", "7");
   });
 });

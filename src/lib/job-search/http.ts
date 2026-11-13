@@ -14,14 +14,20 @@ const MAX_BYTES = 5 * 1024 * 1024;
 /**
  * Asks a source for JSON, turning every failure into a JobSearchError: a GET,
  * or a POST of `body` as JSON. A source that takes its key in the path gives a
- * `label` to log instead of it.
+ * `label` to log instead of it; `timeoutMs` is for a source that needs longer.
  */
 export async function requestJson(
   source: JobSource,
   url: URL,
-  { headers = {}, signal, body, label }: { headers?: Record<string, string>; signal?: AbortSignal; body?: unknown; label?: string } = {},
+  {
+    headers = {},
+    signal,
+    body,
+    label,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  }: { headers?: Record<string, string>; signal?: AbortSignal; body?: unknown; label?: string; timeoutMs?: number } = {},
 ): Promise<unknown> {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(timeoutMs);
   const where = label ?? url.pathname;
   let response: Response;
   try {

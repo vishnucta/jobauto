@@ -15,7 +15,7 @@ import type { JobSearchSettingsView } from "@/lib/job-search/sources";
 import { startJob } from "@/lib/jobs/runner";
 import { countTailoredDocuments, zipPdfsJob } from "@/lib/jobs/zip-pdfs";
 import { logServerError } from "@/lib/log";
-import { isJobRetention } from "@/lib/settings";
+import { DOCUMENTS_TO_WRITE, isJobRetention } from "@/lib/settings";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 
 // What Settings saves and tests (SET-1, SET-2, E10-2, E10-3, E10-5, E14-4),
@@ -67,7 +67,7 @@ export async function availableAiModels(): Promise<{ models: string[]; problem: 
 }
 
 /** A test connection on a stop-watch has no business waiting minutes. */
-const TEST_TIMEOUT_MS = 60_000;
+export const TEST_TIMEOUT_MS = 60_000;
 
 /** "Test connection" (SET-2): a short prompt to the saved provider, timed. */
 export async function testAiProvider(): Promise<{ connected: true; model: string; seconds: number } | { connected: false; message: string }> {
@@ -155,7 +155,7 @@ export const settingChoicesSchema = z.strictObject({
     .optional(),
   fileNamePattern: z.string().max(200).optional(),
   includeRefs: z.boolean().optional(),
-  pageLimit: z.enum(["1", "2", "none"]).optional(),
+  documentsToWrite: z.enum(DOCUMENTS_TO_WRITE).optional(),
   nightlyBackup: z.boolean().optional(),
   jobRetentionHours: z.number().refine(isJobRetention).optional(),
   updateCheck: z.boolean().optional(),

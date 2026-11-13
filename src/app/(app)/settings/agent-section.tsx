@@ -8,17 +8,19 @@ import { toastResult } from "@/components/toast";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
-import { useAutosave } from "@/hooks/use-autosave";
+import type { SavedAgentSearch } from "@/lib/agent/search";
+import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
 import type { Country } from "@/lib/job-search/countries";
-import { searchHref, type JobSource, type SearchQuery } from "@/lib/job-search/search";
+import type { JobSource, SearchQuery } from "@/lib/job-search/search";
+import type { Scorer } from "@/lib/scoring/scorers";
 
 import { saveAgentSettings } from "../agent/actions";
-import { RemoteOnlyField, SearchFields, type SearchFieldErrors } from "../jobs/search-fields";
+import { RecurringSearches } from "./recurring-searches";
+import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
 
 export type AgentSettings = {
   enabled: boolean;
-  query: SearchQuery;
   hour: number;
   minScore: number;
   maxScores: number;
@@ -34,28 +36,33 @@ const clock = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /**
- * Settings → Job agent (E16-7): whether it runs, the one search it runs,
- * when, and how much a run may do. Each change saves at once; the search
- * once typing pauses.
+ * Shared daily schedule and AI limits, with explicit saved-search management.
  */
 export function AgentSection({
   initial,
   source,
-  aiReady,
+  scoring,
   countries,
   timeZone,
+  onlyWhileOpen = false,
+  searches,
+  suggestedQuery,
 }: {
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
   source: JobSource | null;
-  aiReady: boolean;
+  /** What scores the postings (Settings → Scoring), and whether it's set up. */
+  scoring: { scorer: Scorer; ready: boolean };
   countries: readonly Country[];
   /** The user's time zone, which the hour is in. */
   timeZone: string;
+  /** In the desktop app on this computer, where it only runs while the app is open (#325). */
+  onlyWhileOpen?: boolean;
+  searches: SavedAgentSearch[];
+  suggestedQuery?: SearchQuery;
 }) {
   const track = useTrackSave();
   const [settings, setSettings] = useState(initial);
-  const [errors, setErrors] = useState<SearchFieldErrors>({});
 
   const change = (next: Partial<AgentSettings>) => {
     const previous = settings;
@@ -64,49 +71,28 @@ export function AgentSection({
       if (!toastResult(result).ok) setSettings(previous);
     });
   };
-  const { flush } = useAutosave(settings.query, (query) => track(saveAgentSettings({ query })));
-  const setQuery = (patch: Partial<SearchQuery>) => {
-    setErrors({});
-    setSettings((current) => ({ ...current, query: { ...current.query, ...patch } }));
-  };
-
-  const turnOn = (on: boolean) => {
-    if (on) {
-      const problems = {
-        keywords: settings.query.keywords.trim() ? undefined : "Type what the agent should look for.",
-        country: settings.query.country ? undefined : "Choose a country.",
-      };
-      setErrors(problems);
-      if (problems.keywords || problems.country) return;
-      // With it, so a search started from Find jobs is saved too.
-      return change({ enabled: true, query: settings.query });
-    }
-    change({ enabled: false });
-  };
 
   return (
     <>
       <SettingsSectionIntro title="Job agent">
-        Once a day it runs one search, scores the new postings against your profile, and keeps the best on the Agent screen. It never sends or applies.
+        Once a day it runs all enabled searches, scores the new postings against your profile, and keeps the best on the Agent screen. It never sends or applies.
       </SettingsSectionIntro>
 
       {source === "ARBEITSAGENTUR" ? (
         // It searches on its own, which the BA's terms forbid most clearly (#223).
         <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
-          The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch, SerpApi or Adzuna in{" "}
+          The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch, SerpApi, Adzuna or FreeHire in{" "}
           <Link href="/settings?section=jobs" className="font-medium text-warning underline underline-offset-2">
             Settings → Job search
           </Link>{" "}
-          for it.
+          for it. Manual Find jobs searches are unaffected.
         </p>
-      ) : (!source || !aiReady) && (
-        <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
-          {!source ? "The agent searches the source you choose in " : "The agent scores postings with the AI provider in "}
-          <Link href={!source ? "/settings?section=jobs" : "/settings?section=ai"} className="font-medium text-warning underline underline-offset-2">
-            {!source ? "Settings → Job search" : "Settings → AI provider"}
-          </Link>
-          {!source ? ", which is off. Choose one first." : ", which isn't set up yet. Choose one first."}
-        </p>
+      ) : !source ? (
+        <SetupNote before="The agent searches the source you choose in " section="jobs" after=", which is off. Choose one first." />
+      ) : scoring.ready ? null : scoring.scorer === "JEV" ? (
+        <SetupNote before="The agent scores postings with Jev, which needs your TypeSafe key in " section="scoring" after="." />
+      ) : (
+        <SetupNote before="The agent scores postings with the AI provider in " section="ai" after=", which isn't set up yet. Choose one first." />
       )}
 
       <Card padding="none" className="px-7 py-4">
@@ -114,32 +100,17 @@ export function AgentSection({
           label="Run the job agent"
           description={
             settings.enabled
-              ? `On. It runs once a day after ${clock(settings.hour)} your time (${timeZone}), and you can run it now and then on the Agent screen.`
+              ? `On. It runs once a day after ${clock(settings.hour)} your time (${timeZone}), and you can run it now and then on the Agent screen.${
+                  onlyWhileOpen ? " On this computer, only while Dossier is open: when it's closed at that hour, the run starts once you open it, the same day." : ""
+                }`
               : "Off. Nothing is searched or scored until it's on."
           }
           checked={settings.enabled}
-          onCheckedChange={turnOn}
+          onCheckedChange={(enabled) => change({ enabled })}
         />
       </Card>
 
-      <Card padding="none" className="flex flex-col gap-4 px-7 py-[26px]">
-        <div className="flex flex-col gap-1">
-          <h3 className="text-field font-medium">What it looks for</h3>
-          <p className="text-meta text-muted">
-            The same search as in{" "}
-            <Link href={searchHref(settings.query)} className="font-medium text-ink underline underline-offset-2">
-              Find jobs
-            </Link>
-            , through the source in Settings → Job search. Postings you saved, dismissed or applied for there are left out.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 sm:grid-cols-2" onBlur={flush}>
-          <SearchFields value={settings.query} onChange={setQuery} source={source} countries={countries} errors={errors} />
-          <div className="sm:col-span-2">
-            <RemoteOnlyField value={settings.query} onChange={setQuery} source={source} />
-          </div>
-        </div>
-      </Card>
+      <RecurringSearches initial={searches} suggestedQuery={suggestedQuery} source={source} countries={countries} />
 
       <Card padding="none" className="grid gap-x-[18px] gap-y-5 px-7 py-[26px] sm:grid-cols-2">
         <Select label="Runs after" hint={`Your time (${timeZone})`} value={String(settings.hour)} onChange={(event) => change({ hour: Number(event.target.value) })}>
@@ -195,9 +166,22 @@ export function AgentSection({
       </Card>
 
       <p className="text-meta text-muted">
-        One search a day, and at most three in any 24 hours. Each run scores up to {plural(settings.maxScores, "posting", "postings")}
-        {settings.autoDraft ? ` and prepares up to ${plural(settings.maxDrafts, "draft", "drafts")}` : ""}. Scoring and drafts go to your AI provider with your profile, as a new application does; the job source only gets the search.
+        One shared daily schedule for all enabled searches, in {timeZone}. Each search requests only the first page, sequentially. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} source requests in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}
+        {settings.autoDraft ? ` and prepares up to ${plural(settings.maxDrafts, "draft", "drafts")}` : ""}. Scoring uses the provider in Settings → Scoring; drafts use your AI provider. Both receive your profile; the job source only gets the search.
       </p>
     </>
+  );
+}
+
+/** What the agent still needs, with a link to the section that sets it up. */
+function SetupNote({ before, section, after }: { before: string; section: SettingsSectionId; after: string }) {
+  return (
+    <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
+      {before}
+      <Link href={settingsSectionHref(section)} className="font-medium text-warning underline underline-offset-2">
+        Settings → {SETTINGS_SECTIONS.find((entry) => entry.id === section)?.label}
+      </Link>
+      {after}
+    </p>
   );
 }

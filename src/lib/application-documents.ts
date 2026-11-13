@@ -9,8 +9,10 @@ import type { z } from "zod";
 
 import { DocumentKind } from "@/generated/prisma/enums";
 import { extractedSchema, trimmedSchema, unitsSchema, type Trimmed, type Unit } from "@/lib/application-data";
+import { frozenProfile, readFrozenCopy } from "@/lib/frozen-copy";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
+import { sectionLayoutSchema } from "@/lib/resume-sections";
 import { loadSettings } from "@/lib/settings-data";
 import { loadTheme, THEME_FIELDS } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, type ThemeData } from "@/lib/themes";
@@ -57,18 +59,29 @@ export type DocumentData = { units: Unit[]; theme: ThemeData; trimmed?: Trimmed 
  * the same for the page and for printing (E8-8).
  */
 export async function loadDocuments(id: string) {
-  const [application, profile, settings] = await Promise.all([loadApplication(id), loadProfile(), loadSettings()]);
-  const baseTheme = (await loadTheme(settings.baseThemeId)) ?? BUILT_IN_THEMES[0];
+  const [application, liveProfile, liveSettings] = await Promise.all([loadApplication(id), loadProfile(), loadSettings()]);
+  const baseTheme = (await loadTheme(liveSettings.baseThemeId)) ?? BUILT_IN_THEMES[0];
+  // Once it was sent, it's drawn from what it was sent with (#299).
+  const copy = readFrozenCopy(application.frozen);
+  const profile = copy ? frozenProfile(copy, liveProfile) : liveProfile;
+  const settings = copy ? { ...liveSettings, paper: copy.paper, dateFormat: copy.dateFormat } : liveSettings;
   const documentData = (kind: DocumentKind): DocumentData | null => {
     const document = application.documents.find((entry) => entry.kind === kind);
     const units = document && readJson(unitsSchema, document.units);
     const trimmed = document && readJson(trimmedSchema, document.trimmed);
-    return document && units ? { units, theme: document.theme ?? baseTheme, ...(trimmed?.length ? { trimmed } : {}) } : null;
+    const frozenTheme = kind === DocumentKind.EMAIL ? null : copy?.themes[kind];
+    return document && units ? { units, theme: frozenTheme ?? document.theme ?? baseTheme, ...(trimmed?.length ? { trimmed } : {}) } : null;
   };
   const extracted = readJson(extractedSchema, application.extracted);
+  const ownSections = readJson(sectionLayoutSchema, application.sections);
+  const sections = ownSections ?? liveSettings.resumeSections;
   return {
     application,
     profile,
+    /** The profile as it is now, whatever the application was sent with: what its Sections menu can add. */
+    liveProfile,
+    /** It was sent, so it's drawn from its copy. */
+    sent: copy !== null,
     settings,
     extracted,
     resume: documentData(DocumentKind.RESUME),
@@ -76,7 +89,10 @@ export async function loadDocuments(id: string) {
     /** The email's units, once it's been written (Email tab). */
     email: documentData(DocumentKind.EMAIL)?.units ?? null,
     /** Settings → "Include references", when the posting asks for them (SET-9). */
-    includeReferences: settings.includeRefs && extracted?.asksForReferences === true,
+    includeReferences: (copy ? copy.includeReferences : settings.includeRefs && extracted?.asksForReferences === true) || sections.withReferences === true,
+    /** Its sections' order and which are off: its own, or the base resume's (#297). */
+    sections,
+    ownSections: ownSections !== null,
     /** Dated the day it was sent; until then, today. */
     letterDate: calendarDay(application.sentAt ?? undefined),
   };

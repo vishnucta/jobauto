@@ -14,7 +14,7 @@ import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { languageJobKey, translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { isFrameUnit, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
-import { isPublicationUnit, unitName } from "@/lib/unit-text";
+import { isPublicationUnit, isVerbatimUnit, unitName } from "@/lib/unit-text";
 
 // The AI's changes to a tailored document, and their Undo: one unit written
 // again (E8-4) and the Refine with AI chat (E8-5, E8-6). The work runs in
@@ -63,9 +63,9 @@ export async function startUnitRewrite({
   if ((frame && !WRITTEN_FRAME_UNITS.has(unitId)) || (document === DocumentKind.EMAIL && !WRITTEN_EMAIL_UNITS.has(unitId))) {
     throw new ActionError("This part isn't written by the AI. Edit it instead.");
   }
-  // A publication is the user's own citation (#218).
-  if (document === DocumentKind.RESUME && isPublicationUnit(unitId)) {
-    throw new ActionError("A publication stays as you wrote it. Edit it instead.");
+  // A certification or publication is the user's own (#293, #218).
+  if (document === DocumentKind.RESUME && isVerbatimUnit(unitId)) {
+    throw new ActionError(`A ${isPublicationUnit(unitId) ? "publication" : "certification"} stays as you wrote it. Edit it instead.`);
   }
   if (frame && shown) {
     await updateDocuments(applicationId, async (documents) => {

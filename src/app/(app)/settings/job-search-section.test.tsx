@@ -22,6 +22,7 @@ const off: JobSearchSettingsView = {
   adzuna: { appId: "", keyState: "none" },
   jooble: { keyState: "none" },
   arbeitsagentur: { offered: true, acceptedAt: null },
+  freehire: { host: "freehire.me" },
 };
 const ACCEPTED = "2026-10-23T09:00:00.000Z";
 const withSource = (view: Partial<JobSearchSettingsView>): JobSearchSettingsView => ({ ...off, ...view });
@@ -37,7 +38,7 @@ beforeEach(() => {
 });
 
 describe("JobSearchSection", () => {
-  it("offers the five sources and Off, as a radio group, Off by default", () => {
+  it("offers the six sources and Off, as a radio group, Off by default", () => {
     render(<JobSearchSection initial={off} />);
     expect(screen.getByRole("heading", { name: "Job search" })).toBeInTheDocument();
     expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual([
@@ -45,6 +46,7 @@ describe("JobSearchSection", () => {
       "SerpApi",
       "Adzuna",
       "Jooble",
+      "FreeHire",
       "Bundesagentur für Arbeit",
       "Off",
     ]);
@@ -150,7 +152,17 @@ describe("JobSearchSection", () => {
 
   it("leaves the Arbeitsagentur out when the server doesn't offer it", () => {
     render(<JobSearchSection initial={withSource({ arbeitsagentur: { offered: false, acceptedAt: null } })} />);
-    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "SerpApi", "Adzuna", "Jooble", "Off"]);
+    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["JSearch", "SerpApi", "Adzuna", "Jooble", "FreeHire", "Off"]);
+  });
+
+  it("says which FreeHire it searches, with no key to ask for", () => {
+    const { unmount } = render(<JobSearchSection initial={withSource({ source: "FREEHIRE" })} />);
+    expect(screen.getByText("No key needed. Dossier searches FreeHire's public catalogue at freehire.me.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/key/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeInTheDocument();
+    unmount();
+    render(<JobSearchSection initial={withSource({ source: "FREEHIRE", freehire: { host: "jobs.example" } })} />);
+    expect(screen.getByText("No key needed. Dossier searches your own FreeHire at jobs.example.")).toBeInTheDocument();
   });
 
   it("shows keys from the environment and keys that can't be read", () => {
@@ -196,5 +208,6 @@ describe("each tile says when its key is kept", () => {
     expect(screen.getByRole("radio", { name: "Adzuna" })).not.toHaveAccessibleDescription(/Key saved|Key from the server/);
     expect(screen.getByRole("radio", { name: "Jooble" })).toHaveAccessibleDescription(/Key saved/);
     expect(screen.getByRole("radio", { name: "Bundesagentur für Arbeit" })).toHaveAccessibleDescription(/Note accepted/);
+    expect(screen.getByRole("radio", { name: "FreeHire" })).not.toHaveAccessibleDescription(/Key saved|Key from the server|Note accepted/);
   });
 });

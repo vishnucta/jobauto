@@ -5,6 +5,7 @@ import { countryCodeFor, countryName, COUNTRIES } from "./countries";
 import { jobSearchError } from "./errors";
 import {
   defaultSearch,
+  describeSearch,
   EMPTY_QUERY,
   foundPostingSchema,
   latestRole,
@@ -35,6 +36,12 @@ describe("search in the URL", () => {
 
   it("leaves defaults out of the URL", () => {
     expect(searchHref({ ...EMPTY_QUERY, keywords: "nurse" })).toBe("/jobs?q=nurse");
+    // The level (public issue 59): in the address when it's asked for, and read back; "any" is the same as none.
+    expect(searchHref({ ...EMPTY_QUERY, keywords: "nurse", experience: "senior" })).toBe("/jobs?q=nurse&level=senior");
+    expect(searchHref({ ...EMPTY_QUERY, keywords: "nurse", experience: "any" })).toBe("/jobs?q=nurse");
+    expect(queryFromParams({ q: "nurse", level: "senior" })).toMatchObject({ experience: "senior" });
+    expect(queryFromParams({ q: "nurse", level: "boss" })).not.toHaveProperty("experience");
+    expect(describeSearch({ ...EMPTY_QUERY, keywords: "nurse", experience: "intern" }, "Germany")).toBe("nurse · Germany · Internship");
   });
 
   it("reads the view from the URL (E14-7)", () => {
@@ -48,6 +55,7 @@ describe("search in the URL", () => {
     expect(sourceFilterFromParams({ from: "JSearch" })).toBe("JSEARCH");
     expect(sourceFilterFromParams({ from: "serpapi" })).toBe("SERPAPI");
     expect(sourceFilterFromParams({ from: "jooble" })).toBe("JOOBLE");
+    expect(sourceFilterFromParams({ from: "freehire" })).toBe("FREEHIRE");
     expect(sourceFilterFromParams({ from: "other" })).toBeNull();
     expect(sourceFilterFromParams({})).toBeNull();
   });
@@ -82,6 +90,19 @@ describe("job keys (what add_found_jobs leaves out)", () => {
     // Without company and title there's only the link; without a link only the opening.
     expect(jobKeys({ url: "https://jobs.example/p2", title: "Designer", company: "", place: "Berlin" })).toEqual(["link:jobs.example/p2"]);
     expect(jobKeys({ url: "", title: "Designer", company: "Acme", place: "Berlin" })).toEqual(["job:acme|designer|berlin"]);
+  });
+});
+
+describe("a search in a line", () => {
+  it("names the radius only for a source that has one", () => {
+    const query = { ...EMPTY_QUERY, keywords: "product designer", place: "Hamburg", country: "de", remoteOnly: true, postedWithin: "week" as const };
+    expect(describeSearch(query, "Germany")).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
+    expect(describeSearch(query, "Germany", ["ADZUNA"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
+    expect(describeSearch(query, "Germany", ["FREEHIRE"])).toBe("product designer · Hamburg · Remote only · Past week");
+    expect(describeSearch({ ...query, place: "" }, "Germany", ["FREEHIRE"])).toBe("product designer · Germany · Remote only · Past week");
+    // A search of several sources keeps the km when one of them has a radius; an AI client's search reads as before.
+    expect(describeSearch(query, "Germany", ["JSEARCH", "FREEHIRE"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
+    expect(describeSearch(query, "Germany", ["CLIENT"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
   });
 });
 

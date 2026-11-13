@@ -38,6 +38,16 @@ test("reads a posting, shows the match and writes tailored documents", async ({ 
   await expect(page.getByRole("region", { name: "Facts for this application" }).getByRole("textbox", { name: "Fact 1", exact: true })).toHaveValue("I'm moving to Amsterdam in January.");
 });
 
+test("counts the tokens it used on the Usage screen (#290)", async ({ page }) => {
+  await page.goto("/usage");
+  await expect(page.getByRole("heading", { level: 1, name: "Usage" })).toBeVisible();
+  // One reading of the posting, as the fake AI server counts every answer.
+  const reading = page.getByRole("row", { name: /^Reading postings/ });
+  await expect(reading.getByRole("cell")).toHaveText(["1", "1,200", "300", "1,500"]);
+  await expect(page.getByRole("row", { name: /^Writing resumes/ }).getByRole("cell").first()).toHaveText("1");
+  await expect(page.getByText(/^Counting since/)).toBeVisible();
+});
+
 test("won't fetch a posting from the server's own network (E7-8)", async ({ page }) => {
   await page.goto("/new?fresh=1");
   await page.getByLabel(/^Link to the posting/).fill("http://localhost:3100/login");
