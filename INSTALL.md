@@ -209,6 +209,35 @@ From then on, start **Chrome for Apply** before you click **Open and fill it in*
 
 While **Chrome for Apply** is open, any device in your Tailscale network can control it, which is how the server fills in forms. Use it only for applying, and close it when you're done. To let only the server reach it, add a rule in Tailscale's access controls that allows port 9222 on the laptop only from the server.
 
+The address under **Browser window** is how the server reaches your laptop, not how you reach the app. Opening the app at its home network address, such as `http://192.168.0.246:3000`, doesn't change it.
+
+### If the Apply tab says Chrome didn't answer
+
+Check these on the laptop, in order:
+
+1. **Is Chrome open for debugging?** Start **Chrome for Apply**, then open `http://127.0.0.1:9222/json/version` in it. If that page shows nothing, close every Chrome window and start the shortcut again.
+2. **Did step 3 run?** Run the `tailscale serve` line again; it does no harm.
+3. **Is the server on Tailscale too?** It can only reach a `100.` address if it is. If it isn't, use your home network instead, as below.
+
+### Without Tailscale: on your home network
+
+When the laptop and the server are on the same home network, the server can reach the laptop by its home network address instead. Chrome still only listens on the laptop itself, so Windows passes the port on. Make the shortcut as in step 2, then:
+
+1. **Find the laptop's home network address.** Type `ipconfig` in PowerShell: it's the **IPv4 Address** under your Wi-Fi or Ethernet adapter, such as `192.168.0.57`. Reserve that address for the laptop in your router's settings, or it may change and the app stops reaching Chrome.
+2. **Pass the port on and let only the server in (once).** In PowerShell as administrator, with your laptop's address after `listenaddress=` and your server's after `-RemoteAddress`:
+   ```powershell
+   netsh interface portproxy add v4tov4 listenaddress=192.168.0.57 listenport=9222 connectaddress=127.0.0.1 connectport=9222
+   New-NetFirewallRule -DisplayName "Chrome for Apply" -Direction Inbound -Protocol TCP -LocalPort 9222 -RemoteAddress 192.168.0.246 -Action Allow
+   ```
+   Passing the port on needs the **IP Helper** service, which runs on Windows by default. On a work laptop, company policy may block either line: then use Tailscale, or another computer.
+3. **Tell the app.** Start **Chrome for Apply** and enter the laptop's address under **Browser window**, such as `http://192.168.0.57:9222`, then click **Test** and **Save**.
+
+To undo it later:
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=192.168.0.57 listenport=9222
+Remove-NetFirewallRule -DisplayName "Chrome for Apply"
+```
+
 ## First steps in the app
 
 1. **Settings → AI provider**: choose **Groq** and paste a free API key from [console.groq.com](https://console.groq.com), **DeepSeek** with a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys) (pay per use, a few euros go a long way), **Gemini** with a key from [Google AI Studio](https://aistudio.google.com/api-keys) (set up billing there first, so Google doesn't use what it's sent), or **Anthropic** with a key from [platform.claude.com](https://platform.claude.com). Press **Test connection**.
