@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import {
   fieldsFromBasics,
   inEntryOrder,
+  LEGACY_ADDRESS_KEY,
   type Basics,
   type EducationItem,
   type ExperienceItem,
@@ -27,13 +28,15 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 /** Saves the Basics (PRO-1, PRO-2): one row per filled-in field, and a cleared one's row removed. Answers with whether the name changed. */
 export async function saveBasicsFields(basics: Basics): Promise<{ nameChanged: boolean }> {
   const before = await loadProfileName();
-  await prisma.$transaction(
-    Object.entries(fieldsFromBasics(basics)).map(([key, value]) =>
+  await prisma.$transaction([
+    ...Object.entries(fieldsFromBasics(basics)).map(([key, value]) =>
       value === null
         ? prisma.profileField.deleteMany({ where: { key } })
         : prisma.profileField.upsert({ where: { key }, create: { key, value }, update: { value } }),
     ),
-  );
+    // The old one-line address, now held by the four address fields.
+    prisma.profileField.deleteMany({ where: { key: LEGACY_ADDRESS_KEY } }),
+  ]);
   return { nameChanged: before !== basics.name };
 }
 

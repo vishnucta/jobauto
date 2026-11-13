@@ -18,7 +18,9 @@ const ATTEMPTS_SHOWN = 8;
 /** The basics forms nearly always ask for. */
 const ASKED: readonly [keyof Basics, string][] = [
   ["phone", "phone number"],
-  ["address", "street address"],
+  ["street", "street"],
+  ["postalCode", "postal code"],
+  ["city", "city"],
 ];
 
 /** "30 Oct, 14:32" in the user's time zone. */

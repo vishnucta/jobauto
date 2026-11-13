@@ -42,14 +42,12 @@ const NOT_WATCHING = "Dossier isn't watching the browser window any more (it was
 const VALUE_SHOWN = 300;
 const shorten = (value: string) => (value.length > VALUE_SHOWN ? `${value.slice(0, VALUE_SHOWN)}…` : value);
 
-/** The standard answers, with whether a street and postal code are saved but not what they are. */
+/** The standard answers. The address is the profile's (update_profile_basics). */
 function answersView(answers: ApplyAnswers) {
   return {
     salary: answers.salary,
     start_date: answers.startDate,
     notice_period: answers.noticePeriod,
-    street_saved: answers.street.trim() !== "",
-    postal_code_saved: answers.postalCode.trim() !== "",
     work_permit: answers.workPermit,
     german_level: answers.germanLevel,
     english_level: answers.englishLevel,
@@ -233,8 +231,6 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
         salary: z.string().trim().max(80).optional().describe("Salary expectation, e.g. '55.000 € brutto/Jahr'"),
         start_date: z.string().trim().max(80).optional().describe("Earliest start: 'sofort', or a day as YYYY-MM-DD"),
         notice_period: z.string().trim().max(80).optional().describe("e.g. 'keine' or '3 Monate zum Monatsende'"),
-        street: z.string().trim().max(120).optional().describe("Street and number, when the profile's address line doesn't split cleanly"),
-        postal_code: z.string().trim().max(12).optional(),
         work_permit: z.boolean().optional().describe("Allowed to work in Germany without sponsorship"),
         german_level: z.enum(LANGUAGE_LEVEL_ANSWERS).optional(),
         english_level: z.enum(LANGUAGE_LEVEL_ANSWERS).optional(),
@@ -253,8 +249,6 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
         salary: input.salary,
         startDate: input.start_date,
         noticePeriod: input.notice_period,
-        street: input.street,
-        postalCode: input.postal_code,
         workPermit: input.work_permit,
         germanLevel: input.german_level,
         englishLevel: input.english_level,

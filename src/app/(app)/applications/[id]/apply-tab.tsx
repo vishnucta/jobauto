@@ -422,8 +422,6 @@ function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applica
         <Input label="Salary expectation" placeholder="e.g. 55.000 € brutto/Jahr" value={answers.salary} onChange={(event) => set("salary", event.target.value)} />
         <Input label="Earliest start date" hint="“sofort”, or a day as YYYY-MM-DD" placeholder="sofort" value={answers.startDate} onChange={(event) => set("startDate", event.target.value)} />
         <Input label="Notice period" placeholder="e.g. keine, or 3 Monate" value={answers.noticePeriod} onChange={(event) => set("noticePeriod", event.target.value)} />
-        <Input label="Street and number" hint="When the address line of your profile doesn't split cleanly" value={answers.street} onChange={(event) => set("street", event.target.value)} />
-        <Input label="Postal code" value={answers.postalCode} onChange={(event) => set("postalCode", event.target.value)} />
         <Select label="German level" value={answers.germanLevel} onChange={(event) => set("germanLevel", event.target.value as ApplyAnswers["germanLevel"])}>
           {LANGUAGE_LEVEL_ANSWERS.map((level) => (
             <option key={level} value={level}>

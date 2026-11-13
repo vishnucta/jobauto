@@ -63,7 +63,7 @@ afterAll(() => prisma().$disconnect());
 
 const basics = {
   name: "Jane Doe", headline: "", email: "", phone: "", dob: "1992-04-18", website: "",
-  address: "", city: "", country: "", linkedin: "", summary: "", showAge: true,
+  street: "", houseNumber: "", postalCode: "", city: "", country: "", linkedin: "", summary: "", showAge: true,
 };
 
 describe("profile actions", () => {
@@ -79,6 +79,22 @@ describe("profile actions", () => {
 
     await saveBasics({ ...basics, dob: "", showAge: false });
     expect(await fields()).toEqual([{ key: "name", value: "Jane Doe" }]);
+  });
+
+  it("shows an address saved as one line in its parts, and stores the parts in its place on the next save", async () => {
+    await prisma().profileField.createMany({
+      data: [
+        { key: "name", value: "Jane Doe" },
+        { key: "address", value: "Musterweg 7, Pinneberg 25421" },
+        { key: "city", value: "Hamburg" },
+      ],
+    });
+    const { basics: shown } = await loadProfile();
+    expect(shown).toMatchObject({ street: "Musterweg", houseNumber: "7", postalCode: "25421", city: "Pinneberg" });
+
+    await saveBasics({ ...shown, headline: "Analyst" });
+    const rows = Object.fromEntries((await prisma().profileField.findMany()).map((row) => [row.key, row.value]));
+    expect(rows).toEqual({ name: "Jane Doe", headline: "Analyst", street: "Musterweg", houseNumber: "7", postalCode: "25421", city: "Pinneberg" });
   });
 
   it("adds skills in order and ignores duplicates in any case", async () => {

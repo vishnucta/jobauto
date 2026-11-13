@@ -13,7 +13,7 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn() }));
 
 const empty: Basics = {
   name: "", headline: "", email: "", phone: "", dob: "", website: "",
-  address: "", city: "", country: "", linkedin: "", summary: "", showAge: false,
+  street: "", houseNumber: "", postalCode: "", city: "", country: "", linkedin: "", summary: "", showAge: false,
 };
 
 function Harness({ initial = empty }: { initial?: Basics }) {
@@ -35,7 +35,7 @@ describe("BasicsSection", () => {
     render(<Harness />);
     for (const label of [
       "Full name", "Headline", "Email", "Phone (optional)", "Date of birth (optional)", "Website (optional)",
-      "Street address (optional)", "City", "Country", "LinkedIn (optional)", "A few lines about you",
+      "Street (optional)", "House number (optional)", "Postal code (PLZ) (optional)", "City", "Country", "LinkedIn (optional)", "A few lines about you",
     ]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }

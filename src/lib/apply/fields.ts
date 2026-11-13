@@ -5,7 +5,8 @@ import { ANSWER_LABELS, type AnswerKey, type AnswerSet, type LanguageLevelAnswer
 // form.ts), and a plan of what to type, pick, tick and upload goes out,
 // with the fields that need the user herself. German and English labels,
 // names and ids are read; nothing is typed into a field that isn't
-// understood, and nothing a form already holds is overwritten.
+// understood, and nothing a form already holds is overwritten, except an
+// address the site guessed (CORRECTED).
 
 /** One form control as the page scan reports it. */
 export type FormControl = {
@@ -94,7 +95,9 @@ const TEXT_RULES: readonly [AnswerKey, RegExp][] = [
   ["lastName", /\b(family name|nachname|last ?name|lastname|surname|familienname|lname|zuname)\b/],
   ["postalCode", /\b(postal code|plz|postleitzahl|zip|zipcode|postal|postcode|post code)\b/],
   ["city", /\b(address level2|stadt|ort|wohnort|city|town|locality)\b/],
-  ["street", /\b(street address|address line1|stra(ss|ß)e|street|anschrift|adresse|address|hausnummer)\b/],
+  // "Straße und Hausnummer" is one field for both; "Hausnummer" or "Nr." alone is the number's own.
+  ["street", /\b(street address|address line1|stra(ss|ß)e|street|anschrift|adresse|address)\b/],
+  ["houseNumber", /\b(hausnummer|hausnr|house ?number|house no|nr)\b/],
   ["dob", /\b(bday|geburtsdatum|geburtstag|date of birth|birth ?date|birthday|dob|geboren)\b/],
   ["salary", /\b(gehalt|gehaltsvorstellung|gehaltsvorstellungen|gehaltswunsch|wunschgehalt|zielgehalt|salary|compensation|verg(u|ue)tung|jahresgehalt|bruttogehalt|bruttojahresgehalt)\b/],
   ["noticePeriod", /\b(k(u|ue)ndigungsfrist|notice period|notice)\b/],
@@ -122,7 +125,19 @@ const TEXT_RULES: readonly [AnswerKey, RegExp][] = [
 const NOT_THE_CANDIDATE =
   /\b(firma|company|unternehmen|arbeitgeber|employer|position|job ?title|jobtitel|stellenbezeichnung|referenz|reference|how did you|wie sind sie|aufmerksam|gender|geschlecht|anrede|salutation|nationalit|staatsangeh|user ?name|benutzername|login|bundesland|province)|\b(quelle|source|titel|title|state|region)\b/;
 /** Rules that a "not the candidate" hint overrules; the rest are specific enough. */
-const HINT_SENSITIVE = new Set<AnswerKey>(["fullName", "city", "street", "country", "message", "website"]);
+const HINT_SENSITIVE = new Set<AnswerKey>(["fullName", "city", "street", "houseNumber", "country", "message", "website"]);
+
+/**
+ * The address: a value the site put there itself, such as a guess from the uploaded resume,
+ * is replaced with the profile's (bewerbung fork). Every other field keeps what it holds.
+ */
+const CORRECTED = new Set<AnswerKey>(["street", "houseNumber", "postalCode", "city"]);
+
+/** "Musterstraße 12" without its number "12", for a form that asks for the number on its own. */
+function streetWithoutNumber(street: string, houseNumber: string): string {
+  if (!houseNumber || !street.endsWith(` ${houseNumber}`)) return street;
+  return street.slice(0, -houseNumber.length).trim();
+}
 
 const OPT_IN = /newsletter|talent ?pool|talentpool|informiert|benachrichtig|zukunftig|future|marketing|keep me|other positions|weitere stellen|updates|job ?alert/;
 const CONSENT =
@@ -309,7 +324,8 @@ export function planFill(controls: readonly FormControl[], answers: AnswerSet, f
     else leave(first, answer ? REASONS.noOption : REASONS.noAnswer, question);
   }
 
-  // Everything else.
+  // Everything else. A form with a field of its own for the house number gets the street without it.
+  const numberApart = controls.some((control) => control.type !== "file" && control.type !== "radio" && classify(control) === "houseNumber");
   for (const control of controls) {
     if (control.type === "file" || control.type === "radio") continue;
     const target = classify(control);
@@ -337,7 +353,7 @@ export function planFill(controls: readonly FormControl[], answers: AnswerSet, f
       continue;
     }
     const key = target as AnswerKey;
-    const answer = answers[key];
+    const answer = key === "street" && numberApart ? streetWithoutNumber(answers.street, answers.houseNumber) : answers[key];
     if (control.tag === "select") {
       const current = control.options.find((option) => option.value === control.value);
       if (current && !PLACEHOLDER_OPTION.test(fold(current.text))) {
@@ -354,7 +370,9 @@ export function planFill(controls: readonly FormControl[], answers: AnswerSet, f
       continue;
     }
     if (control.value.trim()) {
-      kept.push({ ref: control.ref, label });
+      const corrected = CORRECTED.has(key) ? valueFor(key, answer, control.type) : null;
+      if (corrected !== null && fold(corrected) !== fold(control.value)) actions.push({ kind: "type", ref: control.ref, label, key, value: corrected });
+      else kept.push({ ref: control.ref, label });
       continue;
     }
     if (!answer) {

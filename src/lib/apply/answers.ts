@@ -20,7 +20,10 @@ export const applyAnswersSchema = z.object({
   startDate: z.string().max(80).catch(""),
   /** e.g. "keine" or "3 Monate zum Monatsende". */
   noticePeriod: z.string().max(80).catch(""),
-  /** Street and number, when the profile's address line doesn't split cleanly. */
+  /**
+   * Street and number, and postal code, from before the profile held the address in parts.
+   * No longer shown: used only while the profile's own street and postal code are empty.
+   */
   street: z.string().max(120).catch(""),
   postalCode: z.string().max(12).catch(""),
   /** Allowed to work in Germany without sponsorship. */
@@ -41,6 +44,7 @@ export const ANSWER_KEYS = [
   "email",
   "phone",
   "street",
+  "houseNumber",
   "postalCode",
   "city",
   "country",
@@ -69,6 +73,7 @@ export const ANSWER_LABELS: Record<AnswerKey, string> = {
   email: "Email address",
   phone: "Phone number",
   street: "Street and number",
+  houseNumber: "House number",
   postalCode: "Postal code",
   city: "City",
   country: "Country",
@@ -94,43 +99,31 @@ export function splitName(name: string): { first: string; last: string } {
 }
 
 /**
- * Street and postal code from a free address line such as
- * "Musterstraße 12, 20095 Hamburg": the five digits are the postal code,
- * what's before them (and the city, if it's there) is the street.
+ * The answers for one application, from the profile, the saved standard answers and the cover letter.
+ * The address is the profile's: street is the street with its number, for forms with one field for
+ * both; a form with a field of its own for the number gets them apart (planFill).
  */
-export function splitAddress(address: string, city: string): { street: string; postalCode: string } {
-  const line = address.trim();
-  if (!line) return { street: "", postalCode: "" };
-  const postal = /\b(\d{5})\b/.exec(line);
-  const postalCode = postal?.[1] ?? "";
-  let street = line;
-  if (postal) street = line.slice(0, postal.index);
-  if (city) street = street.replace(new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), "");
-  street = street.replace(/[\s,;]+$/, "").replace(/^[\s,;]+/, "").trim();
-  return { street, postalCode };
-}
-
-/** The answers for one application, from the profile, the saved standard answers and the cover letter. */
 export function buildAnswerSet({
   basics,
   answers,
   letterParagraphs,
 }: {
-  basics: Pick<Basics, "name" | "email" | "phone" | "address" | "city" | "country" | "linkedin" | "website" | "dob">;
+  basics: Pick<Basics, "name" | "email" | "phone" | "street" | "houseNumber" | "postalCode" | "city" | "country" | "linkedin" | "website" | "dob">;
   answers: ApplyAnswers;
   /** The cover letter's paragraphs, for "message" fields; empty when there's no letter. */
   letterParagraphs: string[];
 }): AnswerSet {
   const { first, last } = splitName(basics.name);
-  const fromAddress = splitAddress(basics.address, basics.city);
+  const street = [basics.street.trim(), basics.houseNumber.trim()].filter(Boolean).join(" ");
   return {
     firstName: first,
     lastName: last,
     fullName: basics.name.trim(),
     email: basics.email.trim(),
     phone: basics.phone.trim(),
-    street: answers.street.trim() || fromAddress.street,
-    postalCode: answers.postalCode.trim() || fromAddress.postalCode,
+    street: street || answers.street.trim(),
+    houseNumber: basics.houseNumber.trim(),
+    postalCode: basics.postalCode.trim() || answers.postalCode.trim(),
     city: basics.city.trim(),
     country: basics.country.trim(),
     linkedin: basics.linkedin.trim(),
@@ -148,4 +141,4 @@ export function buildAnswerSet({
 }
 
 /** The keys that are contact details: never sent to the AI, and shown as "filled" rather than with their value. */
-export const PRIVATE_KEYS: ReadonlySet<AnswerKey> = new Set<AnswerKey>(["email", "phone", "street", "postalCode", "dob"]);
+export const PRIVATE_KEYS: ReadonlySet<AnswerKey> = new Set<AnswerKey>(["email", "phone", "street", "houseNumber", "postalCode", "dob"]);

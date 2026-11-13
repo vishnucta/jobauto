@@ -17,7 +17,7 @@ describe("the letter's frame (E8-11)", () => {
       greeting: "Dear Ledgerly team,",
       signature: "Jane Doe",
     });
-    expect(defaultFrame({ ...context, basics: { ...basics, name: " ", email: "", phone: "", website: "", linkedin: "", city: "", country: "", address: "" }, company: "", location: "" })).toEqual({
+    expect(defaultFrame({ ...context, basics: { ...basics, name: " ", email: "", phone: "", website: "", linkedin: "", city: "", country: "", street: "", houseNumber: "", postalCode: "" }, company: "", location: "" })).toEqual({
       sender: "Your name",
       date: "3 October 2026",
       recipient: "Hiring team",

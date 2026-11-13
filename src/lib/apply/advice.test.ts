@@ -24,7 +24,7 @@ const control = (over: Partial<FormControl> & { ref: string }): FormControl => (
 });
 
 const answers = buildAnswerSet({
-  basics: { name: "Erika Mustermann", email: "e@example.com", phone: "", address: "", city: "Hamburg", country: "Germany", linkedin: "", website: "", dob: "" },
+  basics: { name: "Erika Mustermann", email: "e@example.com", phone: "", street: "", houseNumber: "", postalCode: "", city: "Hamburg", country: "Germany", linkedin: "", website: "", dob: "" },
   answers: { ...DEFAULT_APPLY_ANSWERS, salary: "55.000 €", startDate: "sofort" },
   letterParagraphs: ["Ich bewerbe mich."],
 });

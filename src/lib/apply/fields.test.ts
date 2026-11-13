@@ -27,7 +27,9 @@ const answers = buildAnswerSet({
     name: "Erika Mustermann",
     email: "p@example.com",
     phone: "+49 170 1234567",
-    address: "Musterstraße 12, 20095 Hamburg",
+    street: "Musterstraße",
+    houseNumber: "12",
+    postalCode: "20095",
     city: "Hamburg",
     country: "Germany",
     linkedin: "https://www.linkedin.com/in/p",
@@ -185,6 +187,35 @@ describe("planning the fill of a German form", () => {
       ["Passwort", false, REASONS.account],
       ["Wie sind Sie auf uns aufmerksam geworden?", false, REASONS.unknown],
     ]);
+  });
+
+  it("gives a form with a field of its own for the house number the street without it", () => {
+    const plan = planFill([control({ ref: "s", label: "Straße" }), control({ ref: "n", label: "Nr. (opt.)" })], answers, { cv: false, coverLetter: false });
+    expect(plan.actions).toMatchObject([
+      { ref: "s", key: "street", value: "Musterstraße" },
+      { ref: "n", key: "houseNumber", value: "12" },
+    ]);
+    // One field for both gets both.
+    expect(classify(control({ ref: "x", label: "Straße und Hausnummer" }))).toBe("street");
+  });
+
+  it("corrects an address the site filled in itself, and leaves everything else it holds", () => {
+    const plan = planFill(
+      [
+        control({ ref: "c", label: "Wohnort", value: "Berlin" }),
+        control({ ref: "p", label: "PLZ", value: "10115" }),
+        control({ ref: "s", label: "Straße", value: "Musterstraße 12" }),
+        control({ ref: "g", label: "Gehaltsvorstellung", value: "60.000" }),
+      ],
+      answers,
+      { cv: false, coverLetter: false },
+    );
+    expect(plan.actions).toMatchObject([
+      { kind: "type", ref: "c", key: "city", value: "Hamburg" },
+      { kind: "type", ref: "p", key: "postalCode", value: "20095" },
+    ]);
+    // Already right, or not part of the address: left as they are.
+    expect(plan.kept.map((entry) => entry.ref)).toEqual(["s", "g"]);
   });
 
   it("puts the letter into 'other documents' when there is no letter input, and nothing twice", () => {

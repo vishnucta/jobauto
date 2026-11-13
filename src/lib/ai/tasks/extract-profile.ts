@@ -26,7 +26,9 @@ const answerSchema = z.object({
     phone: text,
     dob: text,
     website: text,
-    address: text,
+    street: text,
+    houseNumber: text,
+    postalCode: text,
     city: text,
     country: text,
     linkedin: text,
@@ -46,7 +48,7 @@ const answerSchema = z.object({
 const INSTRUCTIONS = `You turn the text of a candidate's resume into their profile, as JSON.
 
 Take everything only from the resume: never add, guess or improve facts. Use null, an empty string or an empty list for anything it doesn't say.
-- basics: name; headline (their current title or one-line description); email; phone; dob (date of birth as YYYY-MM-DD, only if the resume gives the full date); website; address (street and number); city; country; linkedin (the URL or handle); summary (their profile or summary paragraph, in their words).
+- basics: name; headline (their current title or one-line description); email; phone; dob (date of birth as YYYY-MM-DD, only if the resume gives the full date); website; their postal address in parts, each only if the resume gives it: street (the street's name, without the number), houseNumber, postalCode, city (where they live); country; linkedin (the URL or handle); summary (their profile or summary paragraph, in their words).
 - skills: skills, tools and methods the resume lists or clearly names, each short ("Figma", "Design systems", "User research"), once each.
 - languages: spoken languages with a level: NATIVE, or the CEFR level C2, C1, B2, B1, A2 or A1 ("fluent" is C1, "business" B2, "basic" A2). Use null when no level is given.
 - experience: every role, most recent first. startYear and endYear as four-digit years, startMonth and endMonth as 1–12 (null when only a year is given); current is true when the role hasn't ended ("present", "today"). bullets: what they did, one item per point, in the resume's words. skills: the skills from your skills list this role mentions.

@@ -10,6 +10,7 @@ import {
   inEntryOrder,
   fieldsFromBasics,
   filledBasics,
+  splitAddressLine,
   formatDateRange,
   formatMonthYear,
   LANGUAGE_LEVELS,
@@ -106,11 +107,11 @@ describe("dates", () => {
 describe("basics", () => {
   const empty = {
     name: "", headline: "", email: "", phone: "", dob: "", website: "",
-    address: "", city: "", country: "", linkedin: "", summary: "",
+    street: "", houseNumber: "", postalCode: "", city: "", country: "", linkedin: "", summary: "",
   };
 
   it("counts filled required fields, ignoring whitespace", () => {
-    expect(BASICS_FIELDS).toHaveLength(11);
+    expect(BASICS_FIELDS).toHaveLength(13);
     expect(filledBasics(empty)).toBe(0);
     expect(filledBasics({ ...empty, name: "Jane", email: "jane.doe@example.com", city: "  " })).toBe(2);
   });
@@ -139,7 +140,7 @@ describe("profile strength", () => {
   });
 
   it("leaves out the optional basics (#216)", () => {
-    const optional = { ...basics, phone: "p", dob: "1992-04-18", website: "w", address: "a", linkedin: "l" };
+    const optional = { ...basics, phone: "p", dob: "1992-04-18", website: "w", street: "s", houseNumber: "1", postalCode: "12345", linkedin: "l" };
     expect(profileStrength({ ...none, basics: optional }).percent).toBe(0);
     expect(filledBasics(optional)).toBe(0);
   });
@@ -176,6 +177,38 @@ describe("stored basics", () => {
     const rows = Object.entries(fieldsFromBasics(basics)).flatMap(([key, value]) => (value === null ? [] : [{ key, value }]));
     expect(basicsFromFields(rows)).toEqual(basics);
     expect(basicsFromFields([{ key: "nickname", value: "Lee" }])).toEqual({ ...basics, name: "", dob: "", showAge: false });
+  });
+
+  it("reads the old one-line address into street, number, postal code and city, the line's city first", () => {
+    const read = basicsFromFields([
+      { key: "address", value: "Musterweg 7, Pinneberg 25421" },
+      { key: "city", value: "Hamburg" },
+    ]);
+    expect(read).toMatchObject({ street: "Musterweg", houseNumber: "7", postalCode: "25421", city: "Pinneberg" });
+    // Without a city in the line, the City field stays.
+    expect(basicsFromFields([{ key: "address", value: "Musterweg 7" }, { key: "city", value: "Hamburg" }])).toMatchObject({ street: "Musterweg", houseNumber: "7", postalCode: "", city: "Hamburg" });
+  });
+
+  it("ignores the old line once the address is stored in parts", () => {
+    const read = basicsFromFields([
+      { key: "address", value: "Musterweg 7, 25421 Pinneberg" },
+      { key: "street", value: "Neue Straße" },
+      { key: "city", value: "Hamburg" },
+    ]);
+    expect(read).toMatchObject({ street: "Neue Straße", houseNumber: "", postalCode: "", city: "Hamburg" });
+  });
+});
+
+describe("splitAddressLine", () => {
+  it.each([
+    ["Musterstraße 12, 20095 Hamburg", { street: "Musterstraße", houseNumber: "12", postalCode: "20095", city: "Hamburg" }],
+    ["Musterstraße 12a 20095 Hamburg", { street: "Musterstraße", houseNumber: "12a", postalCode: "20095", city: "Hamburg" }],
+    ["Am Markt 3-5, Pinneberg 25421", { street: "Am Markt", houseNumber: "3-5", postalCode: "25421", city: "Pinneberg" }],
+    ["12 Main Street, Springfield", { street: "Main Street", houseNumber: "12", postalCode: "", city: "Springfield" }],
+    ["Musterstraße", { street: "Musterstraße", houseNumber: "", postalCode: "", city: "" }],
+    ["  ", { street: "", houseNumber: "", postalCode: "", city: "" }],
+  ])("splits %j", (line, parts) => {
+    expect(splitAddressLine(line)).toEqual(parts);
   });
 });
 
