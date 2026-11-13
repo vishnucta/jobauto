@@ -9,6 +9,8 @@ import { action, ActionError } from "@/lib/action";
 import { lockAgentSearches } from "@/lib/agent/searches";
 import { AiError } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
+import { ntfyTarget } from "@/lib/alert-address";
+import { AlertError, sendAlert } from "@/lib/alerts";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
 import { deleteAllBackups } from "@/lib/backups";
@@ -288,4 +290,28 @@ export const removeConnectorRedirect = action(z.object({ uri: z.string().max(200
   const redirects = (await loadSettings()).connectorRedirects.filter((entry) => entry !== uri);
   await saveSettings({ connectorRedirects: redirects });
   return { redirects };
+});
+
+// Phone alerts (alerts.ts): an ntfy topic for strong new matches and new jobs on careers pages.
+
+/** Sends alerts to this ntfy topic, or turns them off with null. */
+export const saveAlertAddress = action(z.object({ address: z.string().trim().max(500).nullable() }), async ({ address }) => {
+  if (address && !ntfyTarget(address)) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/your-topic.");
+  await saveSettings({ alertAddress: address || null, alertProblem: null });
+  return { address: address || null };
+});
+
+/** "Send a test": an alert to the saved topic now, so the phone shows whether it arrives. */
+export const testAlert = action(z.object({}), async (_input, { toast }) => {
+  const { alertAddress } = await loadSettings();
+  if (!alertAddress) throw new ActionError("Save a topic address first.");
+  try {
+    await sendAlert(alertAddress, { title: "Test from jobauto", message: "Alerts arrive here: strong new matches and new jobs on the careers pages you follow.", open: "/agent" });
+  } catch (error) {
+    if (error instanceof AlertError) throw new ActionError(error.message);
+    throw error;
+  }
+  await saveSettings({ alertProblem: null });
+  toast("Sent. It should be on your phone in a few seconds.");
+  return null;
 });

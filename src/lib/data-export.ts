@@ -70,6 +70,9 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "googleClientId",
   "googleClientSecretEnc",
   "browserTimeZone",
+  // A phone alert topic is as good as a password (alerts.ts).
+  "alertAddress",
+  "alertProblem",
   // The apply assistant's laptop Chrome is an address in this server's network.
   "applyBrowserAddress",
   // An import must never open the MCP connector's addresses on this server (#221), or let another app sign in (#281).

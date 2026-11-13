@@ -191,6 +191,14 @@ export const settingsSchema = z.object({
   agentAutoDraft: flag(false),
   /** The latest runs, newest first. They belong to the install: exports leave them out (INSTALL_SETTINGS). */
   agentRuns: json(z.array(agentRunSchema)).catch([]),
+  // Phone alerts (alerts.ts): the ntfy topic strong new matches and new jobs
+  // on careers pages go to; null while they're off. The topic is as good as
+  // a password and belongs to the install, as does why the last alert
+  // failed, so exports leave both out (INSTALL_SETTINGS).
+  alertAddress: z.string().nullable().catch(null),
+  alertProblem: z.string().nullable().catch(null),
+  /** The job agent alerts about postings scored at least this. */
+  alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
   // Startups (#222): when the screen was last opened, since the daily refresh
   // only runs while it's in use, and what the last refresh found. They belong
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).

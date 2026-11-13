@@ -159,6 +159,7 @@ export const settingChoicesSchema = z.strictObject({
   nightlyBackup: z.boolean().optional(),
   jobRetentionHours: z.number().refine(isJobRetention).optional(),
   updateCheck: z.boolean().optional(),
+  alertMinScore: z.number().int().min(0).max(100).optional(),
 });
 export type SettingChoices = z.output<typeof settingChoicesSchema>;
 

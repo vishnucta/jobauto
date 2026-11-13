@@ -69,6 +69,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             autoDraft: settings.agentAutoDraft,
           }}
           searches={await listAgentSearches()}
+          alerts={{ address: settings.alertAddress, minScore: settings.alertMinScore, problem: settings.alertProblem }}
           suggestedQuery={(await loadSearch())?.query}
           source={(await loadJobSearchConfig()).source}
           scoring={await scoringReadiness()}

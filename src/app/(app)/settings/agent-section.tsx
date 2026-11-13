@@ -15,6 +15,7 @@ import type { JobSource, SearchQuery } from "@/lib/job-search/search";
 import type { Scorer } from "@/lib/scoring/scorers";
 
 import { saveAgentSettings } from "../agent/actions";
+import { PhoneAlerts, type PhoneAlertSettings } from "./phone-alerts";
 import { RecurringSearches } from "./recurring-searches";
 import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
@@ -47,6 +48,7 @@ export function AgentSection({
   onlyWhileOpen = false,
   searches,
   suggestedQuery,
+  alerts,
 }: {
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
@@ -60,6 +62,8 @@ export function AgentSection({
   onlyWhileOpen?: boolean;
   searches: SavedAgentSearch[];
   suggestedQuery?: SearchQuery;
+  /** Phone alerts for strong matches and new jobs on careers pages. */
+  alerts: PhoneAlertSettings;
 }) {
   const track = useTrackSave();
   const [settings, setSettings] = useState(initial);
@@ -164,6 +168,8 @@ export function AgentSection({
           onCheckedChange={(autoDraft) => change({ autoDraft })}
         />
       </Card>
+
+      <PhoneAlerts initial={alerts} />
 
       <p className="text-meta text-muted">
         One shared daily schedule for all enabled searches, in {timeZone}. Each search requests only the first page, sequentially. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} source requests in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}

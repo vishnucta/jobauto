@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { AiError } from "@/lib/ai/errors";
+import { alertIfOn, matchLines } from "@/lib/alerts";
 import { germanFit, textForGerman, profileGerman } from "@/lib/german-need";
 import { dayOf } from "@/lib/calendar-view";
 import { searchPostings } from "@/lib/job-search";
@@ -229,6 +230,8 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
   let queued = 0;
   const kept: string[] = [];
   let problem: string | null = null;
+  // The ones worth a phone alert, best first once sorted.
+  const strong: { title: string; company: string; score: number }[] = [];
   for (const posting of toScore) {
     if (context.signal.aborted) break;
     try {
@@ -243,6 +246,7 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
       kept.push(candidate.id);
       scored += 1;
       if (data.score >= settings.agentMinScore) queued += 1;
+      if (data.score >= settings.alertMinScore) strong.push({ title: posting.title, company: posting.company, score: data.score });
     } catch (error) {
       // Another run kept it first: it's seen either way.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") continue;
@@ -250,6 +254,11 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
       if (error instanceof AiError) problem = error.message;
       else if (!context.signal.aborted) logServerError("job agent scoring", error);
     }
+  }
+
+  if (strong.length > 0 && !context.signal.aborted) {
+    strong.sort((a, b) => b.score - a.score);
+    await alertIfOn({ title: strong.length === 1 ? "A strong new match" : `${strong.length} strong new matches`, message: matchLines(strong), open: "/agent" });
   }
 
   // Auto-draft (#197, off by default): the best of this run's, one job each.
