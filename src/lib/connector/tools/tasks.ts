@@ -6,6 +6,7 @@ import { DocumentKind, JobStatus } from "@/generated/prisma/enums";
 import { agentDraftJob } from "@/lib/agent/draft";
 import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
+import { prepareCallJob } from "@/lib/jobs/prepare-call";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
 import { searchRunHref, viewHref } from "@/lib/job-search/search";
@@ -179,6 +180,16 @@ const KINDS: Record<string, Tell> = {
     };
   },
   [agentScanJob.type]: (task, linkTo) => ({ task: "Running the job agent", result: resultOf(agentScanJob, task) ?? undefined, link: linkTo("/agent") }),
+  [prepareCallJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(prepareCallJob, task)?.applicationId;
+    return {
+      task: "Preparing for a call",
+      about: { application_id: applicationId },
+      result: resultOf(prepareCallJob, task) ? { prepared: true } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}?tab=prep`) : undefined,
+      next: "get_call_prep reads the pack.",
+    };
+  },
   [careersCheckJob.type]: (task, linkTo) => {
     const checked = resultOf(careersCheckJob, task);
     return {

@@ -73,6 +73,7 @@ import { ResumeScore } from "./resume-score";
 import { WriteMissingDocument } from "./write-missing-document";
 import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
+import { PrepTab, type PrepTabData } from "./prep-tab";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
 import { EmailTab, type Attachments } from "./email-tab";
@@ -205,6 +206,8 @@ export type ApplicationViewProps = {
   suggestions: RefineSuggestions;
   /** The Apply tab (Phase A of the bewerbung fork). */
   apply: ApplyTabData;
+  /** The Call prep tab (jobauto fork). */
+  prep: PrepTabData;
 };
 
 /**
@@ -252,6 +255,7 @@ export function ApplicationView({
   refining,
   suggestions,
   apply,
+  prep,
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -882,6 +886,7 @@ export function ApplicationView({
               {waiting > 0 ? `Conversation · ${waiting} new` : gmail.emails.length > 0 ? `Conversation · ${gmail.emails.length}` : "Conversation"}
             </TabsTrigger>
           )}
+          <TabsTrigger value="prep">Call prep</TabsTrigger>
           <TabsTrigger value="posting">{score ? `Job posting · ${score.hit}/${score.total} match` : "Job posting"}</TabsTrigger>
           <TabsTrigger value="notes">{notes > 0 ? `Notes · ${notes}` : "Notes"}</TabsTrigger>
         </TabsList>
@@ -1013,6 +1018,10 @@ export function ApplicationView({
 
         <TabsContent value="apply" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} />
+        </TabsContent>
+
+        <TabsContent value="prep" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
+          <PrepTab applicationId={application.id} data={prep} aiReady={aiReady} company={application.company} />
         </TabsContent>
 
         <TabsContent value="conversation" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

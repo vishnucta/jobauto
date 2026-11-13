@@ -542,6 +542,10 @@ model Application {
   jobs                Job[]
   /// Runs of the apply assistant on the employer's page (Phase A), deleted with it.
   applyAttempts       ApplyAttempt[]
+  /// The phone-screen prep pack (callPrepSchema in src/lib/call-prep.ts), once prepared.
+  prep                Json?
+  /// The prompt version that wrote `prep`, e.g. "prepare-call@1".
+  prepWith            String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 

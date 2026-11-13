@@ -27,6 +27,7 @@ import { resumeContent, sectionsWithContent } from "@/lib/resume-content";
 import { sectionName } from "@/lib/resume-sections";
 import { loadThemes } from "@/lib/theme-data";
 import { userTimeZone } from "@/lib/time-zone";
+import { callPrepOf, prepJobKey } from "@/lib/call-prep";
 
 import { ApplicationView } from "./application-view";
 import { metaLine } from "./meta";
@@ -68,6 +69,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
     ]);
 
   const apply = await loadApplyTab(application, profile, settings, timeZone);
+  const prepJobs = await findUnfinishedJobs(prepJobKey(id));
   const match = readJson(matchSchema, application.match);
   const messages = application.messages
     .map((message, index) => ({
@@ -176,6 +178,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       score={match && match.items.length > 0 ? matchScore(match) : null}
       initialTab={tabFrom(tab)}
       apply={apply}
+      prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
       aiReady={aiReady}
       rewriting={rewriting}
       messages={messages}

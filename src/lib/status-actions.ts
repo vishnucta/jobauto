@@ -6,6 +6,7 @@ import { z } from "zod";
 import { ApplicationStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
 import { approveCandidate } from "@/lib/agent/draft";
+import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 
 import { statusInfo } from "./status";
@@ -35,6 +36,8 @@ export const setStatus = action(
     const result = await applyStatusChange(prisma, id, to);
     if (result.outcome === "not-found") throw new ActionError(NOT_FOUND);
     if (result.outcome === "unchanged") return { eventId: null };
+    // A first call is coming: its prep pack is prepared now.
+    await prepareOnStatus(id, to);
 
     refreshEverything();
     toast(statusInfo(to).toast);

@@ -20,6 +20,7 @@ import { logServerError } from "@/lib/log";
 import { saveScore } from "@/lib/posting-scores";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { foundFromPosting } from "@/lib/postings";
+import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { statusInfo } from "@/lib/status";
@@ -37,6 +38,7 @@ import { registerPostingTools } from "./tools/postings";
 import { registerProfileTools } from "./tools/profile";
 import { registerRecruiterTools } from "./tools/recruiters";
 import { registerCareersTools } from "./tools/careers";
+import { registerPrepTools } from "./tools/prep";
 import { registerSettingsTools } from "./tools/settings";
 import { registerTaskTools } from "./tools/tasks";
 import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writtenLetterSchema, writtenMatchSchema, writtenResumeSchema } from "./write";
@@ -439,6 +441,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       }
       const result = await applyStatusChange(prisma, id, status);
       if (result.outcome === "not-found") return failure("That application no longer exists.");
+      if (result.outcome === "changed") await prepareOnStatus(id, status);
       return text({ id, status: statusInfo(status).label, changed: result.outcome !== "unchanged" });
     },
   );
@@ -451,6 +454,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
   registerPostingTools(context);
   registerRecruiterTools(context);
   registerCareersTools(context);
+  registerPrepTools(context);
   registerTaskTools(context);
   registerAgentTools(context);
   registerInboxTools(context);

@@ -276,6 +276,9 @@ const application = z.object({
   agentScore: int.nullable().optional(),
   /** The tailored resume's score (#370); absent in files before version 10. */
   resumeFit: z.unknown().nullable().optional(),
+  /** The phone-screen prep pack (jobauto fork); absent in files from before it. */
+  prep: z.unknown().nullable().optional(),
+  prepWith: text.nullable().optional(),
   awaitingReview: z.boolean().optional(),
   archivedAt: optionalDate,
   createdAt: date,
