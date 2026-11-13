@@ -81,7 +81,7 @@ const jsonList = (value: unknown) => (Array.isArray(value) ? value : []) as Pris
  * settings (the update check's) stay as they are.
  */
 export async function importExport(db: PrismaClient, data: DossierExport): Promise<void> {
-  const { profile, themes, settings, applications, postings, searches, agentCandidates, startups, startupBlocks, recruiters, recruiterBlocks, apiKey, jobSourceKeys } = data;
+  const { profile, themes, settings, applications, postings, searches, agentCandidates, startups, startupBlocks, recruiters, recruiterBlocks, employers, apiKey, jobSourceKeys } = data;
   const fromFile: Record<string, string | null> = {
     apiKeyEnc: apiKey ? encryptApiKey(apiKey) : null,
     jsearchKeyEnc: jobSourceKeys?.jsearch ? encryptSecret(JOB_SOURCE_KEY, jobSourceKeys.jsearch) : null,
@@ -116,6 +116,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       await tx.startupBlock.deleteMany();
       await tx.recruiter.deleteMany();
       await tx.recruiterBlock.deleteMany();
+      await tx.employer.deleteMany();
       // Scores of postings (#208) belong to the profile being replaced; they're left out of exports, since they can be made again.
       await tx.postingScore.deleteMany();
       // Mail from Gmail belongs to the applications being replaced; the next check fetches what's still relevant.
@@ -169,6 +170,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
           sections: json(application.sections),
           frozen: json(application.frozen),
           resumeFit: json(application.resumeFit),
+          prep: json(application.prep),
         })),
       });
       await tx.statusEvent.createMany({
@@ -259,6 +261,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       for (const { events, ...entry } of recruiters) {
         await tx.recruiter.create({ data: { ...entry, events: { create: events.map(({ id, text, at }) => ({ id, text, at })) } } });
       }
+      await tx.employer.createMany({ data: employers });
     },
     // A big export takes longer than the default five seconds.
     { timeout: 120_000, maxWait: 10_000 },

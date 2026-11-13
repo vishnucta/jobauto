@@ -34,9 +34,9 @@ beforeEach(() => resetDatabase(prisma()));
 afterAll(() => prisma().$disconnect());
 
 describe("postings", () => {
-  it("lists the same sources as the schema's enum, with CLIENT only as where a posting came from", () => {
+  it("lists the same sources as the schema's enum, with CLIENT and CAREERS only as where a posting came from", () => {
     expect([...POSTING_SOURCES].sort()).toEqual(Object.values(PostingSource).sort());
-    expect([...JOB_SOURCES].sort()).toEqual(Object.values(PostingSource).filter((source) => source !== "CLIENT").sort());
+    expect([...JOB_SOURCES].sort()).toEqual(Object.values(PostingSource).filter((source) => source !== "CLIENT" && source !== "CAREERS").sort());
   });
 
   it("saves a posting with everything the screen needs, and reads it back in the same shape", async () => {

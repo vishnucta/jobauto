@@ -9,10 +9,13 @@ import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/cn";
 import { formatDay } from "@/lib/dates";
 import {
+  CONTACT_KIND_INFO,
+  CONTACT_KINDS,
   followUpDue,
   gmailLink,
   listOrder,
@@ -23,6 +26,7 @@ import {
   STARTER_RECRUITERS,
   STATUS_INFO,
   statusMoves,
+  type ContactKindName,
   type OutreachFacts,
   type RecruiterFilter,
   type RecruiterStatusName,
@@ -85,7 +89,7 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
     <>
       <PageHeader
         title="Find jobs"
-        description="Recruiters: agencies and recruiters who place people in your field. Ones that show up in your searches or jobs are added here. Keep track of whom you wrote to, see when a follow-up is due, and send each a message drafted from your profile. You send everything yourself."
+        description="Recruiters: agencies and recruiters who place people in your field, and the people you write to directly: hiring managers, and former colleagues or alumni who could refer you. Agencies that show up in your searches or jobs are added here. Keep track of whom you wrote to, see when a follow-up is due, and send each a message drafted from your profile. You send everything yourself."
         actions={
           <>
             {missingStarters && (
@@ -204,10 +208,12 @@ function RecruiterRow({ recruiter, now, selected, onSelect }: { recruiter: Recru
       onClick={onSelect}
       className={cn("grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 rounded-control px-2 py-3 text-left hover:bg-hover", selected && "bg-selected")}
     >
-      <span className="truncate font-medium">{recruiter.name}</span>
+      <span className="truncate font-medium">{recruiter.kind === "AGENCY" ? recruiter.name : [recruiter.contactName, recruiter.name].filter(Boolean).join(" · ")}</span>
       <Pill status={recruiter.status} due={due} />
-      {(recruiter.speciality || SOURCE_LABEL[recruiter.source]) && (
-        <span className="col-span-2 truncate text-meta text-muted">{[recruiter.speciality, SOURCE_LABEL[recruiter.source]].filter(Boolean).join(" · ")}</span>
+      {(recruiter.kind !== "AGENCY" || recruiter.speciality || SOURCE_LABEL[recruiter.source]) && (
+        <span className="col-span-2 truncate text-meta text-muted">
+          {[recruiter.kind === "AGENCY" ? "" : CONTACT_KIND_INFO[recruiter.kind].label, recruiter.speciality, SOURCE_LABEL[recruiter.source]].filter(Boolean).join(" · ")}
+        </span>
       )}
       <span className={cn("col-span-2 text-meta", due ? "font-medium text-warning" : "text-muted")}>{nextStep(recruiter, now)}</span>
     </button>
@@ -263,7 +269,7 @@ function RecruiterDetail({ recruiter, facts, now, onChanged, onGone }: { recruit
 
       {kind ? (
         <Draft
-          key={`${recruiter.id}:${kind}:${recruiter.contactedAt}:${recruiter.contactName}:${recruiter.speciality}:${recruiter.email}`}
+          key={`${recruiter.id}:${kind}:${recruiter.contactedAt}:${recruiter.kind}:${recruiter.contactName}:${recruiter.speciality}:${recruiter.relation}:${recruiter.email}`}
           recruiter={recruiter}
           kind={kind}
           facts={facts}
@@ -272,7 +278,7 @@ function RecruiterDetail({ recruiter, facts, now, onChanged, onGone }: { recruit
         <p className="text-sm text-muted">They replied. Write back from your own mail, then press “I wrote again” to start the next follow-up.</p>
       ) : null}
 
-      <RecruiterForm key={`${recruiter.id}:${recruiter.name}:${recruiter.email}:${recruiter.contactName}:${recruiter.website}:${recruiter.speciality}:${recruiter.notes}`} recruiter={recruiter} title="Details" onSaved={onChanged} />
+      <RecruiterForm key={`${recruiter.id}:${recruiter.kind}:${recruiter.name}:${recruiter.email}:${recruiter.contactName}:${recruiter.website}:${recruiter.speciality}:${recruiter.relation}:${recruiter.notes}`} recruiter={recruiter} title="Details" onSaved={onChanged} />
 
       <div className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">History</h3>
@@ -344,13 +350,17 @@ function Draft({ recruiter, kind, facts }: { recruiter: RecruiterView; kind: "fi
 function RecruiterForm({ recruiter, title, onSaved, onCancel }: { recruiter: RecruiterView | null; title: string; onSaved: (saved: RecruiterView) => void; onCancel?: () => void }) {
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
+    kind: recruiter?.kind ?? ("AGENCY" as ContactKindName),
     name: recruiter?.name ?? "",
     contactName: recruiter?.contactName ?? "",
     email: recruiter?.email ?? "",
     website: recruiter?.website ?? "",
     speciality: recruiter?.speciality ?? "",
+    relation: recruiter?.relation ?? "",
     notes: recruiter?.notes ?? "",
   });
+  const info = CONTACT_KIND_INFO[form.kind];
+  const person = form.kind !== "AGENCY";
   const [errors, setErrors] = useState<Partial<Record<string, string[]>>>({});
   const set = (patch: Partial<typeof form>) => setForm((current) => ({ ...current, ...patch }));
 
@@ -364,7 +374,7 @@ function RecruiterForm({ recruiter, title, onSaved, onCancel }: { recruiter: Rec
         return toast(result.error);
       }
       setErrors({});
-      toast(recruiter ? "Saved." : "Recruiter added.");
+      toast(recruiter ? "Saved." : person ? "Contact added." : "Recruiter added.");
       onSaved(result.data);
     });
   };
@@ -372,17 +382,32 @@ function RecruiterForm({ recruiter, title, onSaved, onCancel }: { recruiter: Rec
   return (
     <form onSubmit={submit} aria-label={title} className={cn("flex flex-col gap-3", !recruiter && "rounded-panel border border-line-card bg-card p-5")}>
       <h3 className={cn(recruiter ? "text-sm font-medium" : "font-serif text-lead")}>{title}</h3>
-      <Input label="Agency or recruiter" value={form.name} error={errors.name?.[0]} onChange={(event) => set({ name: event.target.value })} />
+      <Select label="Who" value={form.kind} onChange={(event) => set({ kind: event.target.value as ContactKindName })}>
+        {CONTACT_KINDS.map((value) => (
+          <option key={value} value={value}>
+            {CONTACT_KIND_INFO[value].label}
+          </option>
+        ))}
+      </Select>
+      <Input label={info.name} value={form.name} error={errors.name?.[0]} onChange={(event) => set({ name: event.target.value })} />
       <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="Contact person" value={form.contactName} placeholder="Optional" onChange={(event) => set({ contactName: event.target.value })} />
+        <Input label={person ? "Their name" : "Contact person"} value={form.contactName} placeholder={person ? undefined : "Optional"} onChange={(event) => set({ contactName: event.target.value })} />
         <Input label="Email" type="email" value={form.email} error={errors.email?.[0]} placeholder="Only one they published" onChange={(event) => set({ email: event.target.value })} />
       </div>
       <Input label="Website" value={form.website} error={errors.website?.[0]} placeholder="https://" onChange={(event) => set({ website: event.target.value })} />
-      <Input label="Places people in" value={form.speciality} placeholder="e.g. Finance & accounting, Hamburg" onChange={(event) => set({ speciality: event.target.value })} />
+      <Input label={info.speciality} value={form.speciality} placeholder={info.specialityHint} onChange={(event) => set({ speciality: event.target.value })} />
+      {person && (
+        <Input
+          label="How you know them"
+          value={form.relation}
+          placeholder={form.kind === "REFERRAL" ? "e.g. We worked together at EY" : "e.g. We met at the EMIR forum in Frankfurt"}
+          onChange={(event) => set({ relation: event.target.value })}
+        />
+      )}
       <Textarea label="Notes" rows={3} value={form.notes} maxLength={5_000} onChange={(event) => set({ notes: event.target.value })} />
       <div className="flex flex-wrap gap-2">
         <Button type="submit" size="md" aria-disabled={pending || undefined}>
-          {recruiter ? "Save details" : "Add recruiter"}
+          {recruiter ? "Save details" : person ? "Add contact" : "Add recruiter"}
         </Button>
         {onCancel && (
           <Button type="button" variant="secondary" size="md" onClick={onCancel}>

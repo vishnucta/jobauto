@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { loadProfile } from "@/lib/profile-data";
 import { countPostings } from "@/lib/postings";
 import { countSearches } from "@/lib/posting-searches";
+import { prisma } from "@/lib/prisma";
 import { outreachFacts } from "@/lib/recruiters/facts";
 import { listRecruiters } from "@/lib/recruiters/store";
 
@@ -16,11 +17,11 @@ export const metadata: Metadata = { title: "Recruiters" };
  * from the profile. Nothing is sent: the user sends it from their own mail.
  */
 export default async function RecruitersPage() {
-  const [recruiters, profile, postingCounts, searches] = await Promise.all([listRecruiters(), loadProfile(), countPostings(), countSearches()]);
+  const [recruiters, profile, postingCounts, searches, employers] = await Promise.all([listRecruiters(), loadProfile(), countPostings(), countSearches(), prisma.employer.count()]);
   return (
     <RecruitersScreen
       recruiters={recruiters}
-      counts={{ ...postingCounts, searches, recruiters: recruiters.length }}
+      counts={{ ...postingCounts, searches, recruiters: recruiters.length, employers }}
       facts={outreachFacts(profile)}
       today={new Date().toISOString()}
     />

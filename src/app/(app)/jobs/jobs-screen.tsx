@@ -11,6 +11,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
+import type { ProfileGerman } from "@/lib/german-need";
 import type { Country } from "@/lib/job-search/countries";
 import {
   isJobSource,
@@ -48,6 +49,8 @@ export type JobsScreenProps = {
   arbeitsagenturNote?: boolean;
   /** Score opens a Claude chat, which scores through the connector (#221). */
   scoreInClaude?: boolean;
+  /** The profile's German, which each posting's is read against. */
+  german?: ProfileGerman;
   /** Every country by name, named on the server. */
   countries: readonly Country[];
   /** The search, past searches, or the Saved or Dismissed postings. */
@@ -83,6 +86,7 @@ export function JobsScreen({
   suggestions = [],
   arbeitsagenturNote = false,
   scoreInClaude = false,
+  german = "NONE",
   countries,
   view,
   query,
@@ -125,6 +129,7 @@ export function JobsScreen({
           postings={found.filter((posting) => fromSource(posting.source))}
           today={today}
           scoreInClaude={scoreInClaude}
+          german={german}
           empty={from ? `No postings from ${filterName(from)}.` : undefined}
         />
       </>
@@ -154,6 +159,7 @@ export function JobsScreen({
           postings={kept.filter((posting) => fromSource(posting.source))}
           today={today}
           scoreInClaude={scoreInClaude}
+          german={german}
           empty={from ? `Nothing ${view} from ${filterName(from)}.` : undefined}
         />
       </>
@@ -210,6 +216,7 @@ export function JobsScreen({
             search={search}
             today={today}
             scoreInClaude={scoreInClaude}
+            german={german}
             onSearchAgain={() => run(search.query, startSources)}
             searching={pending}
           />

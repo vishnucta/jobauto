@@ -25,6 +25,8 @@ export type FileNameContext = {
   company?: string;
   role?: string;
   doc: DocumentKind;
+  /** `{doc}` for a file that isn't one document, e.g. "Bewerbungsmappe". */
+  label?: string;
   /** The download date; `{date}` is its calendar day on the server, YYYY-MM-DD. */
   date: Date;
 };
@@ -56,7 +58,7 @@ export function resolveFileName(pattern: string, context: FileNameContext): stri
     "{first}": name.split(/\s+/)[0],
     "{company}": context.company?.trim() ?? "",
     "{role}": context.role?.trim() ?? "",
-    "{doc}": DOCUMENT_LABELS[context.doc],
+    "{doc}": context.label ?? DOCUMENT_LABELS[context.doc],
     "{date}": `${context.date.getFullYear()}-${pad(context.date.getMonth() + 1)}-${pad(context.date.getDate())}`,
   };
 

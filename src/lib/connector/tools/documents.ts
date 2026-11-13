@@ -71,7 +71,7 @@ const MISSING: Record<DocumentKind, string> = {
 const PRIVATE = "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.";
 
 /** The PDFs export_pdf makes, by the `?doc=` the Download PDF buttons ask src/app/api/pdf for. */
-const PDF_DOCS = { resume: "resume", cover_letter: "letter", base_resume: "base" } as const satisfies Record<string, PdfDocument>;
+const PDF_DOCS = { resume: "resume", cover_letter: "letter", base_resume: "base", bewerbungsmappe: "mappe" } as const satisfies Record<string, PdfDocument>;
 
 const applicationId = z.string().min(1).max(100);
 const documentName = z.enum(["resume", "cover_letter", "email"]);
@@ -652,10 +652,11 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
     {
       title: "Make a PDF",
       description:
-        "Renders an application's tailored resume or cover letter, or the base resume, as a PDF, exactly as Download PDF does, and returns the file with its name.",
+        "Renders an application's tailored resume or cover letter, or the base resume, as a PDF, exactly as Download PDF does, and returns the file with its name. " +
+        "bewerbungsmappe is the application's letter, resume and the Anlagen from Settings → Documents in one PDF, for job portals that take a single file.",
       inputSchema: z.object({
-        application_id: applicationId.optional().describe("For resume and cover_letter: the application"),
-        document: z.enum(["resume", "cover_letter", "base_resume"]).describe("base_resume is the one on the Base resume screen, built from the profile"),
+        application_id: applicationId.optional().describe("For resume, cover_letter and bewerbungsmappe: the application"),
+        document: z.enum(["resume", "cover_letter", "base_resume", "bewerbungsmappe"]).describe("base_resume is the one on the Base resume screen, built from the profile"),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
@@ -672,7 +673,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
       if ("error" in rendered) return failure(rendered.error);
       // Where the signed-in user downloads it again, as the page's button does.
       const download = linkTo(doc === "base" ? "/api/pdf?doc=base" : `/api/pdf?doc=${doc}&application=${encodeURIComponent(application_id)}`);
-      const link = document === "base_resume" ? linkTo("/resume") : documentLink(application_id, KINDS[document]);
+      const link = document === "base_resume" ? linkTo("/resume") : documentLink(application_id, KINDS[document === "bewerbungsmappe" ? "cover_letter" : document]);
       const answer = text({ file_name: rendered.fileName, document, pages: countPdfPages(rendered.pdf), download, link });
       return {
         content: [...answer.content, { type: "resource", resource: { uri: download, mimeType: "application/pdf", blob: Buffer.from(rendered.pdf).toString("base64") } }],

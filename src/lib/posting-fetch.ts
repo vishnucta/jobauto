@@ -309,7 +309,7 @@ function salaryOf(value: unknown): string {
 }
 
 /** Text from HTML, including HTML that arrives escaped (&lt;p&gt;), as in many JSON-LD descriptions. */
-function htmlText(html: string): string {
+export function htmlText(html: string): string {
   let text = textOf(parse(html));
   if (/<\/?(p|li|ul|br|div|strong)\b/i.test(text)) text = textOf(parse(text));
   return text;

@@ -5,6 +5,8 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { AiError } from "@/lib/ai/errors";
+import { alertIfOn, matchLines } from "@/lib/alerts";
+import { germanFit, textForGerman, profileGerman } from "@/lib/german-need";
 import { dayOf } from "@/lib/calendar-view";
 import { searchPostings } from "@/lib/job-search";
 import { noteAgencies } from "@/lib/recruiters/store";
@@ -213,13 +215,23 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
   const counts = { found: postings.length, fresh: fresh.length, skipped: postings.length - fresh.length, drafted: 0 };
   if (fresh.length === 0) return { ...counts, scored: 0, message: postings.length === 0 ? "The search found no postings this time." : "No new postings this time." };
 
-  const toScore = fresh.slice(0, settings.agentMaxScores);
+  // Postings that need far more German than the profile has aren't scored: no AI is spent on them.
+  const profile = await loadProfile();
+  const german = profileGerman(profile.languages);
+  const reachable = fresh.filter((posting) => germanFit(textForGerman(posting), german).verdict !== "out");
+  const gated = fresh.length - reachable.length;
+  const tooMuchGerman = gated ? ` ${gated} more ${gated === 1 ? "needs" : "need"} more German than your profile has, so ${gated === 1 ? "it wasn't" : "they weren't"} scored.` : "";
+  if (reachable.length === 0) return { ...counts, scored: 0, message: `No new postings within reach this time.${tooMuchGerman}` };
+
+  const toScore = reachable.slice(0, settings.agentMaxScores);
   await context.step(`Scoring ${toScore.length} ${toScore.length === 1 ? "posting" : "postings"}`);
-  const [score, profile] = await Promise.all([loadPostingScorer(), loadProfile()]);
+  const score = await loadPostingScorer();
   let scored = 0;
   let queued = 0;
   const kept: string[] = [];
   let problem: string | null = null;
+  // The ones worth a phone alert, best first once sorted.
+  const strong: { title: string; company: string; score: number }[] = [];
   for (const posting of toScore) {
     if (context.signal.aborted) break;
     try {
@@ -234,6 +246,7 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
       kept.push(candidate.id);
       scored += 1;
       if (data.score >= settings.agentMinScore) queued += 1;
+      if (data.score >= settings.alertMinScore) strong.push({ title: posting.title, company: posting.company, score: data.score });
     } catch (error) {
       // Another run kept it first: it's seen either way.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") continue;
@@ -241,6 +254,11 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
       if (error instanceof AiError) problem = error.message;
       else if (!context.signal.aborted) logServerError("job agent scoring", error);
     }
+  }
+
+  if (strong.length > 0 && !context.signal.aborted) {
+    strong.sort((a, b) => b.score - a.score);
+    await alertIfOn({ title: strong.length === 1 ? "A strong new match" : `${strong.length} strong new matches`, message: matchLines(strong), open: "/agent" });
   }
 
   // Auto-draft (#197, off by default): the best of this run's, one job each.
@@ -265,5 +283,5 @@ export async function evaluateAgentPostings(postings: readonly FoundPosting[], c
         : drafted > 0
           ? `${waiting} Preparing ${drafted === 1 ? "a draft for the best one" : `drafts for the best ${drafted}`}.`
           : waiting;
-  return { ...counts, scored, drafted, message };
+  return { ...counts, scored, drafted, message: message + tooMuchGerman };
 }

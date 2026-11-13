@@ -21,15 +21,15 @@ beforeEach(async () => {
 afterAll(() => db.$disconnect());
 
 describe("built-in seed", () => {
-  it("creates the twelve themes and nothing else", async () => {
+  it("creates the thirteen themes and nothing else", async () => {
     expect(await db.theme.findMany({ orderBy: { id: "asc" }, select: { id: true, builtIn: true } })).toEqual(
-      ["atlas", "chronicle", "classic", "console", "editorial", "folio", "ledger", "minimal", "modern", "signal", "studio", "technical"].map((id) => ({ id, builtIn: true })),
+      ["atlas", "chronicle", "classic", "console", "editorial", "folio", "lebenslauf", "ledger", "minimal", "modern", "signal", "studio", "technical"].map((id) => ({ id, builtIn: true })),
     );
     // An empty profile and default settings are empty tables.
     expect(await db.profileField.count()).toBe(0);
     expect(await db.setting.count()).toBe(0);
     expect(await db.application.count()).toBe(0);
-    expect(BUILT_IN_THEMES).toHaveLength(12);
+    expect(BUILT_IN_THEMES).toHaveLength(13);
   });
 
   it("is safe to run again: it keeps the user's data and restores changed built-in themes", async () => {
@@ -42,7 +42,7 @@ describe("built-in seed", () => {
 
     expect((await basics()).name).toBe("Me");
     expect((await db.setting.findUniqueOrThrow({ where: { key: "paper" } })).value).toBe("LETTER");
-    expect(await db.theme.count()).toBe(13);
+    expect(await db.theme.count()).toBe(14);
     expect(await db.theme.findUniqueOrThrow({ where: { id: "classic" } })).toMatchObject({ accent: "#1d1c1a", headerStyle: "PLAIN", dateStyle: "INLINE" });
   });
 });

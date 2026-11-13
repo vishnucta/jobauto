@@ -8,6 +8,7 @@ import { isDesktopApp } from "@/lib/desktop";
 import { loadSearch } from "@/lib/posting-searches";
 import { listAgentSearches } from "@/lib/agent/searches";
 import { providerOption } from "@/lib/ai/provider-options";
+import { listAttachments } from "@/lib/attachments";
 import { lastNightlyBackup } from "@/lib/backup-schedule";
 import { backupsDir } from "@/lib/backups";
 import { mcpUrl } from "@/lib/connector/oauth";
@@ -69,6 +70,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             autoDraft: settings.agentAutoDraft,
           }}
           searches={await listAgentSearches()}
+          alerts={{ address: settings.alertAddress, minScore: settings.alertMinScore, problem: settings.alertProblem }}
           suggestedQuery={(await loadSearch())?.query}
           source={(await loadJobSearchConfig()).source}
           scoring={await scoringReadiness()}
@@ -136,6 +138,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             documentsToWrite: settings.documentsToWrite,
           }}
           preview={await filePreview()}
+          attachments={await listAttachments()}
         />
       ) : (
         <AboutSection

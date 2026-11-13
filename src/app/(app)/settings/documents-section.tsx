@@ -16,7 +16,9 @@ import { DATE_FORMATS, DOCUMENTS_TO_WRITE, DOCUMENTS_TO_WRITE_LABELS, type Docum
 import { PAPER_SIZES } from "@/lib/themes";
 import { TONES } from "@/lib/tones";
 import { useAutosave } from "@/hooks/use-autosave";
+import type { AttachmentView } from "@/lib/attachment-types";
 
+import { AnlagenCard } from "./anlagen-card";
 import { addDocumentLanguage, updateSettings } from "./actions";
 import { SettingsSectionIntro } from "./settings-screen";
 
@@ -43,8 +45,11 @@ const OTHER_LANGUAGE = "__other";
 export function DocumentsSection({
   initial,
   preview,
+  attachments = [],
 }: {
   initial: DocumentSettings;
+  /** The Anlagen kept to send with applications. */
+  attachments?: AttachmentView[];
   /** For the file name's preview: the user's name and the latest application, or sample values. */
   preview: { name: string; company: string; role: string };
 }) {
@@ -231,6 +236,8 @@ export function DocumentsSection({
           onCheckedChange={(includeRefs) => change({ includeRefs })}
         />
       </Card>
+
+      <AnlagenCard initial={attachments} />
     </>
   );
 }

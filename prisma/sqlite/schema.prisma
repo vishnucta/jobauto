@@ -544,6 +544,10 @@ model Application {
   jobs                Job[]
   /// Runs of the apply assistant on the employer's page (Phase A), deleted with it.
   applyAttempts       ApplyAttempt[]
+  /// The phone-screen prep pack (callPrepSchema in src/lib/call-prep.ts), once prepared.
+  prep                Json?
+  /// The prompt version that wrote `prep`, e.g. "prepare-call@1".
+  prepWith            String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
@@ -716,8 +720,9 @@ model Note {
 // ─── Job search (E14) ────────────────────────────────────────────────────────
 
 /// Where a posting came from: the job sources Find jobs can search (E14-1 to
-/// E14-3), or CLIENT for postings an AI client (Claude, Gemini…) found on its
-/// own and added through the connector's add_found_jobs.
+/// E14-3), CLIENT for postings an AI client (Claude, Gemini…) found on its
+/// own and added through the connector's add_found_jobs, or CAREERS for new
+/// jobs on the careers pages of the employers the user follows (Employer).
 enum PostingSource {
   JSEARCH
   SERPAPI
@@ -726,6 +731,7 @@ enum PostingSource {
   ARBEITSAGENTUR
   FREEHIRE
   CLIENT
+  CAREERS
 }
 
 /// A posting from Find jobs that the user kept (E14-5): saved, dismissed, or
@@ -971,6 +977,59 @@ model StartupBlock {
   createdAt DateTime @default(now())
 }
 
+// ─── Careers pages (jobauto fork) ────────────────────────────────────────────
+
+/// An employer whose own careers page Find jobs follows: once a day, and on
+/// Check now, the jobs on it are read from its job system's public feed,
+/// and those new to Dossier are added as a search from the CAREERS source.
+/// Jobs show there days before the job boards have them.
+model Employer {
+  id            String    @id @default(cuid())
+  name          String
+  /// The careers page as the user gave it; always http(s).
+  careersUrl    String
+  /// The job system read (src/lib/careers/boards.ts), e.g. "personio", or "page" for job data on the page itself.
+  ats           String
+  /// Words one of which a job's title must hold, comma-separated; empty takes every job.
+  keywords      String    @default("")
+  /// Places one of which a job's place must name, comma-separated, e.g. "Hamburg, Remote"; empty takes every place.
+  places        String    @default("")
+  enabled       Boolean   @default(true)
+  notes         String    @default("")
+  lastCheckedAt DateTime?
+  /// At the last check: the jobs that matched the words and places, and how many of them were new.
+  lastMatched   Int       @default(0)
+  lastNew       Int       @default(0)
+  /// Why the last check failed, in words; null once one works again.
+  problem       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([name])
+}
+
+// ─── Anlagen (jobauto fork) ──────────────────────────────────────────────────
+
+/// A certificate or reference letter (Zeugnis, Zertifikat) kept once and sent
+/// with applications: attached to the application email, and put after the
+/// letter and resume in the one-PDF Bewerbungsmappe. The PDF itself lives in
+/// DOSSIER_DATA_DIR/attachments/<id>.pdf.
+model Attachment {
+  id        String   @id @default(cuid())
+  /// What it is, as the letter's Anlagen line names it, e.g. "Arbeitszeugnis AvaTrade".
+  name      String
+  /// The file's name as uploaded.
+  fileName  String
+  /// In bytes.
+  size      Int
+  /// Sent with every application; off keeps it on file without sending it.
+  enabled   Boolean  @default(true)
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([sort, createdAt])
+}
+
 // ─── Google: Gmail and Calendar (E15) ────────────────────────────────────────
 
 /// The connected Google account; at most one row, with id "google". It
@@ -1141,19 +1200,32 @@ enum RecruiterStatus {
   NOT_INTERESTED
 }
 
+/// Who a contact on Recruiters is (jobauto fork): an agency or recruiter, a
+/// hiring manager at an employer, or someone she knows there (a former
+/// colleague or an alum) who could refer her.
+enum ContactKind {
+  AGENCY
+  HIRING_MANAGER
+  REFERRAL
+}
+
 /// A recruiter or agency the user keeps track of: who, how to reach them, where
 /// the conversation stands. Dossier sends nothing: a message is drafted, and
-/// the user sends it from their own mail.
+/// the user sends it from their own mail. Hiring managers and people who
+/// could refer her are kept here too (kind).
 model Recruiter {
   id          String           @id @default(cuid())
-  /// The agency, or the recruiter when there is no agency.
+  kind        ContactKind      @default(AGENCY)
+  /// The agency, or the recruiter when there is no agency; the employer for a hiring manager or a referral.
   name        String
   contactName String           @default("")
   /// Only an address the user typed or the agency publishes, never guessed.
   email       String           @default("")
   website     String           @default("")
-  /// What they place, e.g. "Finance & accounting, Hamburg".
+  /// What they place, e.g. "Finance & accounting, Hamburg"; for a hiring manager or a referral, their team or role.
   speciality  String           @default("")
+  /// How she knows them, e.g. "We worked together at AvaTrade"; for referrals and hiring managers.
+  relation    String           @default("")
   notes       String           @default("")
   /// Where it came from: "you" or "starter list".
   source      String           @default("you")

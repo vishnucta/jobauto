@@ -5,9 +5,12 @@ import { z } from "zod";
 import { DocumentKind, JobStatus } from "@/generated/prisma/enums";
 import { agentDraftJob } from "@/lib/agent/draft";
 import { agentScanJob } from "@/lib/agent/jobs";
+import { careersCheckJob } from "@/lib/careers/check";
+import { englishCopyJob } from "@/lib/jobs/english-copy";
+import { prepareCallJob } from "@/lib/jobs/prepare-call";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
-import { viewHref } from "@/lib/job-search/search";
+import { searchRunHref, viewHref } from "@/lib/job-search/search";
 import { applyJob, applyPageJob } from "@/lib/jobs/apply";
 import { draftReplyJob } from "@/lib/jobs/draft-reply";
 import { importProfileJob } from "@/lib/jobs/import-profile";
@@ -178,6 +181,34 @@ const KINDS: Record<string, Tell> = {
     };
   },
   [agentScanJob.type]: (task, linkTo) => ({ task: "Running the job agent", result: resultOf(agentScanJob, task) ?? undefined, link: linkTo("/agent") }),
+  [prepareCallJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(prepareCallJob, task)?.applicationId;
+    return {
+      task: "Preparing for a call",
+      about: { application_id: applicationId },
+      result: resultOf(prepareCallJob, task) ? { prepared: true } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}?tab=prep`) : undefined,
+      next: "get_call_prep reads the pack.",
+    };
+  },
+  [englishCopyJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(englishCopyJob, task)?.applicationId;
+    return {
+      task: "Writing a document in English to read",
+      about: { application_id: applicationId },
+      result: resultOf(englishCopyJob, task) ?? undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}`) : undefined,
+    };
+  },
+  [careersCheckJob.type]: (task, linkTo) => {
+    const checked = resultOf(careersCheckJob, task);
+    return {
+      task: "Checking the careers pages followed",
+      result: checked ? { added: checked.added, search_id: checked.searchId ?? undefined, problems: checked.problems.length ? checked.problems : undefined, message: checked.message } : undefined,
+      link: linkTo(checked?.searchId ? searchRunHref(checked.searchId) : "/careers"),
+      next: checked?.searchId ? "list_postings with this search_id lists the jobs it added." : undefined,
+    };
+  },
   [agentDraftJob.type]: (task, linkTo) => {
     const draft = resultOf(agentDraftJob, task);
     return {

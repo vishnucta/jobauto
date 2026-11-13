@@ -120,7 +120,7 @@ describe("deleteEverything (E10-8)", () => {
     expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(await prisma().agentSearch.count()).toBe(0);
     expect(await prisma().agentCandidateSearch.count()).toBe(0);
-    expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(12);
+    expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(13);
     expect(await readdir(dataDir.path)).toEqual([]);
   });
 

@@ -22,11 +22,13 @@ const days = (count: number) => new Date(NOW.getTime() + count * 86_400_000).toI
 
 const recruiter = (patch: Partial<RecruiterView> = {}): RecruiterView => ({
   id: "r1",
+  kind: "AGENCY",
   name: "Selby Jennings",
   contactName: "",
   email: "",
   website: "",
   speciality: "Financial services, incl. regulatory reporting",
+  relation: "",
   notes: "",
   source: "you",
   status: "NOT_CONTACTED",
@@ -171,6 +173,35 @@ describe("the message to write", () => {
     const long = outreachDraft(recruiter(), "first", { ...facts, headline: "Financial Analyst — Regulatory Reporting (EMIR Refit, MiFIR, COREP) & Reconciliation, Transaction Reporting and more" });
     expect(long.subject.length).toBeLessThanOrEqual(90);
     expect(long.subject.endsWith("…")).toBe(true);
+  });
+
+  it("writes to a hiring manager directly about their team", () => {
+    const manager = recruiter({ kind: "HIRING_MANAGER", name: "Nordbank", contactName: "Anna Weber", speciality: "Regulatory Reporting", relation: "We met at the EMIR forum in Frankfurt." });
+    const { subject, body } = outreachDraft(manager, "first", facts);
+    expect(subject).toBe("Financial Analyst, regulatory reporting, interested in your regulatory reporting team");
+    expect(body).toBe(
+      [
+        "Hello Anna Weber,",
+        "I am Erika Mustermann, Financial Analyst, regulatory reporting, based in Hamburg. We met at the EMIR forum in Frankfurt. I am writing to you directly because you lead Regulatory Reporting at Nordbank, and I would like to bring my experience there.",
+        "Is there an opening in your team I should apply for, or would a short call fit in the next weeks?",
+        "My languages: English (Fluent (C2)), German (Elementary (A2)).",
+        "My resume is attached.",
+        "Kind regards,\nErika Mustermann",
+      ].join("\n\n"),
+    );
+    expect(outreachDraft(manager, "follow-up", facts).body).toContain("I wanted to follow up on my message about your regulatory reporting team.");
+  });
+
+  it("asks someone she knows for a referral, or a name", () => {
+    const colleague = recruiter({ kind: "REFERRAL", name: "Acme Bank", contactName: "Sam", speciality: "", relation: "We worked together at EY" });
+    const { subject, body } = outreachDraft(colleague, "first", facts);
+    expect(subject).toBe("Financial Analyst, regulatory reporting: could you point me the right way at Acme Bank?");
+    expect(body.split("\n\n").slice(0, 3)).toEqual([
+      "Hi Sam,",
+      "We worked together at EY, and I hope you are well. I am looking for my next role as Financial Analyst, regulatory reporting, based in Hamburg, and Acme Bank is one of the places I would most like to work.",
+      "Would you be open to referring me, or telling me who I should talk to? I am happy to send anything that makes it easy for you.",
+    ]);
+    expect(outreachDraft(colleague, "follow-up", facts).body).toContain("If a referral isn't possible, a name of someone I could write to would already help a lot.");
   });
 
   it("opens a Gmail window with the message in it, to the address when there is one", () => {

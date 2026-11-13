@@ -21,6 +21,8 @@ export const USAGE_TASKS = [
   { task: "plan-apply-form", label: "Filling in application forms", hint: "The apply assistant's fields the program couldn't fill by itself" },
   { task: "classify-reply", label: "Reading replies", hint: "Employers' mail from Gmail, read in the background" },
   { task: "draft-reply", label: "Drafting answers", hint: "Your answers to employers' replies" },
+  // Call prep (jobauto fork).
+  { task: "prepare-call", label: "Preparing for calls", hint: "An application's phone-screen prep pack" },
   { task: "connection-check", label: "Connection checks", hint: "Test connection in Settings" },
 ] as const;
 

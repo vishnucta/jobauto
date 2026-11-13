@@ -131,6 +131,15 @@ describe("the Recruiters tools", () => {
     expect(await prisma().recruiter.count()).toBe(1);
   });
 
+  it("add a hiring manager or a referral, more than one person at the same employer, and keep the kind on an update", async () => {
+    const manager = await tool("add_recruiter", { kind: "hiring_manager", name: "Nordbank", contact_name: "Anna Weber", speciality: "Regulatory Reporting" });
+    expect(manager.json).toMatchObject({ kind: "hiring_manager", name: "Nordbank", contact_name: "Anna Weber" });
+    expect((await tool("add_recruiter", { kind: "referral", name: "Nordbank", contact_name: "Sam", relation: "We worked together at EY" })).json).toMatchObject({ kind: "referral", how_you_know_them: "We worked together at EY" });
+    expect(await tool("add_recruiter", { kind: "hiring_manager", name: "nordbank", contact_name: "anna weber" })).toMatchObject({ isError: true, text: expect.stringContaining("already on the list") });
+    const id = (manager.json as unknown as { id: string }).id;
+    expect((await tool("update_recruiter", { id, notes: "Met in Frankfurt" })).json).toMatchObject({ kind: "hiring_manager" });
+  });
+
   it("add one the user removed before, which lifts the removal", async () => {
     const row = await recruiter();
     await tool("remove_recruiter", { id: row.id });
@@ -145,7 +154,7 @@ describe("the Recruiters tools", () => {
     expect(await prisma().recruiter.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ speciality: "Banking", contactName: "Alex", email: "", notes: "Keep" });
     expect(await tool("update_recruiter", { id: row.id })).toMatchObject({ isError: true, text: expect.stringContaining("Say what to change") });
     expect(await tool("update_recruiter", { id: row.id, email: "nope" })).toMatchObject({ isError: true, text: "That doesn't look like an email address." });
-    expect(await tool("update_recruiter", { id: row.id, name: " " })).toMatchObject({ isError: true, text: "Give the agency or recruiter a name." });
+    expect(await tool("update_recruiter", { id: row.id, name: " " })).toMatchObject({ isError: true, text: "Give the agency, recruiter or employer a name." });
     expect(await tool("update_recruiter", { id: "gone", notes: "x" })).toMatchObject({ isError: true, text: "That recruiter is no longer in the list." });
   });
 

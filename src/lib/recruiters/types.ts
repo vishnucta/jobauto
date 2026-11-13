@@ -18,13 +18,26 @@ export const FOLLOW_UP_DAYS = 7;
 export const SNOOZE_DAYS = 3;
 
 /** A recruiter as the screen gets it; dates are ISO strings. */
+/** Who a contact is (jobauto fork): an agency or recruiter, a hiring manager, or someone who could refer her. */
+export const CONTACT_KINDS = ["AGENCY", "HIRING_MANAGER", "REFERRAL"] as const;
+export type ContactKindName = (typeof CONTACT_KINDS)[number];
+
+export const CONTACT_KIND_INFO: Record<ContactKindName, { label: string; name: string; speciality: string; specialityHint: string }> = {
+  AGENCY: { label: "Agency or recruiter", name: "Agency or recruiter", speciality: "Places people in", specialityHint: "e.g. Finance & accounting, Hamburg" },
+  HIRING_MANAGER: { label: "Hiring manager", name: "Employer", speciality: "Their team or role", specialityHint: "e.g. Head of Regulatory Reporting" },
+  REFERRAL: { label: "Someone who could refer you", name: "Employer", speciality: "Their team or role", specialityHint: "e.g. Finance Operations" },
+};
+
 export type RecruiterView = {
   id: string;
+  kind: ContactKindName;
   name: string;
   contactName: string;
   email: string;
   website: string;
   speciality: string;
+  /** How she knows them, e.g. "We worked together at AvaTrade". */
+  relation: string;
   notes: string;
   source: string;
   status: RecruiterStatusName;
@@ -223,7 +236,7 @@ const clip = (text: string, length: number) => (text.length > length ? `${text.s
  * has them. The user reads and edits it before sending.
  */
 export function outreachDraft(
-  recruiter: Pick<RecruiterView, "name" | "contactName" | "speciality" | "contactedAt">,
+  recruiter: Pick<RecruiterView, "name" | "contactName" | "speciality" | "contactedAt"> & Partial<Pick<RecruiterView, "kind" | "relation">>,
   kind: OutreachKind,
   facts: OutreachFacts,
 ): { subject: string; body: string } {
@@ -233,6 +246,7 @@ export function outreachDraft(
   const field = recruiter.speciality.trim();
   const sign = facts.name.trim();
   const subject = clip(`Introduction: ${facts.headline.trim() || sign}`, 90);
+  if (recruiter.kind === "HIRING_MANAGER" || recruiter.kind === "REFERRAL") return personDraft({ ...recruiter, kind: recruiter.kind, relation: recruiter.relation ?? "" }, kind, facts, { greeting, who, languages, sign });
 
   if (kind === "follow-up") {
     const when = recruiter.contactedAt
@@ -256,6 +270,57 @@ export function outreachDraft(
       languages.length > 0 ? `My languages: ${languages.join(", ")}.` : "",
       "My resume is attached. I would be glad to hear whether a short call fits.",
       ["Kind regards,", sign].filter(Boolean).join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+/**
+ * The message to a person rather than an agency (jobauto fork): a hiring
+ * manager, written to directly about their team, or someone she knows at an
+ * employer, asked for a referral or a name. Referrals are the quickest way
+ * into a team that works in English.
+ */
+function personDraft(
+  person: Pick<RecruiterView, "name" | "contactName" | "speciality" | "contactedAt" | "relation"> & { kind: "HIRING_MANAGER" | "REFERRAL" },
+  kind: OutreachKind,
+  facts: OutreachFacts,
+  { greeting, who, languages, sign }: { greeting: string; who: string; languages: string[]; sign: string },
+): { subject: string; body: string } {
+  const company = person.name.trim();
+  const team = person.speciality.trim();
+  const relation = person.relation.trim().replace(/[.!]+$/, "");
+  const closing = ["Kind regards,", sign].filter(Boolean).join("\n");
+  const referral = person.kind === "REFERRAL";
+  const subject = clip(referral ? `${facts.headline.trim() || "My next role"}: could you point me the right way at ${company}?` : `${facts.headline.trim() || sign}, interested in ${team ? `your ${team.toLowerCase()} team` : company}`, 100);
+
+  if (kind === "follow-up") {
+    return {
+      subject: `Following up: ${subject}`.slice(0, 100),
+      body: [
+        greeting,
+        referral
+          ? `I wanted to follow up on my message about ${company}. If a referral isn't possible, a name of someone I could write to would already help a lot.`
+          : `I wanted to follow up on my message about ${team ? `your ${team.toLowerCase()} team` : `roles at ${company}`}. I am still very interested, and a short call at a time that suits you would be great.`,
+        "My resume is attached again.",
+        closing,
+      ].join("\n\n"),
+    };
+  }
+  return {
+    subject,
+    body: [
+      referral ? greeting.replace(/^Hello/, "Hi") : greeting,
+      referral
+        ? `${relation ? `${relation}, and I hope you are well. ` : "I hope you are well. "}I am looking for my next role${who ? ` as ${who}` : ""}, and ${company} is one of the places I would most like to work.`
+        : `I am ${sign || "writing to you"}${who ? `, ${who}` : ""}.${relation ? ` ${relation}.` : ""} I am writing to you directly because ${team ? `you lead ${team} at ${company}` : `of your team at ${company}`}, and I would like to bring my experience there.`,
+      referral
+        ? "Would you be open to referring me, or telling me who I should talk to? I am happy to send anything that makes it easy for you."
+        : "Is there an opening in your team I should apply for, or would a short call fit in the next weeks?",
+      languages.length > 0 ? `My languages: ${languages.join(", ")}.` : "",
+      "My resume is attached.",
+      closing,
     ]
       .filter(Boolean)
       .join("\n\n"),

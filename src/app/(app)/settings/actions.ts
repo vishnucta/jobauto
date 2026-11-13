@@ -9,6 +9,9 @@ import { action, ActionError } from "@/lib/action";
 import { lockAgentSearches } from "@/lib/agent/searches";
 import { AiError } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
+import { ntfyTarget } from "@/lib/alert-address";
+import { AlertError, sendAlert } from "@/lib/alerts";
+import { deleteAllAttachments, removeAttachment as deleteAttachment, updateAttachment } from "@/lib/attachments";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
 import { deleteAllBackups } from "@/lib/backups";
@@ -214,6 +217,8 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     // Recruiters, and their history with them, and the agencies removed from the list.
     await tx.recruiter.deleteMany();
     await tx.recruiterBlock.deleteMany();
+    await tx.employer.deleteMany();
+    await tx.attachment.deleteMany();
     // Mail fetched from Gmail (E15-3).
     await tx.emailMessage.deleteMany();
     // Applications take their history, documents, chat and notes along.
@@ -234,7 +239,7 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
   });
   // An empty profile and default settings need no rows; the built-in themes do.
   await seedBuiltIns(prisma);
-  await Promise.all([deleteAllBackups(), deleteAllDownloads(), deleteAllApplyData()]);
+  await Promise.all([deleteAllBackups(), deleteAllDownloads(), deleteAllApplyData(), deleteAllAttachments()]);
   // Profile entries Claude removed can't be put back into the new, empty profile.
   forgetRemovedProfileEntries();
 
@@ -288,4 +293,46 @@ export const removeConnectorRedirect = action(z.object({ uri: z.string().max(200
   const redirects = (await loadSettings()).connectorRedirects.filter((entry) => entry !== uri);
   await saveSettings({ connectorRedirects: redirects });
   return { redirects };
+});
+
+// Phone alerts (alerts.ts): an ntfy topic for strong new matches and new jobs on careers pages.
+
+/** Sends alerts to this ntfy topic, or turns them off with null. */
+export const saveAlertAddress = action(z.object({ address: z.string().trim().max(500).nullable() }), async ({ address }) => {
+  if (address && !ntfyTarget(address)) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/your-topic.");
+  await saveSettings({ alertAddress: address || null, alertProblem: null });
+  return { address: address || null };
+});
+
+/** "Send a test": an alert to the saved topic now, so the phone shows whether it arrives. */
+export const testAlert = action(z.object({}), async (_input, { toast }) => {
+  const { alertAddress } = await loadSettings();
+  if (!alertAddress) throw new ActionError("Save a topic address first.");
+  try {
+    await sendAlert(alertAddress, { title: "Test from jobauto", message: "Alerts arrive here: strong new matches and new jobs on the careers pages you follow.", open: "/agent" });
+  } catch (error) {
+    if (error instanceof AlertError) throw new ActionError(error.message);
+    throw error;
+  }
+  await saveSettings({ alertProblem: null });
+  toast("Sent. It should be on your phone in a few seconds.");
+  return null;
+});
+
+// Anlagen (attachments.ts): uploads go through /api/attachments; these change one.
+
+/** Renames an Anlage, or turns sending it on or off. */
+export const saveAttachment = action(
+  z.object({ id: z.string().min(1).max(64), name: z.string().trim().min(1, "Give it a name.").max(120).optional(), enabled: z.boolean().optional() }),
+  async ({ id, ...change }) => {
+    const saved = await updateAttachment(id, change);
+    if (!saved) throw new ActionError("That Anlage is gone. Reload the page.");
+    return saved;
+  },
+);
+
+export const removeAttachment = action(z.object({ id: z.string().min(1).max(64) }), async ({ id }, { toast }) => {
+  if (!(await deleteAttachment(id))) throw new ActionError("That Anlage is gone. Reload the page.");
+  toast("Removed.");
+  return null;
 });

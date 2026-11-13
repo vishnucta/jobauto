@@ -62,6 +62,8 @@ export function TailoredLetter({
   dateFormat,
   language,
   renderUnit,
+  role,
+  anlagen,
 }: {
   letter: DocumentData;
   profile: ProfileData;
@@ -73,6 +75,10 @@ export function TailoredLetter({
   dateFormat: DateFormat;
   language: string;
   renderUnit?: UnitRenderer;
+  /** For a German letter's Betreff. */
+  role?: string;
+  /** The Anlagen sent with it, for a German letter's list. */
+  anlagen?: readonly string[];
 }) {
   return (
     <CoverLetterDocument
@@ -87,6 +93,8 @@ export function TailoredLetter({
       dateFormat={dateFormat}
       language={language}
       renderUnit={renderUnit}
+      role={role}
+      anlagen={anlagen}
     />
   );
 }

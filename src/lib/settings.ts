@@ -143,6 +143,8 @@ export const settingsSchema = z.object({
   applicationsSort: z.string().catch("updated"),
   /** The dashboard's period as last left (E9-8). */
   dashboardPeriod: z.enum(["30d", "90d", "all"]).catch("all"),
+  /** Applications to send each week, Monday to Sunday (weekly-target.ts); 0 is no target. */
+  weeklyTarget: z.coerce.number().int().min(0).max(50).catch(0),
   /** Days without news before "Worth a look" suggests a follow-up (E9-9). */
   quietDays: z.coerce.number().int().min(1).max(60).catch(7),
   /** Experience, projects and education: newest first by date, or the order set by hand (E4-9). */
@@ -191,6 +193,16 @@ export const settingsSchema = z.object({
   agentAutoDraft: flag(false),
   /** The latest runs, newest first. They belong to the install: exports leave them out (INSTALL_SETTINGS). */
   agentRuns: json(z.array(agentRunSchema)).catch([]),
+  // Phone alerts (alerts.ts): the ntfy topic strong new matches and new jobs
+  // on careers pages go to; null while they're off. The topic is as good as
+  // a password and belongs to the install, as does why the last alert
+  // failed, so exports leave both out (INSTALL_SETTINGS).
+  alertAddress: z.string().nullable().catch(null),
+  alertProblem: z.string().nullable().catch(null),
+  /** The job agent alerts about postings scored at least this. */
+  alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
+  /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
+  careersCheckedOn: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh
   // only runs while it's in use, and what the last refresh found. They belong
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).

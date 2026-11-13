@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { json, stubFetch } from "@/lib/ai/test-http";
+import { alertIfOn } from "@/lib/alerts";
 import { demoProfile } from "@/lib/demo-profile";
 import type { FoundPosting, SearchQuery } from "@/lib/job-search/search";
 import type { JobContext } from "@/lib/jobs/runner";
@@ -67,6 +68,7 @@ vi.mock("@/lib/job-search/config", () => ({
   requestContext: () => ({}),
 }));
 vi.mock("@/lib/ai/config", () => ({ isAiConfigured: async () => fake.ai }));
+vi.mock("@/lib/alerts", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/alerts")>()), alertIfOn: vi.fn(async () => {}) }));
 vi.mock("@/lib/ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ai")>()),
   getAiProvider: async () =>
@@ -281,6 +283,28 @@ describe("runAgentScan (E16-3)", () => {
     expect((await prisma().postingScore.findMany({ orderBy: { score: "desc" } })).map((row) => [row.externalId, row.score])).toEqual([["a", 90], ["b", 75], ["c", 40]]);
     // The run is on record, with how it ended.
     expect((await loadSettings()).agentRuns).toEqual([{ at: now.toISOString(), manual: false, message: "2 new postings are waiting for a look.", sourceRequests: 1, sourceRequestAts: [expect.any(String)], searches: [expect.objectContaining({ searchName: "My search", found: 3, fresh: 3, error: null })] }]);
+  });
+
+  it("sends one phone alert for the postings scored at least the alert's minimum, best first", async () => {
+    await saveSettings({ alertMinScore: 70 });
+    await runAgentScan({ manual: false }, context(), now);
+    expect(alertIfOn).toHaveBeenCalledTimes(1);
+    expect(alertIfOn).toHaveBeenCalledWith({ title: "2 strong new matches", message: "90 · Senior Product Designer, Company a\n75 · Product Designer, Company b", open: "/agent" });
+    vi.mocked(alertIfOn).mockClear();
+    await saveSettings({ alertMinScore: 95 });
+    fake.postings = [posting("e", "Senior Analyst", "2026-10-19T00:00:00Z")];
+    await runAgentScan({ manual: true }, context(), now);
+    expect(alertIfOn).not.toHaveBeenCalled();
+  });
+
+  it("doesn't score postings that need far more German than the profile has (B1)", async () => {
+    fake.postings = [...page, posting("d", "Buchhalter", "2026-10-19T00:00:00Z", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." })];
+    const scored: string[] = [];
+    fake.onScore = (title) => void scored.push(title);
+    const result = await runAgentScan({ manual: false }, context(), now);
+    expect(scored).not.toContain("Buchhalter");
+    expect(result).toMatchObject({ found: 4, fresh: 4, scored: 3, message: "2 new postings are waiting for a look. 1 more needs more German than your profile has, so it wasn't scored." });
+    expect(await prisma().agentCandidate.count({ where: { externalId: "d" } })).toBe(0);
   });
 
   it("scores with Jev when Settings → Scoring chose it, without an AI provider (#274)", async () => {
