@@ -1,7 +1,7 @@
 import type { LanguageLevel } from "@/generated/prisma/enums";
 import type { Unit } from "@/lib/application-data";
 import { publicationLabel } from "@/lib/citation";
-import { certificationLabel, LANGUAGE_LEVELS, type DateSpan, type ProfileData } from "@/lib/profile";
+import { certificationLabel, LANGUAGE_LEVELS, splitAddressLine, type DateSpan, type ProfileData } from "@/lib/profile";
 
 import sample from "../../prisma/seed/prototype-sample.json";
 
@@ -46,7 +46,7 @@ export function demoProfile(): ProfileData {
       phone: basics.phone,
       dob: basics.dob,
       website: basics.website,
-      address: basics.address,
+      ...splitAddressLine(basics.address),
       city: basics.city,
       country: basics.country,
       linkedin: basics.linkedin,

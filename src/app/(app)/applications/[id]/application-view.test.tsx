@@ -183,6 +183,7 @@ const props: ApplicationViewProps = {
     hasResume: true,
     hasLetter: true,
     missing: [],
+    browserAddress: null,
   },
 };
 

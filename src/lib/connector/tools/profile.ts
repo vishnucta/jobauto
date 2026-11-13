@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import {
   basicsFromFields,
   BASICS_FIELDS,
+  LEGACY_ADDRESS_KEY,
   PROFILE_KEYS,
   type Basics,
   type BasicsField,
@@ -71,6 +72,9 @@ const NOUN: Record<EntryKind, string> = { experience: "role", project: "project"
 
 const filled = (value: string | undefined) => Boolean(value?.trim());
 
+/** The tool's names for the Basics fields whose own names differ. */
+const TOOL_NAMES: Partial<Record<BasicsField, string>> = { dob: "date_of_birth", houseNumber: "house_number", postalCode: "postal_code" };
+
 /** The fields Claude gave, without the ones it left out. */
 function given<T extends object>(fields: T): { [K in keyof T]?: Exclude<T[K], undefined> } {
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as { [K in keyof T]?: Exclude<T[K], undefined> };
@@ -125,7 +129,9 @@ function contactDetails(basics: Partial<Record<BasicsField, string>>) {
   return {
     email: filled(basics.email),
     phone: filled(basics.phone),
-    address: filled(basics.address),
+    street: filled(basics.street),
+    house_number: filled(basics.houseNumber),
+    postal_code: filled(basics.postalCode),
     city: filled(basics.city),
     country: filled(basics.country),
     website: filled(basics.website),
@@ -524,8 +530,10 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         summary: z.string().trim().max(5000).optional().describe("A few lines about the user"),
         email: z.string().trim().max(320).optional(),
         phone: z.string().trim().max(60).optional(),
-        address: z.string().trim().max(300).optional().describe("The street address"),
-        city: z.string().trim().max(120).optional(),
+        street: z.string().trim().max(200).optional().describe("The street's name, without the house number"),
+        house_number: z.string().trim().max(20).optional(),
+        postal_code: z.string().trim().max(20).optional().describe("The PLZ"),
+        city: z.string().trim().max(120).optional().describe("The city the user lives in"),
         country: z.string().trim().max(120).optional(),
         website: z.string().trim().max(500).optional(),
         linkedin: z.string().trim().max(500).optional().describe("e.g. 'linkedin.com/in/janedoe'"),
@@ -535,9 +543,10 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ date_of_birth, show_age, photo_on_resumes, ...fields }) => {
+    async ({ date_of_birth, house_number, postal_code, show_age, photo_on_resumes, ...fields }) => {
       const changes: Partial<Basics> = {
         ...given(fields),
+        ...given({ houseNumber: house_number, postalCode: postal_code }),
         ...(date_of_birth === undefined ? {} : { dob: date_of_birth }),
         ...(show_age === undefined ? {} : { showAge: show_age }),
       };
@@ -545,9 +554,10 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       const photo = photo_on_resumes === undefined ? null : await loadPhoto();
       if (photo_on_resumes !== undefined && !photo) return failure("There's no photo in the profile. The user can add one on the Profile screen.");
 
-      const before = basicsFromFields(await prisma.profileField.findMany({ where: { key: { in: [...PROFILE_KEYS] } } }));
+      // With the old one-line address, which the address fields are read from until the next save.
+      const before = basicsFromFields(await prisma.profileField.findMany({ where: { key: { in: [...PROFILE_KEYS, LEGACY_ADDRESS_KEY] } } }));
       const after: Basics = { ...before, ...changes };
-      const changed: string[] = BASICS_FIELDS.filter((field) => after[field] !== before[field]).map((field) => (field === "dob" ? "date_of_birth" : field));
+      const changed: string[] = BASICS_FIELDS.filter((field) => after[field] !== before[field]).map((field) => TOOL_NAMES[field] ?? field);
       if (after.showAge !== before.showAge) changed.push("show_age");
       if (changed.length > 0) await saveBasicsFields(after);
       if (photo && photo_on_resumes !== undefined && photo.onResumes !== photo_on_resumes) {

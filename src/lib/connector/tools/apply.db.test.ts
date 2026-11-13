@@ -125,8 +125,8 @@ describe("the Apply tab's tools in the Claude connector", () => {
       form: { where: "web page", url: PERSONIO, host: "ledgerly.jobs.personio.de", system: "Personio", sign_in_needed: false, job_board: false },
       has_resume: true,
       has_cover_letter: true,
-      profile_missing: ["phone number"],
-      answers: { salary: "60.000 € brutto/Jahr", start_date: "", street_saved: true, postal_code_saved: true, german_level: "A2", press_send: false },
+      profile_missing: ["phone number", "postal code"],
+      answers: { salary: "60.000 € brutto/Jahr", start_date: "", german_level: "A2", press_send: false },
       link: `https://dossier.example/applications/${ledgerly}?tab=apply`,
     });
     expect(status.text).not.toContain("Musterstraße");
@@ -293,22 +293,21 @@ describe("the Apply tab's tools in the Claude connector", () => {
   });
 
   it("saves the standard answers given, keeping the rest", async () => {
-    const saved = await tool("save_apply_answers", { salary: "60.000 € brutto/Jahr", german_level: "B2", street: "Musterstraße 12", press_send: true, id: ledgerly });
+    const saved = await tool("save_apply_answers", { salary: "60.000 € brutto/Jahr", german_level: "B2", press_send: true, id: ledgerly });
     expect(saved.json).toMatchObject({
-      answers: { salary: "60.000 € brutto/Jahr", german_level: "B2", english_level: "C1", work_permit: true, street_saved: true, postal_code_saved: false, press_send: true },
+      answers: { salary: "60.000 € brutto/Jahr", german_level: "B2", english_level: "C1", work_permit: true, press_send: true },
       note: expect.stringContaining("runs started from Claude never do"),
       link: `https://dossier.example/applications/${ledgerly}?tab=apply`,
     });
-    expect(saved.text).not.toContain("Musterstraße");
-    expect((await loadSettings()).applyAnswers).toEqual({ ...DEFAULT_APPLY_ANSWERS, salary: "60.000 € brutto/Jahr", germanLevel: "B2", street: "Musterstraße 12", autoSubmit: true });
+    expect(saved.json.answers).not.toHaveProperty("street_saved");
+    expect((await loadSettings()).applyAnswers).toEqual({ ...DEFAULT_APPLY_ANSWERS, salary: "60.000 € brutto/Jahr", germanLevel: "B2", autoSubmit: true });
 
     const again = await tool("save_apply_answers", { salary: "", notice_period: " 3 Monate zum Monatsende ", work_permit: false });
     expect(again.json).toMatchObject({ answers: { salary: "", notice_period: "3 Monate zum Monatsende", work_permit: false, german_level: "B2", press_send: true }, link: "https://dossier.example/applications" });
 
     expect(await tool("save_apply_answers", { id: ledgerly })).toMatchObject({ isError: true, text: "Give at least one answer to save." });
     expect(await tool("save_apply_answers", { german_level: "fluent" })).toMatchObject({ isError: true });
-    expect(await tool("save_apply_answers", { postal_code: "1".repeat(13) })).toMatchObject({ isError: true });
-    expect((await loadSettings()).applyAnswers).toMatchObject({ germanLevel: "B2", postalCode: "", noticePeriod: "3 Monate zum Monatsende" });
+    expect((await loadSettings()).applyAnswers).toMatchObject({ germanLevel: "B2", noticePeriod: "3 Monate zum Monatsende" });
   });
 
   it("fills the page the user is at, once a run is waiting and its window is watched, and says why it can't otherwise", async () => {

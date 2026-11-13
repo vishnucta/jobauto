@@ -30,9 +30,12 @@ const FIELDS: FieldSpec[] = [
   { field: "phone", label: "Phone", type: "tel", placeholder: "+1 555 010 0000", autoComplete: "tel" },
   { field: "dob", label: "Date of birth", type: "date", autoComplete: "bday" },
   { field: "website", label: "Website", placeholder: "johndoe.example.com", autoComplete: "url" },
-  { field: "address", label: "Street address", wide: true, placeholder: "12 Main Street", autoComplete: "street-address" },
-  { field: "city", label: "City", placeholder: "Springfield", autoComplete: "address-level2" },
-  { field: "country", label: "Country", placeholder: "United States", autoComplete: "country-name" },
+  // The postal address, German style (bewerbung fork): forms ask for each part on its own.
+  { field: "street", label: "Street", placeholder: "Musterstraße", autoComplete: "address-line1" },
+  { field: "houseNumber", label: "House number", placeholder: "12", autoComplete: "address-line2" },
+  { field: "postalCode", label: "Postal code (PLZ)", placeholder: "20095", autoComplete: "postal-code" },
+  { field: "city", label: "City", placeholder: "Hamburg", autoComplete: "address-level2" },
+  { field: "country", label: "Country", placeholder: "Germany", autoComplete: "country-name", wide: true },
   { field: "linkedin", label: "LinkedIn", wide: true, placeholder: "linkedin.com/in/johndoe" },
 ];
 

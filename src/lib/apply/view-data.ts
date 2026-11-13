@@ -18,7 +18,9 @@ const ATTEMPTS_SHOWN = 8;
 /** The basics forms nearly always ask for. */
 const ASKED: readonly [keyof Basics, string][] = [
   ["phone", "phone number"],
-  ["address", "street address"],
+  ["street", "street"],
+  ["postalCode", "postal code"],
+  ["city", "city"],
 ];
 
 /** "30 Oct, 14:32" in the user's time zone. */
@@ -34,7 +36,7 @@ function when(date: Date, timeZone: string | undefined): string {
 export async function loadApplyTab(
   application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[] },
   profile: { basics: Basics },
-  settings: Pick<SettingsData, "applyAnswers">,
+  settings: Pick<SettingsData, "applyAnswers" | "applyBrowserAddress">,
   timeZone: string | undefined,
 ): Promise<ApplyTabData> {
   const [posting, rows, jobs] = await Promise.all([
@@ -70,5 +72,6 @@ export async function loadApplyTab(
     hasResume: application.documents.some((document) => document.kind === DocumentKind.RESUME),
     hasLetter: application.documents.some((document) => document.kind === DocumentKind.COVER_LETTER),
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),
+    browserAddress: settings.applyBrowserAddress,
   };
 }

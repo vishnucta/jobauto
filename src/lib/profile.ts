@@ -68,7 +68,9 @@ export const BASICS_FIELDS = [
   "phone",
   "dob",
   "website",
-  "address",
+  "street",
+  "houseNumber",
+  "postalCode",
   "city",
   "country",
   "linkedin",
@@ -76,10 +78,63 @@ export const BASICS_FIELDS = [
 ] as const;
 export type BasicsField = (typeof BASICS_FIELDS)[number];
 
+/**
+ * The postal address, German style (bewerbung fork): Straße, Hausnummer, PLZ
+ * and the city the user lives in. Job searches ask for their own places, so
+ * the city here is only where the user lives.
+ */
+export const ADDRESS_FIELDS = ["street", "houseNumber", "postalCode", "city"] as const satisfies readonly BasicsField[];
+export type AddressField = (typeof ADDRESS_FIELDS)[number];
+
+/** The one "Street address" line profiles had before the address was split; read into the address fields, and removed on the next save. */
+export const LEGACY_ADDRESS_KEY = "address";
+
+/** The address fields that came with the split; a profile with none of them still has its address in the old line. */
+const SPLIT_FIELDS = ["street", "houseNumber", "postalCode"] as const satisfies readonly AddressField[];
+
+/**
+ * The parts of a free address line, such as "Musterstraße 12, 20095 Hamburg",
+ * "Musterstraße 12a 20095 Hamburg" or "12 Main Street, Springfield": five digits
+ * are the postal code, the number at the end (or start) of the street part is
+ * the house number, and what follows the street part is the city.
+ */
+export function splitAddressLine(line: string): Record<AddressField, string> {
+  const text = line.trim().replace(/\s+/g, " ");
+  if (!text) return { street: "", houseNumber: "", postalCode: "", city: "" };
+  const postalCode = /\b(\d{5})\b/.exec(text)?.[1] ?? "";
+  const [first, ...rest] = text.split(",").map((part) => part.trim());
+  let streetPart = first;
+  let townPart = rest.join(", ");
+  // No comma between street and town: the postal code divides them.
+  const at = postalCode ? first.indexOf(postalCode) : -1;
+  if (at >= 0) {
+    streetPart = first.slice(0, at).trim();
+    townPart = [first.slice(at + postalCode.length), ...rest].join(", ");
+  }
+  const city = (postalCode ? townPart.replace(postalCode, "") : townPart).replace(/\s+/g, " ").replace(/^[\s,;]+|[\s,;]+$/g, "");
+  const trailing = /^(.*\D)\s+(\d+\s?[a-z]?(?:\s?[-/]\s?\d+\s?[a-z]?)?)$/i.exec(streetPart);
+  const leading = /^(\d+[a-z]?)\s+(\D.*)$/i.exec(streetPart);
+  if (trailing) return { street: trailing[1].trim(), houseNumber: trailing[2].replace(/\s+/g, ""), postalCode, city };
+  if (leading) return { street: leading[2].trim(), houseNumber: leading[1], postalCode, city };
+  return { street: streetPart, houseNumber: "", postalCode, city };
+}
+
+/**
+ * The address fields from rows that still hold the old one-line address, or null when the
+ * profile has the split fields already (or no old line). The city in the line, where the
+ * user lives, wins over the old City field, which may have been where they looked for work.
+ */
+export function addressFromLegacy(values: ReadonlyMap<string, string>): Record<AddressField, string> | null {
+  const legacy = values.get(LEGACY_ADDRESS_KEY)?.trim();
+  if (!legacy || SPLIT_FIELDS.some((field) => values.has(field))) return null;
+  const address = splitAddressLine(legacy);
+  return { ...address, city: address.city || (values.get("city") ?? "") };
+}
+
 /** The Basics fields a profile needs (#216); the rest are optional, and the section count is "filled/6". */
 export const REQUIRED_BASICS = ["name", "headline", "email", "city", "country", "summary"] as const satisfies readonly BasicsField[];
 
-/** Whether a Basics field is optional: phone, date of birth, address, website and LinkedIn. */
+/** Whether a Basics field is optional: phone, date of birth, the address fields, website and LinkedIn. */
 export const isOptionalBasic = (field: BasicsField) => !(REQUIRED_BASICS as readonly BasicsField[]).includes(field);
 
 // The profile as the editor works with it: plain values (dates of birth as
@@ -94,11 +149,15 @@ export type Basics = Record<BasicsField, string> & { showAge: boolean };
 export const PROFILE_KEYS = [...BASICS_FIELDS, "showAge"] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 
-/** The basics from ProfileField rows; a missing key is empty, and keys it doesn't know are ignored. */
+/**
+ * The basics from ProfileField rows; a missing key is empty, and keys it doesn't know are ignored.
+ * A profile from before the address was split has only its one address line: that line is read
+ * into the address fields (addressFromLegacy).
+ */
 export function basicsFromFields(rows: readonly { key: string; value: string }[]): Basics {
   const values = new Map(rows.map((row) => [row.key, row.value]));
-  const basics = Object.fromEntries(BASICS_FIELDS.map((field) => [field, values.get(field) ?? ""]));
-  return { ...(basics as Record<BasicsField, string>), showAge: values.get("showAge") === "true" };
+  const basics = Object.fromEntries(BASICS_FIELDS.map((field) => [field, values.get(field) ?? ""])) as Record<BasicsField, string>;
+  return { ...basics, ...addressFromLegacy(values), showAge: values.get("showAge") === "true" };
 }
 
 /** The value to store for each key, or null for an empty one, whose row is removed. */

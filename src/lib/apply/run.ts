@@ -3,7 +3,7 @@ import "server-only";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { Page } from "playwright-core";
+import type { BrowserContext, Page } from "playwright-core";
 import type { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus, ApplicationStatus, ApplyAttemptStatus, DocumentKind } from "@/generated/prisma/enums";
 import { approveCandidate } from "@/lib/agent/draft";
@@ -74,6 +74,10 @@ const NOTES = {
   closed: "The browser tab was closed before I saw a confirmation. If you did send it, mark it as sent below.",
   timeout: "I stopped watching after 45 minutes without a confirmation. If you did send it, mark it as sent below.",
   broke: "Something went wrong while working the page. The browser window is still open: you can carry on there, or try again.",
+  noLaptop: (address: string) =>
+    `Your laptop's Chrome at ${address} didn't answer, so nothing was opened. Start Chrome with the Apply shortcut, check that Tailscale is on on the laptop, then try again.`,
+  noBrowser:
+    "No browser window could be opened on the computer the app runs on, so nothing was opened. If the app runs on a server, such as a NAS, connect your laptop's Chrome under Browser window below first.",
   cancelled: "Cancelled.",
 } as const;
 
@@ -229,7 +233,15 @@ export async function runApplyAttempt(attemptId: string, { step, signal }: JobCo
     signal.throwIfAborted();
 
     await step(APPLY_STEPS[1]);
-    const context = await applyContext({ userDataDir: applyProfileDir(), channel: env.DOSSIER_BROWSER_CHANNEL });
+    const address = settings.applyBrowserAddress;
+    let context: BrowserContext;
+    try {
+      context = await applyContext({ userDataDir: applyProfileDir(), channel: env.DOSSIER_BROWSER_CHANNEL, address });
+    } catch (error) {
+      if (signal.aborted) return end(attemptId, ApplyAttemptStatus.FAILED, NOTES.cancelled);
+      logServerError(`apply ${attemptId}`, error);
+      return end(attemptId, ApplyAttemptStatus.FAILED, address ? NOTES.noLaptop(address) : NOTES.noBrowser);
+    }
     page = await context.newPage();
     await page.bringToFront().catch(() => {});
     // https:// first: an address saved as http:// is tried as https://, and only if that doesn't answer, as it was given.

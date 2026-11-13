@@ -105,7 +105,7 @@ describe("reading the profile", () => {
       name: "Jane Doe",
       headline: "Senior Product Designer",
       based_in: "Rotterdam, Netherlands",
-      contact_details: { email: true, phone: true, address: true, city: true, country: true, website: true, linkedin: true, date_of_birth: true },
+      contact_details: { email: true, phone: true, street: true, house_number: true, postal_code: false, city: true, country: true, website: true, linkedin: true, date_of_birth: true },
       show_age: false,
       photo: null,
       skills: expect.arrayContaining(["Figma", "Design systems"]),
@@ -482,7 +482,7 @@ describe("importing from a resume (E4-10)", () => {
       read: {
         name: "John Doe",
         based_in: "Berlin, Germany",
-        contact_details: { email: true, phone: true, address: false, city: true, country: true, website: false, linkedin: false, date_of_birth: false },
+        contact_details: { email: true, phone: true, street: false, house_number: false, postal_code: false, city: true, country: true, website: false, linkedin: false, date_of_birth: false },
         skills: ["Figma", "Service design"],
         skills_to_check: ["Service design"],
         languages: [{ name: "German", level: "C1" }, { name: "French", level: "B1", level_given: false }],

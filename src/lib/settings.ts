@@ -214,6 +214,13 @@ export const settingsSchema = z.object({
   // employers' forms ask for and the profile doesn't hold, and whether it
   // may press Send itself.
   applyAnswers: json(applyAnswersSchema).catch(DEFAULT_APPLY_ANSWERS),
+  /**
+   * The laptop's Chrome the browser window opens in, e.g. "http://100.101.102.103:9222",
+   * when the app runs on a server without a screen; null opens it on the computer
+   * the app runs on (browser-address.ts). It belongs to the install, so exports
+   * leave it out (INSTALL_SETTINGS).
+   */
+  applyBrowserAddress: z.string().nullable().catch(null),
   // Gmail and Calendar (E15). Off until the Google account is connected.
   // The OAuth client, entered in Settings → Google. Null means "not set in the
   // app": DOSSIER_GOOGLE_CLIENT_ID and DOSSIER_GOOGLE_CLIENT_SECRET decide.

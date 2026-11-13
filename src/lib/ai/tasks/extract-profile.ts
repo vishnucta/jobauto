@@ -27,7 +27,9 @@ const answerSchema = z.object({
     phone: text,
     dob: text,
     website: text,
-    address: text,
+    street: text,
+    houseNumber: text,
+    postalCode: text,
     city: text,
     country: text,
     linkedin: text,
@@ -59,7 +61,7 @@ const answerSchema = z.object({
 const INSTRUCTIONS = `You turn the text of a candidate's resume into their profile, as JSON.
 
 Take everything only from the resume: never add, guess or improve facts. Use null, an empty string or an empty list for anything it doesn't say.
-- basics: name; headline (their current title or one-line description); email; phone; dob (date of birth as YYYY-MM-DD, only if the resume gives the full date); website; address (street and number); city; country; linkedin (the URL or handle); summary (their profile or summary paragraph, in their words).
+- basics: name; headline (their current title or one-line description); email; phone; dob (date of birth as YYYY-MM-DD, only if the resume gives the full date); website; their postal address in parts, each only if the resume gives it: street (the street's name, without the number), houseNumber, postalCode, city (where they live); country; linkedin (the URL or handle); summary (their profile or summary paragraph, in their words).
 - skills: skills, tools and methods the resume lists or clearly names, each short ("Figma", "Design systems", "User research"), once each.
 - languages: spoken languages with a level: NATIVE, or the CEFR level C2, C1, B2, B1, A2 or A1 ("fluent" is C1, "business" B2, "basic" A2). Use null when no level is given.
 - experience: every role, most recent first. startYear and endYear as four-digit years, startMonth and endMonth as 1–12 (null when only a year is given); current is true when the role hasn't ended ("present", "today"). descriptor: a line under the role's title that describes the company or the role rather than what they did ("Series B fintech, 40 people"), word for word, if there is one. volunteering: true for unpaid volunteer work, such as an entry under a volunteering heading, false for a job. bullets: what they did, one item per point, in the resume's words. skills: the skills from your skills list this role mentions.
@@ -97,7 +99,7 @@ export const extractProfile: Task<{ resume: string; today?: Date }, ImportedProf
 };
 
 /** Basics that must be in the file as they're given (#371); a headline, summary or date of birth may be worded or formatted anew. */
-const LITERAL_BASICS: ReadonlySet<BasicsField> = new Set(["name", "email", "phone", "website", "address", "city", "country", "linkedin"]);
+const LITERAL_BASICS: ReadonlySet<BasicsField> = new Set(["name", "email", "phone", "website", "street", "houseNumber", "postalCode", "city", "country", "linkedin"]);
 
 /**
  * The answer as a profile, trusting nothing: dates in range and in the file,
@@ -145,8 +147,8 @@ export function checkedProfile(answer: z.infer<typeof answerSchema>, resume: str
       leftOut.push(`${label}: not in the file`);
       continue;
     }
-    // A street address has a number; "Portland, Oregon" is a place, not a street.
-    if (field === "address" && !/\d/.test(value)) {
+    // A street comes with a number; "Portland, Oregon" is a place, not a street.
+    if ((field === "street" && !/\d/.test(clean(answer.basics.houseNumber))) || (field === "houseNumber" && !/\d/.test(value))) {
       leftOut.push(`${label}: no street or number in it`);
       continue;
     }

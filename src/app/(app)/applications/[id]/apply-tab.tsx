@@ -19,7 +19,7 @@ import { cn } from "@/lib/cn";
 import type { ApplyJobResult } from "@/lib/jobs/apply";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { fillThisPage, saveApplyAnswers, settleApplyAttempt, startApply } from "./apply-actions";
+import { fillThisPage, saveApplyAnswers, saveApplyBrowser, settleApplyAttempt, startApply, testApplyBrowser } from "./apply-actions";
 import { JobWatcher } from "./job-watcher";
 
 /** How often the tab asks the server whether the browser saw the confirmation, while it's watching. */
@@ -35,11 +35,12 @@ const STATUS_LABELS: Record<ApplyAttemptStatus, string> = {
 
 /**
  * The Apply tab (Phase A of the bewerbung fork): applies on the employer's
- * own page. A visible Chrome window opens, the form is filled from the
- * profile and the standard answers, the PDFs are attached, and the user
- * checks and presses Send; the tab shows what was filled, what's left to
- * her, and how each run ended. When the posting asks for an email instead,
- * it points to the Email tab.
+ * own page. A visible Chrome window opens, on the computer the app runs on
+ * or on her laptop, the form is filled from the profile and the standard
+ * answers, the PDFs are attached, and the user checks and presses Send; the
+ * tab shows what was filled, what's left to her, and how each run ended.
+ * It opens with a warning about what can go wrong. When the posting asks
+ * for an email instead, it points to the Email tab.
  */
 export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: string; data: ApplyTabData; onGoToEmail: () => void }) {
   const router = useRouter();
@@ -104,6 +105,21 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
     <div className="flex flex-1 flex-col items-center gap-4 overflow-auto bg-canvas px-10 pt-11 pb-16">
       {job && <JobWatcher<ApplyJobResult> key={job.id} id={job.id} revision={job.revision} onChange={jobChanged} />}
 
+      <Panel title="Before you use it" tone="warning">
+        <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-pretty">
+          <li>
+            The browser window opens on the computer the app runs on. When it runs on a server, such as a NAS, there&apos;s no screen there: connect the Chrome on
+            your laptop under Browser window below, or it won&apos;t work.
+          </li>
+          <li>
+            Job boards such as StepStone, Indeed and LinkedIn may forbid automated tools in their terms, and their bot checks can stop it. If in doubt, apply
+            there by hand.
+          </li>
+          <li>Forms differ and change, so a field can be filled wrongly or missed. Check every field, and every answer the AI wrote, before you press Send.</li>
+          {data.browserAddress && <li>While your laptop&apos;s Chrome is connected, the server controls it: use that window only for applying, not for your own browsing.</li>}
+        </ul>
+      </Panel>
+
       <Panel title="Apply on the employer's page">
         {plan.kind === "web" && (
           <>
@@ -112,7 +128,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
               {plan.atsLabel !== "the employer's website" && <> ({plan.atsLabel})</>}.{" "}
               {plan.account
                 ? "That site asks you to sign in. The browser window keeps you signed in from one application to the next, so you only do it once."
-                : "I open it in a Chrome window on this computer, fill in what I know, attach your PDFs, and leave the checking and the Send button to you."}
+                : `I open it in ${data.browserAddress ? "the Chrome on your laptop" : "a Chrome window on the computer the app runs on"}, fill in what I know, attach your PDFs, and leave the checking and the Send button to you.`}
               {plan.board && " It's a job board: its apply button may lead on to the employer's own page, and I'll follow it."}
             </p>
             {data.missing.length > 0 && (
@@ -167,6 +183,8 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
           fill={{ available: !job && !starting, running: filling, step: current, onFill: fill }}
         />
       )}
+
+      {plan.kind === "web" && <BrowserPanel applicationId={applicationId} address={data.browserAddress} />}
 
       <AnswersPanel applicationId={applicationId} answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} />
 
@@ -329,6 +347,56 @@ function pagesOf(filled: ApplyAttemptView["filled"]): { page: number; entries: A
   return [...byPage].map(([page, entries]) => ({ page, entries })).sort((a, b) => b.page - a.page);
 }
 
+/** Where the browser window opens: on the computer the app runs on, or in the Chrome on a laptop. */
+function BrowserPanel({ applicationId, address: saved }: { applicationId: string; address: string | null }) {
+  const router = useRouter();
+  const [address, setAddress] = useState(saved ?? "");
+  const [saving, startSaving] = useTransition();
+  const [testing, startTesting] = useTransition();
+  const dirty = address.trim() !== (saved ?? "");
+
+  const save = () =>
+    startSaving(async () => {
+      const result = await saveApplyBrowser({ id: applicationId, address: address.trim() });
+      if (!result.ok) return toast(result.error);
+      if (result.toast) toast(result.toast);
+      router.refresh();
+    });
+
+  const test = () =>
+    startTesting(async () => {
+      const result = await testApplyBrowser({ address: address.trim() });
+      toast(result.ok ? `${result.data.version} answered. It's ready.` : result.error);
+    });
+
+  return (
+    <Panel title="Browser window">
+      <p className="text-sm text-pretty text-muted">
+        {saved
+          ? `The window opens in the Chrome on your laptop, at ${saved}. Start Chrome with the Apply shortcut before you click Open and fill it in.`
+          : "The window opens on the computer the app runs on. If the app runs on a server, such as a NAS, enter the address of your laptop's Chrome here."}{" "}
+        How to set up the laptop is in the install guide, under Apply from a laptop.
+      </p>
+      <Input
+        label="Your laptop's Chrome"
+        hint="The laptop's Tailscale IP address and the port, e.g. http://100.101.102.103:9222. Leave it empty for a window on the computer the app runs on."
+        placeholder="http://100.101.102.103:9222"
+        value={address}
+        onChange={(event) => setAddress(event.target.value)}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant={dirty ? "primary" : "secondary"} aria-disabled={saving || !dirty || undefined} onClick={() => !saving && dirty && save()}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        <Button variant="text" aria-disabled={testing || !address.trim() || undefined} onClick={() => !testing && address.trim() && test()}>
+          {testing ? "Testing…" : "Test"}
+        </Button>
+        {dirty && <span className="text-meta text-muted">Not saved yet</span>}
+      </div>
+    </Panel>
+  );
+}
+
 /** The standard answers every form asks for, saved once. */
 function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applicationId: string; answers: ApplyAnswers; autoSubmitOk: boolean }) {
   const router = useRouter();
@@ -354,8 +422,6 @@ function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applica
         <Input label="Salary expectation" placeholder="e.g. 55.000 € brutto/Jahr" value={answers.salary} onChange={(event) => set("salary", event.target.value)} />
         <Input label="Earliest start date" hint="“sofort”, or a day as YYYY-MM-DD" placeholder="sofort" value={answers.startDate} onChange={(event) => set("startDate", event.target.value)} />
         <Input label="Notice period" placeholder="e.g. keine, or 3 Monate" value={answers.noticePeriod} onChange={(event) => set("noticePeriod", event.target.value)} />
-        <Input label="Street and number" hint="When the address line of your profile doesn't split cleanly" value={answers.street} onChange={(event) => set("street", event.target.value)} />
-        <Input label="Postal code" value={answers.postalCode} onChange={(event) => set("postalCode", event.target.value)} />
         <Select label="German level" value={answers.germanLevel} onChange={(event) => set("germanLevel", event.target.value as ApplyAnswers["germanLevel"])}>
           {LANGUAGE_LEVEL_ANSWERS.map((level) => (
             <option key={level} value={level}>

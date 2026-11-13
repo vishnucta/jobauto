@@ -34,6 +34,7 @@ const answers: AnswerSet = {
   email: "erika.mustermann@example.com",
   phone: "+49 40 1234567",
   street: "Musterstraße 12",
+  houseNumber: "12",
   postalCode: "20095",
   city: "Hamburg",
   country: "Germany",

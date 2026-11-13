@@ -41,6 +41,8 @@ export type ApplyTabData = {
   hasLetter: boolean;
   /** Profile basics forms usually ask for that are empty, e.g. "phone number". */
   missing: string[];
+  /** The laptop's Chrome the window opens in, e.g. "http://100.101.102.103:9222"; null opens it on the computer the app runs on. */
+  browserAddress: string | null;
 };
 
 /** The statuses that mean a run is still going, one way or another. */

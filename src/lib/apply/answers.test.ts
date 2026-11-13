@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAnswersSchema, buildAnswerSet, DEFAULT_APPLY_ANSWERS, splitAddress, splitName } from "./answers";
+import { applyAnswersSchema, buildAnswerSet, DEFAULT_APPLY_ANSWERS, splitName } from "./answers";
 
 const basics = {
   name: "Erika Mustermann",
   email: "p@example.com",
   phone: "+49 170 1234567",
-  address: "Musterstraße 12, 20095 Hamburg",
+  street: "Musterstraße",
+  houseNumber: "12",
+  postalCode: "20095",
   city: "Hamburg",
   country: "Germany",
   linkedin: "https://www.linkedin.com/in/p",
@@ -37,12 +39,6 @@ describe("the standard answers (Phase A)", () => {
     expect(splitName("  ")).toEqual({ first: "", last: "" });
   });
 
-  it("split a German address line into street and postal code", () => {
-    expect(splitAddress("Musterstraße 12, 20095 Hamburg", "Hamburg")).toEqual({ street: "Musterstraße 12", postalCode: "20095" });
-    expect(splitAddress("Musterstraße 12", "Hamburg")).toEqual({ street: "Musterstraße 12", postalCode: "" });
-    expect(splitAddress("", "Hamburg")).toEqual({ street: "", postalCode: "" });
-  });
-
   it("build the set from the profile, the saved answers and the letter", () => {
     const set = buildAnswerSet({
       basics,
@@ -54,6 +50,7 @@ describe("the standard answers (Phase A)", () => {
       lastName: "Mustermann",
       fullName: "Erika Mustermann",
       street: "Musterstraße 12",
+      houseNumber: "12",
       postalCode: "20095",
       city: "Hamburg",
       country: "Germany",
@@ -67,8 +64,14 @@ describe("the standard answers (Phase A)", () => {
     });
   });
 
-  it("let the saved street and postal code win over the address line", () => {
+  it("take the address from the profile, over street and postal code saved before the profile held them", () => {
     const set = buildAnswerSet({ basics, answers: { ...DEFAULT_APPLY_ANSWERS, street: "Neue Str. 1", postalCode: "22222", workPermit: false }, letterParagraphs: [] });
-    expect(set).toMatchObject({ street: "Neue Str. 1", postalCode: "22222", workPermit: "no", sponsorship: "yes", message: "" });
+    expect(set).toMatchObject({ street: "Musterstraße 12", postalCode: "20095", workPermit: "no", sponsorship: "yes", message: "" });
+  });
+
+  it("fall back on street and postal code saved before, while the profile has neither", () => {
+    const empty = { ...basics, street: "", houseNumber: "", postalCode: "" };
+    const set = buildAnswerSet({ basics: empty, answers: { ...DEFAULT_APPLY_ANSWERS, street: "Neue Str. 1", postalCode: "22222" }, letterParagraphs: [] });
+    expect(set).toMatchObject({ street: "Neue Str. 1", houseNumber: "", postalCode: "22222" });
   });
 });

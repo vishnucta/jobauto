@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { citationText } from "@/lib/citation";
-import { BASICS_FIELDS, sameName } from "@/lib/profile";
+import { ADDRESS_FIELDS, addressFromLegacy, BASICS_FIELDS, LEGACY_ADDRESS_KEY, sameName } from "@/lib/profile";
 import type { ImportedProfile, ImportMode } from "@/lib/profile-import";
 import { settingsFromRows } from "@/lib/settings";
 import { saveSettings } from "@/lib/settings-data";
@@ -30,13 +30,20 @@ export async function applyImportedProfile(db: PrismaClient, profile: ImportedPr
         await tx.reference.deleteMany();
         await tx.language.deleteMany();
         await tx.skill.deleteMany();
-        await tx.profileField.deleteMany({ where: { key: { in: [...BASICS_FIELDS] } } });
+        await tx.profileField.deleteMany({ where: { key: { in: [...BASICS_FIELDS, LEGACY_ADDRESS_KEY] } } });
         await saveSettings({ experienceOrder: "date", projectOrder: "date", educationOrder: "date" }, tx);
       }
       const order = settingsFromRows(
         await tx.setting.findMany({ where: { key: { in: ["experienceOrder", "projectOrder", "educationOrder"] } } }),
       );
 
+      // A profile from before the address was split keeps its address when the import brings only part of one.
+      const kept = await tx.profileField.findMany({ where: { key: { in: [...ADDRESS_FIELDS, LEGACY_ADDRESS_KEY] } } });
+      const address = addressFromLegacy(new Map(kept.map((row) => [row.key, row.value])));
+      for (const [key, value] of Object.entries(address ?? {})) {
+        if (value) await tx.profileField.upsert({ where: { key }, create: { key, value }, update: { value } });
+      }
+      await tx.profileField.deleteMany({ where: { key: LEGACY_ADDRESS_KEY } });
       for (const [key, value] of Object.entries(profile.basics)) {
         await tx.profileField.upsert({ where: { key }, create: { key, value }, update: { value } });
       }

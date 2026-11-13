@@ -45,7 +45,9 @@ const answer = {
     phone: "+31 6 1234 5678",
     dob: "1990-03-12",
     website: null,
-    address: null,
+    street: null,
+    houseNumber: null,
+    postalCode: null,
     city: "Utrecht",
     country: "Netherlands",
     linkedin: "",
@@ -121,7 +123,7 @@ describe("extractProfile (E4-10)", () => {
     const resume = "Morgan Ellis\nData Analyst\nPortland, Oregon\n\nEducation\nB.S. in Statistics, Oregon State University, 2021\n\nCertifications\nGoogle Data Analytics, Google, '23";
     const added = {
       ...answer,
-      basics: { ...answer.basics, name: "Morgan Ellis", headline: "Data Analyst", email: null, phone: null, dob: null, website: null, linkedin: null, summary: null, address: "Portland, Oregon", city: "Portland", country: "Oregon" },
+      basics: { ...answer.basics, name: "Morgan Ellis", headline: "Data Analyst", email: null, phone: null, dob: null, website: null, linkedin: null, summary: null, street: "Portland, Oregon", houseNumber: null, postalCode: null, city: "Portland", country: "Oregon" },
       skills: [],
       languages: [],
       experience: [],
@@ -137,7 +139,7 @@ describe("extractProfile (E4-10)", () => {
     // "'23" is 2023.
     expect(data.certifications[0]).toMatchObject({ year: 2023 });
     expect(data.leftOut).toEqual([
-      "Street address “Portland, Oregon”: no street or number in it",
+      "Street “Portland, Oregon”: no street or number in it",
       "Country “Oregon”: not a country",
       "Education “B.S. in Statistics”: 2017, not in the file",
     ]);
