@@ -576,10 +576,24 @@ describe("writeCoverLetter", () => {
     signOff: "Cheers,",
   };
 
+  it("states the salary expectation and start date the posting asks for, as given, and doesn't flag them as made up (jobauto fork)", async () => {
+    const provider = model({ ...answer, paragraphs: [{ label: "Closing", text: "My salary expectation is 58,000 EUR a year, and I can start on 1 March 2027." }] });
+    const { data } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting, availability: { salary: "58,000 EUR a year", start: "1 March 2027" } }, options);
+    const prompt = sent(provider).messages[0].content;
+    expect(prompt).toContain("The posting asks the letter to state these");
+    expect(prompt).toContain("- Salary expectation: 58,000 EUR a year\n- Earliest start: 1 March 2027");
+    expect(data.find((unit) => unit.id === "paragraph:1")).toMatchObject({ text: "My salary expectation is 58,000 EUR a year, and I can start on 1 March 2027." });
+    expect(data.find((unit) => unit.id === "paragraph:1")).not.toHaveProperty("unverified");
+    // Without them, the prompt says nothing about either.
+    const plain = model(answer);
+    await writeCoverLetter(plain, { profile, extracted, match, tone: "FORMAL", facts: [], posting }, options);
+    expect(sent(plain).messages[0].content).not.toContain("Salary expectation");
+  });
+
   it("returns the recipient, greeting, paragraphs and the tone's sign-off for an English letter (APP-10, E8-11)", async () => {
     const provider = model(answer);
     const { data, promptVersion } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting }, options);
-    expect(promptVersion).toBe("write-cover-letter@6");
+    expect(promptVersion).toBe("write-cover-letter@7");
     expect(data).toEqual([
       { id: "recipient", label: "Recipient", text: "Ledgerly · Hiring team\nAmsterdam" },
       { id: "greeting", label: "Greeting", text: "Dear Ledgerly team," },
