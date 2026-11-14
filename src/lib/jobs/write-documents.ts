@@ -7,6 +7,7 @@ import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { tailorResume, writeCoverLetter } from "@/lib/ai/tasks";
 import { extractedSchema, matchSchema, unitsSchema } from "@/lib/application-data";
+import { letterAvailability } from "@/lib/letter-availability";
 import { loadProfile } from "@/lib/profile-data";
 import { withoutSectionsOff } from "@/lib/resume-sections";
 import { DOCUMENTS_TO_WRITE } from "@/lib/settings";
@@ -56,7 +57,9 @@ export const writeDocumentsJob = defineJob({
         : await tailorResume(provider, { profile, extracted, match, facts, posting, keepSkillOrder: settings.skillOrder === "manual" }, taskOptions);
 
     if (write === "both") await step(WRITE_DOCUMENTS_STEPS[1]);
-    const letter = write === "resume" ? skipped : await writeCoverLetter(provider, { profile, extracted, match, tone, facts, posting }, taskOptions);
+    // Salary and start date, when the posting asks for them, from the standard answers.
+    const availability = letterAvailability(posting, settings.applyAnswers).say;
+    const letter = write === "resume" ? skipped : await writeCoverLetter(provider, { profile, extracted, match, tone, facts, posting, availability }, taskOptions);
 
     return { resume: resume.data, resumeWith: resume.promptVersion, letter: letter.data, letterWith: letter.promptVersion };
   },

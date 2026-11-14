@@ -27,6 +27,7 @@ import { EMAIL_UNITS, WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
 import { documentLabels } from "@/lib/document-labels";
 import { copyText } from "@/lib/copy-text";
 import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
+import { missingWords } from "@/lib/letter-availability";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
 import type { ApplyTabData } from "@/lib/apply/view";
@@ -213,6 +214,8 @@ export type ApplicationViewProps = {
   prep: PrepTabData;
   /** The Anlagen that go with it, by name, for a German letter's list. */
   anlagen?: readonly string[];
+  /** What the posting asks the letter to state that has no standard answer yet: salary, start date (letter-availability.ts). */
+  letterAsks?: readonly ("salary" | "start")[];
 };
 
 /**
@@ -262,6 +265,7 @@ export function ApplicationView({
   apply,
   prep,
   anlagen = [],
+  letterAsks = [],
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -1002,7 +1006,20 @@ export function ApplicationView({
                 </span>
               }
               meta={viewed(DocumentKind.COVER_LETTER) ? undefined : hint}
-              notice={viewed(DocumentKind.COVER_LETTER) ? versionBanner(viewed(DocumentKind.COVER_LETTER)!) : undefined}
+              notice={
+                viewed(DocumentKind.COVER_LETTER) ? (
+                  versionBanner(viewed(DocumentKind.COVER_LETTER)!)
+                ) : letterAsks.length > 0 ? (
+                  <p role="note" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
+                    <span>
+                      The posting asks for {missingWords(letterAsks)}. Add {letterAsks.length > 1 ? "them" : "it"} to your standard answers, then regenerate the closing paragraph.
+                    </span>
+                    <button type="button" className="font-medium underline underline-offset-2" onClick={() => selectTab("apply")}>
+                      Open the Apply tab
+                    </button>
+                  </p>
+                ) : undefined
+              }
             >
               <TailoredLetter
                 letter={{ ...letter, theme: letterTheme, units: viewed(DocumentKind.COVER_LETTER)?.units ?? letterUnits }}

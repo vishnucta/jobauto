@@ -36,11 +36,55 @@ function skillPattern(skill: string): RegExp {
 
 const list = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-/** Where a startup says it hires: its location, and the title or the post's first line. */
+/** Where a startup says it hires: its location, and the title or the post's first line; a licensed firm's address only. */
 export const whereText = (startup: Pick<FoundStartup, "source" | "location" | "summary" | "details">) =>
-  [startup.location, startup.source === "YC" ? startup.summary : headerParts(startup.details).join(" | ")].join(" | ");
+  startup.source === "LICENCE" ? startup.location : [startup.location, startup.source === "YC" ? startup.summary : headerParts(startup.details).join(" | ")].join(" | ");
 
 export type StartupFit = { score: number; reasons: string[] };
+
+/** Regulatory reporting and the work around it, in a profile. */
+const REPORTING = /\b(emir|mifir|mifid|mica|transaction reporting|regulatory reporting|meldewesen|corep|finrep|ifr|reconciliations?|client (?:assets|money)|compliance|regulatory)\b/i;
+
+/**
+ * How well a newly licensed firm fits (jobauto fork): it has reporting to
+ * set up, so a profile in regulatory reporting fits it most; the newer the
+ * licence, the more is still to be built; and where it is.
+ */
+function matchLicensedFirm(startup: FoundStartup, profile: Pick<ProfileData, "basics" | "skills" | "experience">, place: Place, now: Date): StartupFit {
+  const reasons: string[] = [];
+  let score = 20;
+  const profileText = [profile.basics.headline, profile.basics.summary, ...profile.experience.flatMap((role) => [role.role, role.bullets]), ...profile.skills.map((skill) => skill.name)].join(" ");
+  const duty = startup.stage.startsWith("Crypto") ? "MiCA and transaction reporting" : "MiFIR transaction reporting";
+  if (REPORTING.test(profileText)) {
+    score += 35;
+    reasons.push(`Has ${duty} to set up, which you've done`);
+  } else {
+    reasons.push(`Has ${duty} to set up`);
+  }
+
+  const days = startup.postedAt ? (now.getTime() - Date.parse(startup.postedAt)) / 86_400_000 : Infinity;
+  if (days <= 90) {
+    score += 20;
+    reasons.push(`Licensed ${Math.max(1, Math.round(days))} days ago`);
+  } else if (days <= 180) {
+    score += 12;
+    reasons.push(`Licensed ${Math.round(days / 30)} months ago`);
+  } else if (days <= 365) {
+    score += 5;
+  }
+
+  const where = reach(whereText(startup), place);
+  if (where.here === "city") {
+    score += 15;
+    reasons.push(`In ${place.city}`);
+  } else if (where.here === "country") {
+    score += 8;
+    reasons.push(`In ${place.countryName}`);
+  }
+  if (startup.stage === "Branch in Germany") reasons.push("A new German branch of an EU firm");
+  if (startup.website) score += 5;
+  return { score: Math.max(0, Math.min(100, Math.round(score))), reasons };
+}
 
 /** How well `startup` fits the profile, with the reasons in a few words each. */
 export function matchStartup(
@@ -49,6 +93,7 @@ export function matchStartup(
   place: Place,
   now = new Date(),
 ): StartupFit {
+  if (startup.source === "LICENCE") return matchLicensedFirm(startup, profile, place, now);
   const text = [startup.company, startup.summary, startup.details, startup.roles.join(" ")].join("\n");
   const reasons: string[] = [];
   let score = 10;

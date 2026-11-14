@@ -3,14 +3,17 @@ import { z } from "zod";
 // Startups (#222): startups that are hiring, from YC startups' job posts on
 // Hacker News and Hacker News' monthly "Who is hiring?" thread, ranked
 // against the profile, with the addresses they publish for applications.
-// Shared by the server and the screen.
+// The jobauto fork adds firms newly licensed in Germany, from ESMA's
+// registers (LICENCE): a new firm has its reporting to set up, often before
+// any job ad. Shared by the server and the screen.
 
-export const STARTUP_SOURCES = ["YC", "HN"] as const;
+export const STARTUP_SOURCES = ["YC", "HN", "LICENCE"] as const;
 export type StartupSource = (typeof STARTUP_SOURCES)[number];
 
 export const STARTUP_SOURCE_INFO: Record<StartupSource, { name: string; kind: string }> = {
   YC: { name: "Y Combinator", kind: "Job post" },
   HN: { name: "Hacker News", kind: "Who is hiring?" },
+  LICENCE: { name: "ESMA registers", kind: "New licence" },
 };
 
 export const STARTUP_STATUSES = ["NEW", "SAVED", "CONTACTED", "DISMISSED"] as const;

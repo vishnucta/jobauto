@@ -53,6 +53,22 @@ export async function getText(url: string, { signal }: { signal?: AbortSignal } 
   return text;
 }
 
+/** GETs a source's address as bytes, for a file whose encoding needs a closer look than text() gives it. */
+export async function getBytes(url: string, { signal }: { signal?: AbortSignal } = {}): Promise<Uint8Array> {
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(testAddress(url), { headers: { "user-agent": STARTUPS_USER_AGENT }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, cache: "no-store" });
+  } catch {
+    if (signal?.aborted) throw new SourceError("was stopped");
+    throw new SourceError(timeout.aborted ? "took too long to answer" : "couldn't be reached");
+  }
+  if (!response.ok) throw new SourceError(`answered with an error (${response.status})`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_BYTES) throw new SourceError("sent too much");
+  return bytes;
+}
+
 export async function getJson(url: string, options: { signal?: AbortSignal } = {}): Promise<unknown> {
   const text = await getText(url, options);
   try {

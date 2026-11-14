@@ -4,6 +4,7 @@ import type { Tone } from "@/generated/prisma/enums";
 import { SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
 import type { ProfileData } from "@/lib/profile";
 import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
+import { availabilityLines, type LetterAvailability } from "@/lib/letter-availability";
 import { TONES } from "@/lib/tones";
 import { plainText } from "@/lib/unit-text";
 
@@ -24,7 +25,7 @@ import {
   type Task,
 } from "./prompt-parts";
 
-export const WRITE_COVER_LETTER_VERSION = "write-cover-letter@6";
+export const WRITE_COVER_LETTER_VERSION = "write-cover-letter@7";
 
 const answerSchema = z.object({
   recipient: z.string(),
@@ -52,6 +53,8 @@ export type CoverLetterInput = {
   facts: string[];
   /** The posting as pasted, for the fact guard. */
   posting: string;
+  /** Salary expectation and start date the posting asks for, from the standard answers (letter-availability.ts); null when it asks for neither or there are none. */
+  availability?: LetterAvailability | null;
 };
 
 /**
@@ -60,7 +63,8 @@ export type CoverLetterInput = {
  * "sign-off"), which matches the tone. The sender, date and signature come
  * from the profile when the application is created (src/lib/letter-frame.ts).
  */
-export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider, { profile, extracted, match, tone, facts, posting }, options) => {
+export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider, { profile, extracted, match, tone, facts, posting, availability = null }, options) => {
+  const asked = availability ? availabilityLines(availability) : [];
   const answer = await provider.complete({
     task: "write-cover-letter",
     system: system(
@@ -82,6 +86,8 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
           `The candidate's profile:\n${profileForPrompt(profile)}`,
           `The job:\n${jobForPrompt(extracted, match)}`,
           applicationFacts(facts),
+          asked.length > 0 &&
+            `The posting asks the letter to state these, so say them in one or two short sentences in the closing paragraph, with exactly these values, in the letter's language. Say nothing about what isn't listed here:\n${asked.map((line) => `- ${line}`).join("\n")}`,
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -111,7 +117,7 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
   ]);
   return {
     // The recipient and greeting aren't claims about the candidate: only the paragraphs are checked.
-    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, facts), language)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
+    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, [...facts, ...asked]), language)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
     promptVersion: WRITE_COVER_LETTER_VERSION,
   };
 };

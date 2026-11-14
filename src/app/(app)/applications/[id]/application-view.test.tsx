@@ -211,6 +211,15 @@ beforeEach(() => {
 const summary = demoResumeUnits()[0];
 
 describe("the document tabs (E8-2)", () => {
+  it("says on the letter what the posting asks for that has no standard answer yet, and leads to the Apply tab (jobauto fork)", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} initialTab="letter" letterAsks={["salary", "start"]} />);
+    const note = screen.getByText(/The posting asks for your salary expectation and your earliest start date\./);
+    expect(note).toHaveTextContent("Add them to your standard answers, then regenerate the closing paragraph.");
+    await user.click(screen.getByRole("button", { name: "Open the Apply tab" }));
+    expect(screen.getByRole("tab", { name: "Apply" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("has Resume, Cover letter, Email and the posting with its match", () => {
     render(<ApplicationView {...props} />);
     const tabs = within(screen.getByRole("tablist", { name: "Application" })).getAllByRole("tab");

@@ -416,7 +416,8 @@ function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applica
   return (
     <Panel title="Your standard answers">
       <p className="text-sm text-pretty text-muted">
-        What German forms ask for and your profile doesn&apos;t hold. Saved once, used on every form; leave one empty and I&apos;ll leave that field to you.
+        What German forms ask for and your profile doesn&apos;t hold. Saved once, used on every form; leave one empty and I&apos;ll leave that field to you. When a posting asks for your
+        salary expectation or earliest start date, the cover letter states them from here too.
       </p>
       <div className="grid gap-4 @min-[560px]:grid-cols-2">
         <Input label="Salary expectation" placeholder="e.g. 55.000 € brutto/Jahr" value={answers.salary} onChange={(event) => set("salary", event.target.value)} />

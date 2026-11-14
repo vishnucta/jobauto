@@ -13,6 +13,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
 import { saveVersion } from "@/lib/document-versions";
 import { newFrame, withFrame } from "@/lib/letter-frame";
+import { letterAvailability } from "@/lib/letter-availability";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
 import { sectionLayoutSchema, withoutSectionsOff } from "@/lib/resume-sections";
@@ -64,7 +65,8 @@ export const writeDocumentJob = defineJob({
       units = resume.data;
       writtenWith = resume.promptVersion;
     } else {
-      const letter = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting }, taskOptions);
+      const availability = letterAvailability(posting, settings.applyAnswers).say;
+      const letter = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting, availability }, taskOptions);
       const language = application.language || settings.docLanguage || extracted.language || "English";
       // The sender and signature from the profile, and today's date, as a new application's letter has (E8-11).
       units = withFrame(

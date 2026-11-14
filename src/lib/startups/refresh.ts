@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { alertIfOn, matchLines } from "@/lib/alerts";
 import { defineJob, findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
@@ -11,12 +12,14 @@ import { saveSettings } from "@/lib/settings-data";
 import { SourceError } from "./http";
 import { placeOf } from "./place";
 import { fetchHnStartups } from "./sources/hn";
+import { fetchLicensedFirms } from "./sources/licences";
 import { fetchYcStartups } from "./sources/yc";
 import { lookUpStartup, rescoreStartups, sweepStartups, upsertStartups } from "./store";
 import { STARTUP_SOURCE_INFO, startupsRefreshSchema, type FoundStartup, type StartupSource, type StartupsRefresh } from "./types";
 
 // "Refresh" on the Startups screen (#222), and once a day while the screen
-// is in use: asks both sources what's new, keeps it, scores it, and looks
+// is in use: asks every source what's new (YC, Hacker News, and ESMA's
+// registers for firms newly licensed in Germany), keeps it, scores it, and looks
 // for role addresses on the best new matches' own sites. One source failing
 // doesn't stop the other; what happened is kept for the screen.
 
@@ -36,9 +39,10 @@ export async function refreshStartups(
   const sources: { source: StartupSource; fetch: () => Promise<FoundStartup[]> }[] = [
     { source: "YC", fetch: () => fetchYcStartups(signal) },
     { source: "HN", fetch: () => fetchHnStartups(place, signal) },
+    { source: "LICENCE", fetch: () => fetchLicensedFirms(signal, now) },
   ];
 
-  await step("Asking Y Combinator and Hacker News");
+  await step("Asking Y Combinator, Hacker News and ESMA's registers");
   const results = await Promise.allSettled(sources.map((entry) => entry.fetch()));
   signal.throwIfAborted();
   const outcomes = results.map((result, index) => {
@@ -51,7 +55,26 @@ export async function refreshStartups(
   const found = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 
   await step(`Scoring ${found.length} ${found.length === 1 ? "startup" : "startups"} against your profile`);
+  const licensed = found.filter((startup) => startup.source === "LICENCE").map((startup) => startup.externalId);
+  const knownLicensed = new Set(
+    (await prisma.startup.findMany({ where: { source: "LICENCE", externalId: { in: licensed } }, select: { externalId: true } })).map((row) => row.externalId),
+  );
+  // The first time, every firm of the past year is new: the screen shows them, without an alert.
+  const firstLook = (await prisma.startup.count({ where: { source: "LICENCE" } })) === 0;
   const added = await upsertStartups(found, now);
+  // Newly licensed firms are rare and early is the point: they go to the phone.
+  const newFirms = await prisma.startup.findMany({
+    where: { source: "LICENCE", externalId: { in: licensed.filter((id) => !knownLicensed.has(id)) } },
+    orderBy: { score: "desc" },
+    select: { company: true, location: true, score: true },
+  });
+  if (newFirms.length > 0 && !firstLook) {
+    await alertIfOn({
+      title: newFirms.length === 1 ? "A newly licensed firm in Germany" : `${newFirms.length} newly licensed firms in Germany`,
+      message: matchLines(newFirms.map((firm) => ({ title: firm.company, company: firm.location.replace(/, Germany$/, ""), score: firm.score }))),
+      open: "/startups?source=licence",
+    });
+  }
   // Ones this refresh didn't find again are scored against today's profile too.
   await rescoreStartups(now);
   await sweepStartups(now);

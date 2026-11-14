@@ -329,7 +329,7 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
         status: z.enum(StartupStatus).optional().describe("NEW (To look at, the default), SAVED, CONTACTED or DISMISSED"),
         search: z.string().trim().max(200).optional().describe("Words to look for, e.g. 'android fintech'"),
         place: z.enum(STARTUP_PLACES).optional().describe("any, city or country (the profile's), or remote (open to its country)"),
-        source: z.enum(STARTUP_SOURCES).optional().describe("YC or HN"),
+        source: z.enum(STARTUP_SOURCES).optional().describe("YC, HN, or LICENCE for firms newly licensed in Germany (ESMA's registers)"),
         min_score: z.number().int().min(0).max(100).optional(),
         with_address: z.boolean().optional().describe("Only ones with an address to write to"),
         sort: z.enum(STARTUP_SORTS).optional().describe("match (the default) or newest"),
