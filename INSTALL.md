@@ -197,7 +197,17 @@ When the app runs on a server, such as a NAS, and you open it from a laptop, the
    ```
    "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\jobauto-apply-chrome"
    ```
-   Call it **Chrome for Apply**. It opens a Chrome with a profile of its own, apart from your everyday Chrome: Chrome only opens the debugging port for a separate profile.
+   Call it **Chrome for Apply**. It opens a Chrome with a profile of its own, apart from your everyday Chrome: Chrome only opens the debugging port for a separate profile. The text is the same on every laptop: Windows reads `%LOCALAPPDATA%` as the signed-in user's own folder, such as `C:\Users\<name>\AppData\Local`, and Chrome makes the `jobauto-apply-chrome` folder there the first time it starts. That folder keeps this Chrome's sign-ins to job sites.
+
+   Or make the same shortcut on the desktop from PowerShell:
+   ```powershell
+   $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+   if (-not (Test-Path $chrome)) { $chrome = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" }
+   $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\Chrome for Apply.lnk")
+   $shortcut.TargetPath = $chrome
+   $shortcut.Arguments = '--remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\jobauto-apply-chrome"'
+   $shortcut.Save()
+   ```
 3. **Let the server reach it (once).** Chrome only listens on the laptop itself. This passes its port on to your Tailscale network, not to the internet. In PowerShell (as administrator, if it says access is denied):
    ```powershell
    tailscale serve --bg --tcp 9222 tcp://127.0.0.1:9222
@@ -210,6 +220,10 @@ From then on, start **Chrome for Apply** before you click **Open and fill it in*
 While **Chrome for Apply** is open, any device in your Tailscale network can control it, which is how the server fills in forms. Use it only for applying, and close it when you're done. To let only the server reach it, add a rule in Tailscale's access controls that allows port 9222 on the laptop only from the server.
 
 The address under **Browser window** is how the server reaches your laptop, not how you reach the app. Opening the app at its home network address, such as `http://192.168.0.246:3000`, doesn't change it.
+
+### Applying from another laptop
+
+Each laptop you apply from needs steps 2 and 3 once, signed in to the same Tailscale network as the server. The app keeps one address under **Browser window**, and the window opens on that laptop only. Before applying from a different laptop, enter that laptop's address (`tailscale ip -4` on it), then click **Test** and **Save**.
 
 ### If the Apply tab says Chrome didn't answer
 
