@@ -213,11 +213,36 @@ The address under **Browser window** is how the server reaches your laptop, not 
 
 ### If the Apply tab says Chrome didn't answer
 
-Check these on the laptop, in order:
+Run these in PowerShell on the laptop, in order:
 
-1. **Is Chrome open for debugging?** Start **Chrome for Apply**, then open `http://127.0.0.1:9222/json/version` in it. If that page shows nothing, close every Chrome window and start the shortcut again.
-2. **Did step 3 run?** Run the `tailscale serve` line again; it does no harm.
-3. **Is the server on Tailscale too?** It can only reach a `100.` address if it is. If it isn't, use your home network instead, as below.
+```powershell
+# 1. Tailscale is on, and the server is listed among your devices
+tailscale status
+
+# 2. The laptop's Tailscale address, the one you entered in the app
+tailscale ip -4
+
+# 3. Close every Chrome window, then start Chrome for Apply
+Stop-Process -Name chrome -ErrorAction SilentlyContinue
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\jobauto-apply-chrome"
+
+# 4. Chrome answers on the laptop: prints its version, such as "Browser: Chrome/..."
+Invoke-RestMethod http://127.0.0.1:9222/json/version
+
+# 5. Pass the port on to your Tailscale network (once; as administrator if it says access is denied)
+tailscale serve --bg --tcp 9222 tcp://127.0.0.1:9222
+
+# 6. The port is passed on
+tailscale serve status
+```
+
+Then click **Test** in the Apply tab again.
+
+- **The server isn't listed in step 1:** it isn't on Tailscale, so it can't reach a `100.` address. Use your home network instead, as below.
+- **Step 4 fails:** Chrome didn't open its debugging port, usually because a Chrome window was still open. Close them all and start it again. If Chrome isn't in `C:\Program Files`, look in `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`.
+- **Test still fails after step 6:** check that `tailscale status` shows the laptop online. On a work laptop, company policy may block Tailscale's sharing: then use your home network, or another computer.
+
+`tailscale serve` stays set up, so next time only step 3 is needed. To undo it: `tailscale serve reset`.
 
 ### Without Tailscale: on your home network
 
