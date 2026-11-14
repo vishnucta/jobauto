@@ -85,7 +85,7 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
     <>
       <PageHeader
         title="Startups"
-        description="Startups that are hiring, from YC startups' job posts and Hacker News' “Who is hiring?”, ranked against your profile, with the address each one publishes for applications. You write to each one yourself."
+        description="Startups that are hiring, from YC startups' job posts and Hacker News' “Who is hiring?”, and firms newly licensed in Germany, from ESMA's registers, which have their reporting to set up before they advertise. Ranked against your profile, with the address each one publishes for applications. You write to each one yourself."
         actions={
           <Button aria-disabled={refreshing || starting || undefined} onClick={() => !refreshing && !starting && refresh()}>
             {refreshing ? "Refreshing…" : "Refresh"}
@@ -135,8 +135,9 @@ function RefreshStatus({ lastRefresh, refreshing, step, today }: { lastRefresh: 
       <div role="note" className="flex flex-col gap-2 rounded-panel border border-line-card bg-card px-6 py-5 text-sm text-pretty">
         <p>
           Press <strong>Refresh</strong> to look for startups. Dossier reads YC startups&apos; job posts and this month&apos;s “Who is hiring?” thread on
-          Hacker News, keeps the ones that hire where you live or remotely, and looks on the best matches&apos; own sites for the address they publish for
-          applications, following their robots.txt.
+          Hacker News, keeps the ones that hire where you live or remotely, and adds the investment firms and crypto-asset providers licensed in Germany in
+          the past year, from ESMA&apos;s public registers. Then it looks on the best matches&apos; own sites for the address they publish for applications,
+          following their robots.txt.
         </p>
         <p className="text-muted">
           After that it refreshes once a day while you use this screen. Nothing is sent to anyone: you decide whom to write to.
@@ -157,7 +158,7 @@ function RefreshStatus({ lastRefresh, refreshing, step, today }: { lastRefresh: 
       </p>
       {failed.length > 0 && (
         <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-warning">
-          {failed.map((source) => source.error).join("; ")}. {failed.length < lastRefresh.sources.length ? "The other one worked. " : ""}The next refresh tries again.
+          {failed.map((source) => source.error).join("; ")}. {failed.length < lastRefresh.sources.length ? (lastRefresh.sources.length - failed.length === 1 ? "The other one worked. " : "The others worked. ") : ""}The next refresh tries again.
         </p>
       )}
     </div>
@@ -208,7 +209,7 @@ function Filters({ filter, city, country, onChange }: { filter: StartupFilter; c
         <option value="remote">Remote{country ? `, open to ${country}` : ""}</option>
       </Select>
       <Select label="Source" value={filter.source} onChange={(event) => onChange({ source: event.target.value as StartupFilter["source"] })}>
-        <option value="">Both sources</option>
+        <option value="">All sources</option>
         {STARTUP_SOURCES.map((source) => (
           <option key={source} value={source}>
             {STARTUP_SOURCE_INFO[source].name}

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { alertIfOn } from "@/lib/alerts";
 import { loadSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
@@ -45,7 +46,9 @@ vi.mock("./emails", async (importOriginal) => ({
     return { emails: web.emails, noApplicationsFrom: web.noApplicationsFrom, refused: false };
   }),
 }));
-const sources = vi.hoisted(() => ({ yc: [] as unknown[], hnFails: false }));
+const sources = vi.hoisted(() => ({ yc: [] as unknown[], hnFails: false, licensed: [] as unknown[] }));
+vi.mock("./sources/licences", () => ({ fetchLicensedFirms: async () => sources.licensed }));
+vi.mock("@/lib/alerts", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/alerts")>()), alertIfOn: vi.fn(async () => {}) }));
 vi.mock("./sources/yc", () => ({ fetchYcStartups: async () => sources.yc }));
 vi.mock("./sources/hn", async () => {
   const { SourceError } = await import("./http");
@@ -82,6 +85,8 @@ const now = new Date("2026-10-23T12:00:00Z");
 beforeEach(async () => {
   await resetDatabase(prisma());
   web.emails = [];
+  sources.licensed = [];
+  vi.mocked(alertIfOn).mockClear();
   web.noApplicationsFrom = "";
   web.looked = [];
   sources.yc = [];
@@ -220,6 +225,21 @@ describe("keeping startups (#222)", () => {
 });
 
 describe("refreshing startups (#222)", () => {
+  it("keeps newly licensed firms, and alerts about new ones from the second look on (jobauto fork)", async () => {
+    const firm = (externalId: string, company: string) => startup({ source: "LICENCE", externalId, company, website: "", location: "Frankfurt am Main, Germany", stage: "Investment firm", roles: [] });
+    sources.licensed = [firm("mifid:1", "Xervices GmbH"), firm("mica:2", "Elbe Digital Assets GmbH")];
+    await refreshStartups(async () => {}, new AbortController().signal, now);
+    expect(await prisma().startup.count({ where: { source: "LICENCE" } })).toBe(2);
+    // The first look shows the past year's firms without an alert.
+    expect(alertIfOn).not.toHaveBeenCalled();
+
+    sources.licensed = [...sources.licensed, firm("mifid:3", "Nordlicht Markets GmbH")];
+    await refreshStartups(async () => {}, new AbortController().signal, now);
+    expect(alertIfOn).toHaveBeenCalledTimes(1);
+    expect(alertIfOn).toHaveBeenCalledWith(expect.objectContaining({ title: "A newly licensed firm in Germany", open: "/startups?source=licence" }));
+    expect(vi.mocked(alertIfOn).mock.calls[0][0].message).toMatch(/^\d+ · Nordlicht Markets GmbH, Frankfurt am Main$/);
+  });
+
   it("keeps what both sources found, says which failed, and looks up the best new sites", async () => {
     sources.yc = [startup({ source: "YC", externalId: "1" }), startup({ source: "YC", externalId: "2", company: "No site", website: "" })];
     sources.hnFails = true;
@@ -232,10 +252,11 @@ describe("refreshing startups (#222)", () => {
       sources: [
         { source: "YC", found: 2, error: null },
         { source: "HN", found: 0, error: "Hacker News took too long to answer" },
+        { source: "LICENCE", found: 0, error: null },
       ],
       emailsFound: 1,
     });
-    expect(steps).toEqual(["Asking Y Combinator and Hacker News", "Scoring 2 startups against your profile", "Looking for application addresses on their own sites"]);
+    expect(steps).toEqual(["Asking Y Combinator, Hacker News and ESMA's registers", "Scoring 2 startups against your profile", "Looking for application addresses on their own sites"]);
     expect(web.looked).toEqual(["https://acme.io"]);
     expect((await loadSettings()).startupsLastRefresh).toEqual(result);
 
