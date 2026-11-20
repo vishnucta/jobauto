@@ -1,4 +1,4 @@
-import type { ApplyAnswers } from "@/lib/apply/answers";
+import { permitClaimed, type ApplyAnswers } from "@/lib/apply/answers";
 import { documentLabels } from "@/lib/document-labels";
 import { experienceMonths, formatDateRange, paidRoles, type ProfileData } from "@/lib/profile";
 
@@ -47,7 +47,7 @@ function startText(startDate: string): string {
 
 export function kurzprofil(
   profile: Pick<ProfileData, "basics" | "skills" | "languages" | "experience" | "education">,
-  answers: Pick<ApplyAnswers, "salary" | "startDate" | "noticePeriod" | "workPermit" | "germanCourse" | "degreeRecognition" | "mobility">,
+  answers: Pick<ApplyAnswers, "salary" | "startDate" | "noticePeriod" | "workPermit" | "confirmed" | "germanCourse" | "degreeRecognition" | "mobility">,
   today: Date,
 ): Kurzprofil {
   const labels = documentLabels("German");
@@ -67,7 +67,7 @@ export function kurzprofil(
     ["Sprachen", languages.join(" · ")],
     ["Verfügbarkeit", availability],
     ["Gehaltsvorstellung", salaryText(answers.salary)],
-    ["Arbeitserlaubnis", answers.workPermit ? "Ja, ohne Visum oder Sponsoring" : ""],
+    ["Arbeitserlaubnis", permitClaimed(answers) ? "Ja, ohne Visum oder Sponsoring" : ""],
     ["Wohnort", city],
     ["Einsatzort", answers.mobility.trim()],
     ["Abschluss anerkannt", answers.degreeRecognition.trim()],

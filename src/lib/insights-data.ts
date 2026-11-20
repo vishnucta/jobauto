@@ -1,7 +1,7 @@
 import "server-only";
 
 import { DocumentKind } from "@/generated/prisma/enums";
-import { armLabel, type ArmResult, type Experiment } from "@/lib/experiments";
+import { armLabel, runWhere, type ArmResult, type Experiment } from "@/lib/experiments";
 import { germanFit, profileGerman } from "@/lib/german-need";
 import { insights, MOVED_ON, type Insights } from "@/lib/insights";
 import { SOURCE_INFO } from "@/lib/job-search/sources";
@@ -72,7 +72,7 @@ export async function loadExperiment(): Promise<{ experiment: Experiment; result
   const { experiment } = await loadSettings();
   if (!experiment) return null;
   const applications = await prisma.application.findMany({
-    where: { experiment: experiment.name, awaitingReview: false },
+    where: { ...runWhere(experiment), awaitingReview: false },
     select: { arm: true, sentAt: true, furthestStage: true },
   });
   const results = (["A", "B"] as const).map((arm) => {

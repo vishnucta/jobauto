@@ -33,9 +33,12 @@ export async function buildDigest(now = new Date()): Promise<Digest> {
   );
 }
 
-/** Sends the digest to the supporter's topic now. */
+/** Sends the digest to the supporter's topic now; that day counts as sent, so the schedule doesn't send it again. */
 export async function sendDigest(address: string, now = new Date()): Promise<void> {
-  await sendAlert(address, { ...(await buildDigest(now)), open: "/" });
+  const digest = await buildDigest(now);
+  // Marked first: a send that times out after ntfy took it isn't repeated.
+  await saveSettings({ supporterSentOn: dayOf(now, await lastKnownTimeZone()) });
+  await sendAlert(address, { ...digest, open: "/" });
 }
 
 /** Sends the week's digest when it's due; never fails the timer. */
@@ -46,7 +49,6 @@ export async function sendDueDigest(now = new Date()): Promise<boolean> {
   if (!digestDue(now, timeZone, { weekday: settings.supporterDay, hour: settings.supporterHour, sentOn: settings.supporterSentOn })) return false;
   try {
     await sendDigest(settings.supporterAddress, now);
-    await saveSettings({ supporterSentOn: dayOf(now, timeZone) });
     return true;
   } catch (error) {
     logServerError("supporter digest", error);

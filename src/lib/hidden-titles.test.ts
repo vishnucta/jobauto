@@ -38,6 +38,12 @@ describe("hiddenTitles", () => {
     expect(hiddenTitles(postings, REPORTING_TERMS, [])).toEqual([]);
   });
 
+  it("counts a past search as covering a title only word for word", () => {
+    const postings = [job("Credit Risk Analyst", asks), job("Credit Risk Analyst", asks)];
+    expect(hiddenTitles(postings, REPORTING_TERMS, ["IT"])).toEqual([{ title: "Credit Risk Analyst", postings: 2 }]);
+    expect(hiddenTitles(postings, REPORTING_TERMS, ["Risk Analyst"])).toEqual([]);
+  });
+
   it("matches her terms as words: EMIR isn't in Emirates", () => {
     const postings = [job("Cabin Crew", "Fly with Emirates, reconciliation of duty-free sales."), job("Cabin Crew", "Fly with Emirates, reconciliation of duty-free sales.")];
     expect(hiddenTitles(postings, REPORTING_TERMS, [])).toEqual([]);

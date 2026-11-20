@@ -68,7 +68,10 @@ export function NetworkCard({ people, importedAt }: { people: number; importedAt
           <li>Unzip it and import the Connections.csv here. Import it again now and then: it replaces the last one.</li>
         </ol>
       )}
-      <p className="text-meta text-muted">Their names, employers and positions stay on this server, are left out of exports, and are never sent to an AI.</p>
+      <p className="text-meta text-muted">
+        Their names, employers and positions stay on this server, are left out of exports, and are never sent to an AI. Someone you ask for a referral becomes a contact on your
+        list, like any recruiter you add: in exports, and visible to Claude through the MCP connector.
+      </p>
     </section>
   );
 }

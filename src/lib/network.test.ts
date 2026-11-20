@@ -27,6 +27,12 @@ describe("parseConnections", () => {
     });
   });
 
+  it("keeps a person listed twice once", () => {
+    const jo = "Jo,Ohnelink,,,Hays,Recruiter,01 Mar 2023";
+    const twice = [EXPORT.trimEnd(), "Sam,Beispiel,https://www.linkedin.com/in/sam-beispiel,,Berenberg,Head of Regulatory Reporting,05 Nov 2024", jo, jo].join("\n");
+    expect(parseConnections(twice)!.map((row) => row.firstName)).toEqual(["Sam", "Alex", "Jo"]);
+  });
+
   it("says when a file isn't that export", () => {
     expect(parseConnections("name,company\nSam,Acme")).toBeNull();
   });

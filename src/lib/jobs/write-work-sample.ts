@@ -30,7 +30,9 @@ export const writeWorkSampleJob = defineJob({
       { profile, extracted: extractedOf(application), posting: application.postingText, company: application.company, role: application.role || application.title, facts },
       { ...options, language: application.language || options.language, signal },
     );
-    const sample = { ...data, inMappe: workSampleOf(application.workSample)?.inMappe ?? false };
+    // Read again: she may have changed the Mappe choice while it was writing.
+    const now = await prisma.application.findUniqueOrThrow({ where: { id: applicationId }, select: { workSample: true } });
+    const sample = { ...data, inMappe: workSampleOf(now.workSample)?.inMappe ?? false };
     await prisma.application.update({ where: { id: applicationId }, data: { workSample: sample, workSampleWith: promptVersion } });
     return sample;
   },

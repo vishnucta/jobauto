@@ -21,6 +21,14 @@ describe("parseSalary", () => {
     expect(parseSalary("Attraktives Gehalt")).toBeNull();
     expect(parseSalary("12 € Essenszuschuss")).toBeNull();
   });
+
+  it("reads a range in k, and isn't put off by holidays, hours or weekdays", () => {
+    expect(parseSalary("60-70k €")).toEqual({ min: 60_000, max: 70_000 });
+    expect(parseSalary("Up to €70,000 per year, 30 days holiday")).toEqual({ min: 70_000, max: 70_000 });
+    expect(parseSalary("Montag bis Freitag, 52.000 €")).toEqual({ min: 52_000, max: 52_000 });
+    expect(parseSalary("58.000 € bei 40 Stunden pro Woche")).toEqual({ min: 58_000, max: 58_000 });
+    expect(parseSalary("80 € / h")).toBeNull();
+  });
 });
 
 describe("salaryGuide", () => {

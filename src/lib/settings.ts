@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated/prisma/enums";
 import { announcementFeedSchema } from "@/lib/announcements/contract";
-import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
+import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
 import { experimentSchema } from "@/lib/experiments";
 import { DEFAULT_SECTION_LAYOUT, sectionLayoutSchema } from "@/lib/resume-sections";
@@ -239,7 +239,8 @@ export const settingsSchema = z.object({
   // The apply assistant (Phase A, src/lib/apply): the standard answers
   // employers' forms ask for and the profile doesn't hold, and whether it
   // may press Send itself.
-  applyAnswers: json(applyAnswersSchema).catch(DEFAULT_APPLY_ANSWERS),
+  // Answers that were saved are hers; the defaults alone are unconfirmed (permitClaimed).
+  applyAnswers: json(applyAnswersSchema.transform((answers): ApplyAnswers => ({ ...answers, confirmed: true }))).catch({ ...DEFAULT_APPLY_ANSWERS, confirmed: false }),
   /**
    * The laptop's Chrome the browser window opens in, e.g. "http://100.101.102.103:9222",
    * when the app runs on a server without a screen; null opens it on the computer

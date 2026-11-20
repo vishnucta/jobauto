@@ -53,5 +53,7 @@ describe("readinessLines", () => {
       "Degree recognition: ZAB: equivalent to a German Bachelor",
     ]);
     expect(readinessLines(profile, { workPermit: false, germanCourse: "", degreeRecognition: "" })).toEqual(["Lives in Pinneberg, Germany", "German: A2"]);
+    // The default yes, never saved, isn't claimed.
+    expect(readinessLines(profile, { workPermit: true, confirmed: false, germanCourse: "", degreeRecognition: "" })).toEqual(["Lives in Pinneberg, Germany", "German: A2"]);
   });
 });

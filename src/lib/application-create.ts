@@ -9,7 +9,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
-import { nextArm } from "@/lib/experiments";
+import { nextArm, runWhere } from "@/lib/experiments";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { noteAgencies } from "@/lib/recruiters/store";
@@ -122,8 +122,8 @@ export async function createApplicationFromDocuments({ reading, documents, match
     // While an experiment runs, a new application gets the version with fewer so far (experiments.ts).
     const arm = settings.experiment
       ? nextArm({
-          A: await tx.application.count({ where: { experiment: settings.experiment.name, arm: "A" } }),
-          B: await tx.application.count({ where: { experiment: settings.experiment.name, arm: "B" } }),
+          A: await tx.application.count({ where: { ...runWhere(settings.experiment), arm: "A" } }),
+          B: await tx.application.count({ where: { ...runWhere(settings.experiment), arm: "B" } }),
         })
       : null;
 

@@ -51,7 +51,7 @@ export function hiddenTitles(
     const title = coreTitle(posting.title);
     const key = normalText(title);
     if (key.length < 4 || key.split(" ").length > 5) continue;
-    if (covered.some((phrase) => key.includes(phrase) || phrase.includes(key))) continue;
+    if (covered.some((phrase) => ` ${key} `.includes(` ${phrase} `) || ` ${phrase} `.includes(` ${key} `))) continue;
     const entry = counts.get(key) ?? { title, postings: 0 };
     entry.postings += 1;
     counts.set(key, entry);

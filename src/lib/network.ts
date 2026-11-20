@@ -67,7 +67,8 @@ export function parseConnections(text: string): ConnectionRow[] | null {
         companyKey: companyKey(company),
       };
     })
-    .filter((row) => (row.firstName || row.lastName) && row.companyKey);
+    .filter((row) => (row.firstName || row.lastName) && row.companyKey)
+    .filter((row, index, rows) => rows.findIndex((other) => (row.url ? other.url === row.url : `${other.firstName} ${other.lastName} ${other.companyKey}` === `${row.firstName} ${row.lastName} ${row.companyKey}`)) === index);
 }
 
 /** How a screen names the people she knows at a company: "Sam Doe (Head of Finance) and 2 more". */

@@ -89,7 +89,7 @@ describe("stored settings", () => {
       supporterSentOn: null,
       weeklyTarget: 0,
       experiment: null,
-      applyAnswers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanCourse: "", degreeRecognition: "", mobility: "", germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
+      applyAnswers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanCourse: "", degreeRecognition: "", mobility: "", germanLevel: "A2", englishLevel: "C1", autoSubmit: false, confirmed: false },
       applyBrowserAddress: null,
       startupsViewedAt: null,
       startupsLastRefresh: null,

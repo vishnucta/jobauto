@@ -17,7 +17,7 @@ export async function importConnections(text: string): Promise<number> {
   await prisma.$transaction(async (tx) => {
     await tx.connection.deleteMany();
     for (let index = 0; index < kept.length; index += 500) await tx.connection.createMany({ data: kept.slice(index, index + 500) });
-  });
+  }, { timeout: 60_000, maxWait: 10_000 });
   return kept.length;
 }
 
@@ -37,7 +37,10 @@ export async function forgetConnections(): Promise<void> {
 export async function peopleAt(companies: readonly string[]): Promise<Record<string, Person[]>> {
   const wanted = [...new Set(companies.map((company) => company.trim()).filter(Boolean))].map((company) => ({ company, key: companyKey(company) })).filter((entry) => entry.key);
   if (wanted.length === 0 || (await prisma.connection.count()) === 0) return {};
-  const all = await prisma.connection.findMany({ select: { id: true, firstName: true, lastName: true, company: true, position: true, url: true, companyKey: true } });
+  const keys = await prisma.connection.findMany({ distinct: ["companyKey"], select: { companyKey: true } });
+  const matching = keys.map((row) => row.companyKey).filter((stored) => wanted.some(({ key }) => sameCompany(key, stored)));
+  if (matching.length === 0) return {};
+  const all = await prisma.connection.findMany({ where: { companyKey: { in: matching } }, select: { id: true, firstName: true, lastName: true, company: true, position: true, url: true, companyKey: true } });
   const result: Record<string, Person[]> = {};
   for (const { company, key } of wanted) {
     const people = all

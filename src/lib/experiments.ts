@@ -24,6 +24,16 @@ export function nextArm(counts: { A: number; B: number }): Arm {
   return counts.B < counts.A ? "B" : "A";
 }
 
+/**
+ * The applications of this run of the experiment: its name, made since it
+ * started. A later run under the same name starts from nothing.
+ */
+export const runWhere = (experiment: Pick<Experiment, "name" | "startedAt">) => ({ experiment: experiment.name, createdAt: { gte: new Date(experiment.startedAt) } });
+
+/** Whether an application belongs to this run of the experiment. */
+export const inRun = (experiment: Pick<Experiment, "name" | "startedAt">, application: { experiment: string | null; createdAt: Date }) =>
+  application.experiment === experiment.name && application.createdAt.getTime() >= new Date(experiment.startedAt).getTime();
+
 /** "B: German letter" for a version of the experiment. */
 export const armLabel = (experiment: Pick<Experiment, "a" | "b">, arm: Arm) => `${arm}: ${arm === "A" ? experiment.a : experiment.b}`;
 

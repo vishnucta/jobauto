@@ -1,4 +1,4 @@
-import type { ApplyAnswers } from "@/lib/apply/answers";
+import { permitClaimed, type ApplyAnswers } from "@/lib/apply/answers";
 import { germanFit, profileGerman } from "@/lib/german-need";
 import type { ProfileData } from "@/lib/profile";
 
@@ -30,7 +30,7 @@ const EU_FRAME = /\b(?:eu|european|esma|eu-weit|eu-wide|europ[äa]isch)\b/i;
 
 export type EyeInput = {
   profile: Pick<ProfileData, "basics" | "languages" | "education" | "experience">;
-  answers: Pick<ApplyAnswers, "workPermit" | "germanCourse" | "degreeRecognition">;
+  answers: Pick<ApplyAnswers, "workPermit" | "confirmed" | "germanCourse" | "degreeRecognition">;
   posting: string;
   /** The resume's and the letter's text as they are now. */
   documents: string;
@@ -46,9 +46,11 @@ export function recruiterDoubts({ profile, answers, posting, documents }: EyeInp
     id: "permit",
     question: "Can she work in Germany, or would we have to sponsor a visa?",
     answered: PERMIT.test(documents),
-    fix: answers.workPermit
+    fix: permitClaimed(answers)
       ? "Say you may work in Germany without a visa or sponsorship. New letters do, from your standard answers."
-      : "Say which permit you hold, or what it would take.",
+      : answers.workPermit
+        ? "Confirm your work permit in the standard answers on the Apply tab: until you save them, letters don't mention it."
+        : "Say which permit you hold, or what it would take.",
   });
 
   doubts.push({
@@ -98,10 +100,10 @@ export function recruiterDoubts({ profile, answers, posting, documents }: EyeInp
  * What settles these doubts, from her standard answers and profile, for the
  * cover letter to say where a German employer would wonder.
  */
-export function readinessLines(profile: Pick<ProfileData, "basics" | "languages">, answers: Pick<ApplyAnswers, "workPermit" | "germanCourse" | "degreeRecognition">): string[] {
+export function readinessLines(profile: Pick<ProfileData, "basics" | "languages">, answers: Pick<ApplyAnswers, "workPermit" | "confirmed" | "germanCourse" | "degreeRecognition">): string[] {
   const german = profileGerman(profile.languages);
   return [
-    answers.workPermit ? "Allowed to work in Germany without a visa or sponsorship" : "",
+    permitClaimed(answers) ? "Allowed to work in Germany without a visa or sponsorship" : "",
     profile.basics.city.trim() ? `Lives in ${[profile.basics.city.trim(), profile.basics.country.trim()].filter(Boolean).join(", ")}` : "",
     german !== "NONE" ? `German: ${german}${answers.germanCourse.trim() ? `, ${answers.germanCourse.trim()}` : ""}` : answers.germanCourse.trim() ? `German: ${answers.germanCourse.trim()}` : "",
     answers.degreeRecognition.trim() ? `Degree recognition: ${answers.degreeRecognition.trim()}` : "",

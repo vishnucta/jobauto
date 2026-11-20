@@ -10,6 +10,9 @@ export type SalaryRange = { min: number; max: number };
 
 const YEAR_MIN = 15_000;
 const YEAR_MAX = 400_000;
+/** A rate per hour or per day, not a salary; "Montag bis Freitag" or "40 Stunden pro Woche" are neither. */
+const HOURLY = /(?:pro|je|per)\s+(?:stunde|std\.?|hour)\b|stundenlohn|stundensatz|hourly|\/\s*(?:h|std|stunde|hour)\b/i;
+const DAILY = /(?:pro|je|per)\s+(?:tag|day)\b|tagessatz|daily rate|\/\s*(?:tag|day)\b/i;
 
 /** "43.200" or "60,000" or "60k" as a number of euros. */
 function amount(text: string): number | null {
@@ -29,9 +32,14 @@ function amount(text: string): number | null {
 export function parseSalary(text: string): SalaryRange | null {
   const value = text.replace(/\s+/g, " ").trim();
   if (!value || !/€|\beur\b|\beuro/i.test(value)) return null;
-  if (/stunde|hour|\bstd\b|\/\s*h\b|tag\b|tagessatz|\bday\b|daily/i.test(value)) return null;
+  if (HOURLY.test(value) || DAILY.test(value)) return null;
   const monthly = /monat|month|\bmtl\b|\/\s*m\b/i.test(value);
-  const numbers = [...value.matchAll(/\d[\d.,]*\s*(?:k|t€|tsd\.?|tausend)?(?![\d])/gi)].map((match) => amount(match[0])).filter((number): number is number => number !== null);
+  // "60-70k": the k belongs to both ends.
+  const spelled = value.replace(/(\d+(?:[.,]\d+)?)\s*(-|–|bis|to)\s*(\d+(?:[.,]\d+)?)\s*(k|t€|tsd\.?|tausend)\b/gi, "$1$4 $2 $3$4");
+  // Numbers under a thousand (30 days' holiday, 40 hours) are no salary.
+  const numbers = [...spelled.matchAll(/\d[\d.,]*\s*(?:k|t€|tsd\.?|tausend)?(?![\d])/gi)]
+    .map((match) => amount(match[0]))
+    .filter((number): number is number => number !== null && number >= 1000);
   if (numbers.length === 0) return null;
   const [low, high = low] = numbers;
   const scale = monthly ? 12 : 1;
