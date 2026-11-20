@@ -43,6 +43,8 @@ export type ApplyTabData = {
   missing: string[];
   /** The laptop's Chrome the window opens in, e.g. "http://100.101.102.103:9222"; null opens it on the computer the app runs on. */
   browserAddress: string | null;
+  /** What postings like this one pay, from the ones she has seen (salary-guide.ts); null with too few. Missing in older callers. */
+  salaryGuide?: string | null;
 };
 
 /** The statuses that mean a run is still going, one way or another. */

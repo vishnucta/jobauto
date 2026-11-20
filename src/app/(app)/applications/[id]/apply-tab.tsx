@@ -186,7 +186,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
 
       {plan.kind === "web" && <BrowserPanel applicationId={applicationId} address={data.browserAddress} />}
 
-      <AnswersPanel applicationId={applicationId} answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} />
+      <AnswersPanel applicationId={applicationId} answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} salaryGuide={data.salaryGuide ?? null} />
 
       {data.attempts.length > 1 && (
         <Panel title="Earlier runs">
@@ -398,7 +398,18 @@ function BrowserPanel({ applicationId, address: saved }: { applicationId: string
 }
 
 /** The standard answers every form asks for, saved once. */
-function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applicationId: string; answers: ApplyAnswers; autoSubmitOk: boolean }) {
+function AnswersPanel({
+  applicationId,
+  answers: saved,
+  autoSubmitOk,
+  salaryGuide,
+}: {
+  applicationId: string;
+  answers: ApplyAnswers;
+  autoSubmitOk: boolean;
+  /** What postings like this one pay (salary-guide.ts), as a hint under the salary; null with too few. */
+  salaryGuide: string | null;
+}) {
   const router = useRouter();
   const [answers, setAnswers] = useState<ApplyAnswers>(saved);
   const [saving, startSaving] = useTransition();
@@ -420,7 +431,13 @@ function AnswersPanel({ applicationId, answers: saved, autoSubmitOk }: { applica
         salary expectation or earliest start date, the cover letter states them from here too.
       </p>
       <div className="grid gap-4 @min-[560px]:grid-cols-2">
-        <Input label="Salary expectation" placeholder="e.g. 55.000 € brutto/Jahr" value={answers.salary} onChange={(event) => set("salary", event.target.value)} />
+        <Input
+          label="Salary expectation"
+          placeholder="e.g. 55.000 € brutto/Jahr"
+          hint={salaryGuide ? `Postings you've seen: ${salaryGuide}.` : undefined}
+          value={answers.salary}
+          onChange={(event) => set("salary", event.target.value)}
+        />
         <Input label="Earliest start date" hint="“sofort”, or a day as YYYY-MM-DD" placeholder="sofort" value={answers.startDate} onChange={(event) => set("startDate", event.target.value)} />
         <Input label="Notice period" placeholder="e.g. keine, or 3 Monate" value={answers.noticePeriod} onChange={(event) => set("noticePeriod", event.target.value)} />
         <Select label="German level" value={answers.germanLevel} onChange={(event) => set("germanLevel", event.target.value as ApplyAnswers["germanLevel"])}>
