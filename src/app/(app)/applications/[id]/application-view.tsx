@@ -28,6 +28,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { copyText } from "@/lib/copy-text";
 import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { missingWords } from "@/lib/letter-availability";
+import type { Doubt } from "@/lib/recruiter-eye";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
 import type { ApplyTabData } from "@/lib/apply/view";
@@ -77,6 +78,7 @@ import { WriteMissingDocument } from "./write-missing-document";
 import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
 import { PrepTab, type PrepTabData } from "./prep-tab";
+import { RecruiterEyeCard } from "./recruiter-eye-card";
 import { EnglishCopy } from "./english-copy";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
@@ -216,6 +218,8 @@ export type ApplicationViewProps = {
   anlagen?: readonly string[];
   /** What the posting asks the letter to state that has no standard answer yet: salary, start date (letter-availability.ts). */
   letterAsks?: readonly ("salary" | "start")[];
+  /** What a German recruiter may wonder, answered or not (recruiter-eye.ts), for the Job posting tab. */
+  doubts?: readonly Doubt[];
 };
 
 /**
@@ -266,6 +270,7 @@ export function ApplicationView({
   prep,
   anlagen = [],
   letterAsks = [],
+  doubts = [],
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -1077,7 +1082,9 @@ export function ApplicationView({
             onAddSkill={(index) => addSkill(index)}
             facts={facts}
             setFacts={setFacts}
-          />
+          >
+            <RecruiterEyeCard doubts={doubts} onOpenAnswers={() => selectTab("apply")} />
+          </PostingTab>
         </TabsContent>
 
         <TabsContent value="notes" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

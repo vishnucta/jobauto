@@ -30,6 +30,7 @@ import { userTimeZone } from "@/lib/time-zone";
 import { callPrepOf, prepJobKey } from "@/lib/call-prep";
 import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
+import { recruiterDoubts } from "@/lib/recruiter-eye";
 
 import { ApplicationView } from "./application-view";
 import { metaLine } from "./meta";
@@ -184,6 +185,12 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
       anlagen={anlagen}
       letterAsks={letterAvailability(application.postingText, settings.applyAnswers).missing}
+      doubts={recruiterDoubts({
+        profile,
+        answers: settings.applyAnswers,
+        posting: application.postingText,
+        documents: [resume, letter].flatMap((document) => document?.units ?? []).map((unit) => unit.text).join("\n"),
+      })}
       aiReady={aiReady}
       rewriting={rewriting}
       messages={messages}

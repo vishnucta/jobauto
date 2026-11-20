@@ -176,7 +176,7 @@ const props: ApplicationViewProps = {
   suggestions: { resume: ["Make the summary shorter"], letter: ["Make it more formal"], email: ["Shorter, under 100 words"] },
   apply: {
     plan: { kind: "none" },
-    answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
+    answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanCourse: "", degreeRecognition: "", germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
     attempts: [],
     running: null,
     runningKind: null,
@@ -211,6 +211,21 @@ beforeEach(() => {
 const summary = demoResumeUnits()[0];
 
 describe("the document tabs (E8-2)", () => {
+  it("shows on the Job posting tab what a German recruiter may wonder, and what's still open (jobauto fork)", async () => {
+    const user = userEvent.setup();
+    const doubts = [
+      { id: "permit" as const, question: "Can she work in Germany, or would we have to sponsor a visa?", answered: false, fix: "Say you may work in Germany without a visa or sponsorship." },
+      { id: "location" as const, question: "Does she live here, or would she have to move?", answered: true, fix: "" },
+    ];
+    render(<ApplicationView {...props} initialTab="posting" doubts={doubts} />);
+    const card = screen.getByRole("region", { name: "Through a German recruiter's eyes" });
+    expect(card).toHaveTextContent("One is still open in your resume and letter.");
+    expect(card).toHaveTextContent("Open: Can she work in Germany, or would we have to sponsor a visa?Say you may work in Germany without a visa or sponsorship.");
+    expect(card).toHaveTextContent("Answered: Does she live here, or would she have to move?");
+    await user.click(within(card).getByRole("button", { name: "Open your standard answers" }));
+    expect(screen.getByRole("tab", { name: "Apply" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("says on the letter what the posting asks for that has no standard answer yet, and leads to the Apply tab (jobauto fork)", async () => {
     const user = userEvent.setup();
     render(<ApplicationView {...props} initialTab="letter" letterAsks={["salary", "start"]} />);

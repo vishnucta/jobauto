@@ -14,7 +14,7 @@ vi.mock("@/lib/profile-data", async () => {
   const { demoProfile } = await import("@/lib/demo-profile");
   return { loadProfile: async () => demoProfile() };
 });
-vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => ({ resumeSections: { order: [], off: [] }, applyAnswers: { salary: "", startDate: "", noticePeriod: "" } }) }));
+vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => ({ resumeSections: { order: [], off: [] }, applyAnswers: { salary: "", startDate: "", noticePeriod: "", workPermit: true, germanCourse: "", degreeRecognition: "" } }) }));
 vi.mock("./runner", () => ({ defineJob: <T,>(definition: T) => definition }));
 
 describe("writeDocumentsJob (E7-6)", () => {
@@ -36,7 +36,7 @@ describe("writeDocumentsJob (E7-6)", () => {
     );
     expect(steps).toEqual(WRITE_DOCUMENTS_STEPS.slice(0, 2));
     expect(result.resumeWith).toBe("tailor-resume@9");
-    expect(result.letterWith).toBe("write-cover-letter@7");
+    expect(result.letterWith).toBe("write-cover-letter@8");
     // Strict mode: the fact guard marks what the profile doesn't back.
     expect(result.resume[0]).toMatchObject({ id: "summary", unverified: ["Google"] });
     expect(result.letter.map((unit) => unit.id)).toEqual(["recipient", "greeting", "paragraph:1", "sign-off"]);
@@ -69,7 +69,7 @@ describe("writeDocumentsJob (E7-6)", () => {
     const letterOnly = await writeDocumentsJob.run({ ...input, write: "letter" }, context);
     expect(asked).toEqual(["cover_letter"]);
     expect(steps).toEqual([WRITE_DOCUMENTS_STEPS[1]]);
-    expect(letterOnly).toMatchObject({ resume: [], resumeWith: "", letterWith: "write-cover-letter@7" });
+    expect(letterOnly).toMatchObject({ resume: [], resumeWith: "", letterWith: "write-cover-letter@8" });
   });
 
   describe("the language of the documents", () => {

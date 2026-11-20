@@ -440,6 +440,20 @@ function AnswersPanel({
         />
         <Input label="Earliest start date" hint="“sofort”, or a day as YYYY-MM-DD" placeholder="sofort" value={answers.startDate} onChange={(event) => set("startDate", event.target.value)} />
         <Input label="Notice period" placeholder="e.g. keine, or 3 Monate" value={answers.noticePeriod} onChange={(event) => set("noticePeriod", event.target.value)} />
+        <Input
+          label="German course"
+          hint="What you're doing to improve, and the exam date"
+          placeholder="e.g. B1 course since Sept 2026, exam March 2027"
+          value={answers.germanCourse}
+          onChange={(event) => set("germanCourse", event.target.value)}
+        />
+        <Input
+          label="Degree recognition"
+          hint="Your degree's German equivalence, if assessed"
+          placeholder="e.g. ZAB: equivalent to a German Bachelor"
+          value={answers.degreeRecognition}
+          onChange={(event) => set("degreeRecognition", event.target.value)}
+        />
         <Select label="German level" value={answers.germanLevel} onChange={(event) => set("germanLevel", event.target.value as ApplyAnswers["germanLevel"])}>
           {LANGUAGE_LEVEL_ANSWERS.map((level) => (
             <option key={level} value={level}>

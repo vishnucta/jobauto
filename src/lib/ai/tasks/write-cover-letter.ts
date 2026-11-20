@@ -25,7 +25,7 @@ import {
   type Task,
 } from "./prompt-parts";
 
-export const WRITE_COVER_LETTER_VERSION = "write-cover-letter@7";
+export const WRITE_COVER_LETTER_VERSION = "write-cover-letter@8";
 
 const answerSchema = z.object({
   recipient: z.string(),
@@ -55,6 +55,8 @@ export type CoverLetterInput = {
   posting: string;
   /** Salary expectation and start date the posting asks for, from the standard answers (letter-availability.ts); null when it asks for neither or there are none. */
   availability?: LetterAvailability | null;
+  /** What settles a German employer's doubts about a foreign candidate: permit, place, German, degree (recruiter-eye.ts). */
+  readiness?: string[];
 };
 
 /**
@@ -63,7 +65,7 @@ export type CoverLetterInput = {
  * "sign-off"), which matches the tone. The sender, date and signature come
  * from the profile when the application is created (src/lib/letter-frame.ts).
  */
-export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider, { profile, extracted, match, tone, facts, posting, availability = null }, options) => {
+export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider, { profile, extracted, match, tone, facts, posting, availability = null, readiness = [] }, options) => {
   const asked = availability ? availabilityLines(availability) : [];
   const answer = await provider.complete({
     task: "write-cover-letter",
@@ -86,6 +88,8 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
           `The candidate's profile:\n${profileForPrompt(profile)}`,
           `The job:\n${jobForPrompt(extracted, match)}`,
           applicationFacts(facts),
+          readiness.length > 0 &&
+            `What settles a German employer's usual doubts about this candidate. Where the job or the posting would make a reader wonder, say the ones that matter in one short sentence, plainly and without apology; leave out the rest:\n${readiness.map((line) => `- ${line}`).join("\n")}`,
           asked.length > 0 &&
             `The posting asks the letter to state these, so say them in one or two short sentences in the closing paragraph, with exactly these values, in the letter's language. Say nothing about what isn't listed here:\n${asked.map((line) => `- ${line}`).join("\n")}`,
         ]
@@ -117,7 +121,7 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
   ]);
   return {
     // The recipient and greeting aren't claims about the candidate: only the paragraphs are checked.
-    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, [...facts, ...asked]), language)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
+    data: options.strict ? guardUnits(units, inLanguage(guardSources(profile, extracted, posting, [...facts, ...asked, ...readiness]), language)).map((unit) => (isFrameUnit(unit.id) ? units.find((entry) => entry.id === unit.id)! : unit)) : units,
     promptVersion: WRITE_COVER_LETTER_VERSION,
   };
 };

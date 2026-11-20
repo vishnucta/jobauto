@@ -28,6 +28,10 @@ export const applyAnswersSchema = z.object({
   postalCode: z.string().max(12).catch(""),
   /** Allowed to work in Germany without sponsorship. */
   workPermit: z.boolean().catch(true),
+  /** The German course she's in, and the exam date, e.g. "B1 course since Sept 2026, exam March 2027" (recruiter-eye.ts). */
+  germanCourse: z.string().max(120).catch(""),
+  /** Her degree's German equivalence, e.g. "ZAB statement: equivalent to a German Bachelor" (recruiter-eye.ts). */
+  degreeRecognition: z.string().max(160).catch(""),
   germanLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("A2"),
   englishLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("C1"),
   /** Press Send for the user, on systems where that's safe; off, the user presses it herself. */

@@ -576,6 +576,16 @@ describe("writeCoverLetter", () => {
     signOff: "Cheers,",
   };
 
+  it("is told what settles a German employer's doubts, and doesn't flag it as made up (jobauto fork)", async () => {
+    const provider = model({ ...answer, paragraphs: [{ label: "Closing", text: "I may work in Germany without a visa, and I am in a B1 course with the exam in March 2027." }] });
+    const readiness = ["Allowed to work in Germany without a visa or sponsorship", "German: A2, B1 course, exam March 2027"];
+    const { data } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting, readiness }, options);
+    const prompt = sent(provider).messages[0].content;
+    expect(prompt).toContain("What settles a German employer's usual doubts about this candidate");
+    expect(prompt).toContain("- Allowed to work in Germany without a visa or sponsorship\n- German: A2, B1 course, exam March 2027");
+    expect(data.find((unit) => unit.id === "paragraph:1")).not.toHaveProperty("unverified");
+  });
+
   it("states the salary expectation and start date the posting asks for, as given, and doesn't flag them as made up (jobauto fork)", async () => {
     const provider = model({ ...answer, paragraphs: [{ label: "Closing", text: "My salary expectation is 58,000 EUR a year, and I can start on 1 March 2027." }] });
     const { data } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting, availability: { salary: "58,000 EUR a year", start: "1 March 2027" } }, options);
@@ -593,7 +603,7 @@ describe("writeCoverLetter", () => {
   it("returns the recipient, greeting, paragraphs and the tone's sign-off for an English letter (APP-10, E8-11)", async () => {
     const provider = model(answer);
     const { data, promptVersion } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting }, options);
-    expect(promptVersion).toBe("write-cover-letter@7");
+    expect(promptVersion).toBe("write-cover-letter@8");
     expect(data).toEqual([
       { id: "recipient", label: "Recipient", text: "Ledgerly · Hiring team\nAmsterdam" },
       { id: "greeting", label: "Greeting", text: "Dear Ledgerly team," },

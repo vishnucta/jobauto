@@ -25,6 +25,8 @@ describe("the standard answers (Phase A)", () => {
       street: "",
       postalCode: "",
       workPermit: true,
+      germanCourse: "",
+      degreeRecognition: "",
       germanLevel: "A2",
       englishLevel: "C1",
       autoSubmit: false,

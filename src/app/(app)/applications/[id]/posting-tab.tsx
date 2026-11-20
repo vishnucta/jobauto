@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
 import { FactList } from "@/components/fact-list";
 import { MatchRows } from "@/components/match-rows";
@@ -42,6 +42,7 @@ export function PostingTab({
   onAddSkill,
   facts,
   setFacts,
+  children,
 }: {
   applicationId: string;
   posting: PostingData;
@@ -50,6 +51,8 @@ export function PostingTab({
   onAddSkill: (index: number, skill: string) => void;
   facts: FactItem[];
   setFacts: (change: (facts: FactItem[]) => FactItem[]) => void;
+  /** More cards after the posting's own, e.g. the recruiter's eye. */
+  children?: ReactNode;
 }) {
   const factsHint = useId();
   return (
@@ -99,6 +102,7 @@ export function PostingTab({
         </span>
         <span>Pasted {posting.pasted}</span>
       </div>
+      {children}
       <div className="flex w-full max-w-[640px] flex-col gap-[22px] rounded-panel border border-line-card bg-card px-[30px] py-7">
         {match && match.items.length > 0 && <MatchRows match={match} requirements={requirements} onAddSkill={onAddSkill} />}
         <div className={match && match.items.length > 0 ? "flex flex-col gap-2.5 border-t border-line pt-5" : "flex flex-col gap-2.5"}>
