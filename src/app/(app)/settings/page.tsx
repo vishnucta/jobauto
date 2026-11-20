@@ -140,6 +140,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             customLanguages: settings.customLanguages,
             fileNamePattern: settings.fileNamePattern,
             includeRefs: settings.includeRefs,
+            germanOnlyWhenFit: settings.germanOnlyWhenFit,
             documentsToWrite: settings.documentsToWrite,
           }}
           preview={await filePreview()}

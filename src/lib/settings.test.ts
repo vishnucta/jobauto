@@ -48,6 +48,7 @@ describe("stored settings", () => {
       customLanguages: [],
       fileNamePattern: "{name} – {company} – {doc}",
       includeRefs: false,
+      germanOnlyWhenFit: true,
       documentsToWrite: "both",
       nightlyBackup: true,
       jobRetentionHours: 24,

@@ -7,6 +7,7 @@ import { calendarDay } from "@/lib/application-documents";
 import type { Extracted, Match } from "@/lib/application-data";
 import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
+import { postingWriteLanguage, profileGerman } from "@/lib/german-need";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
 import { nextArm, runWhere } from "@/lib/experiments";
@@ -71,7 +72,9 @@ const CLAIMED = "application:";
 export async function createApplicationFromDocuments({ reading, documents, match, details, postingUrl, tone, note, language: chosen, claim }: CreateApplicationInput): Promise<string> {
   const [settings, profile] = await Promise.all([loadSettings(), loadProfile()]);
   const { extracted, extractedWith, matchedWith } = reading;
-  const language = (chosen === undefined ? settings.docLanguage : chosen) ?? extracted.language ?? "English";
+  // "The posting's language" (null), German only when the job needs German she has (german-need.ts).
+  const own = settings.germanOnlyWhenFit ? postingWriteLanguage(extracted.language, reading.posting, profileGerman(profile.languages)) : extracted.language;
+  const language = (chosen === undefined ? settings.docLanguage : chosen) ?? own ?? "English";
   // E8-11: every part of the letter is a unit. The AI wrote the recipient
   // and greeting; the sender and signature come from the profile, and the
   // date is written now, in the letter's language.

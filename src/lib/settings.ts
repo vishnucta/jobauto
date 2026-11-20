@@ -134,6 +134,8 @@ export const settingsSchema = z.object({
   customLanguages: stringList.catch([]),
   fileNamePattern: z.string().catch("{name} – {company} – {doc}"),
   includeRefs: flag(false),
+  /** With "the posting's language": German only when the job needs German she has (german-need.ts postingWriteLanguage). */
+  germanOnlyWhenFit: flag(true),
   /** What New application writes unless chosen there (#367). */
   documentsToWrite: z.enum(DOCUMENTS_TO_WRITE).catch("both"),
   nightlyBackup: flag(true),

@@ -32,6 +32,8 @@ export type DocumentSettings = {
   customLanguages: string[];
   fileNamePattern: string;
   includeRefs: boolean;
+  /** With the posting's language: German only when the job needs German you have; missing in older callers. */
+  germanOnlyWhenFit?: boolean;
   documentsToWrite: DocumentsToWrite;
 };
 
@@ -235,6 +237,15 @@ export function DocumentsSection({
           checked={settings.includeRefs}
           onCheckedChange={(includeRefs) => change({ includeRefs })}
         />
+        {settings.germanOnlyWhenFit !== undefined && !settings.docLanguage && (
+          <Toggle
+            className="border-t border-line py-4"
+            label="German only when the job needs German you have"
+            description="A German ad gets documents in German only when the German it asks for is within your level. One that asks for more, works in English, or names German as a plus gets English, which you can carry into the interview."
+            checked={settings.germanOnlyWhenFit}
+            onCheckedChange={(germanOnlyWhenFit) => change({ germanOnlyWhenFit })}
+          />
+        )}
       </Card>
 
       <AnlagenCard initial={attachments} />

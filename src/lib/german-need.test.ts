@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { adLanguage, germanFit, germanNeed, germanVerdict, profileGerman } from "./german-need";
+import { adLanguage, germanFit, germanNeed, germanVerdict, postingWriteLanguage, profileGerman } from "./german-need";
 
 const GERMAN_AD = `Für unser Team in Hamburg suchen wir zum nächstmöglichen Zeitpunkt einen Financial Analyst (m/w/d).
 Ihre Aufgaben: Sie sind verantwortlich für das regulatorische Meldewesen und die Abstimmung der Konten mit unseren Partnern.
@@ -98,5 +98,25 @@ describe("germanFit", () => {
     expect(germanFit(GERMAN_AD, "A2")).toMatchObject({ verdict: "stretch", label: "Ad in German" });
     expect(germanFit(ENGLISH_AD, "A2")).toMatchObject({ verdict: "fits", label: "In English" });
     expect(germanFit("Our working language is English.", "A2").label).toBe("English team");
+  });
+});
+
+describe("postingWriteLanguage", () => {
+  const german = "Wir suchen eine Analystin für unser Team in Hamburg. Ihre Aufgaben sind die Meldungen nach EMIR und MiFIR, die Abstimmung der Daten und die Arbeit mit unseren Kollegen.";
+  it("keeps German for a German ad whose German she has", () => {
+    expect(postingWriteLanguage("German", `${german} Deutschkenntnisse (A2) sind erforderlich.`, "B1")).toBe("German");
+  });
+
+  it("writes English when the ad asks for more German than she has, works in English, or names German as a plus", () => {
+    expect(postingWriteLanguage("German", `${german} Verhandlungssichere Deutschkenntnisse sind erforderlich.`, "A2")).toBe("English");
+    expect(postingWriteLanguage("German", german, "A2")).toBe("English");
+    expect(postingWriteLanguage("German", `${german} Unsere Arbeitssprache ist Englisch.`, "C2")).toBe("English");
+    expect(postingWriteLanguage("German", `${german} Deutsch von Vorteil.`, "C2")).toBe("English");
+  });
+
+  it("leaves other languages as they are", () => {
+    expect(postingWriteLanguage("English", "We are hiring.", "A2")).toBe("English");
+    expect(postingWriteLanguage("Dutch", "Wij zoeken", "NONE")).toBe("Dutch");
+    expect(postingWriteLanguage(null, "", "A2")).toBeNull();
   });
 });

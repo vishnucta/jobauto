@@ -8,6 +8,7 @@ import { loadTaskOptions } from "@/lib/ai/task-options";
 import { tailorResume, writeCoverLetter } from "@/lib/ai/tasks";
 import { extractedSchema, matchSchema, unitsSchema } from "@/lib/application-data";
 import { letterAvailability } from "@/lib/letter-availability";
+import { postingWriteLanguage, profileGerman } from "@/lib/german-need";
 import { readinessLines } from "@/lib/recruiter-eye";
 import { loadProfile } from "@/lib/profile-data";
 import { withoutSectionsOff } from "@/lib/resume-sections";
@@ -49,7 +50,10 @@ export const writeDocumentsJob = defineJob({
     const profile = withoutSectionsOff(fullProfile, settings.resumeSections);
     // "Anything I should know?" is the application's first fact (APP-15).
     const facts = note.trim() ? [note.trim()] : [];
-    const taskOptions = { ...options, ...(language === undefined ? {} : { language }), signal };
+    // "The posting's language" (null), German only when the job needs German she has (german-need.ts).
+    const own = settings.germanOnlyWhenFit ? postingWriteLanguage(extracted.language, posting, profileGerman(fullProfile.languages)) : extracted.language;
+    const chosen = language === undefined ? options.language : language;
+    const taskOptions = { ...options, language: chosen ?? own, signal };
     const skipped = { data: [], promptVersion: "" };
     // Skills in the user's own order once they set one (public issue 62).
     const resume =

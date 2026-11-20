@@ -157,6 +157,7 @@ export const settingChoicesSchema = z.strictObject({
     .optional(),
   fileNamePattern: z.string().max(200).optional(),
   includeRefs: z.boolean().optional(),
+  germanOnlyWhenFit: z.boolean().optional(),
   documentsToWrite: z.enum(DOCUMENTS_TO_WRITE).optional(),
   nightlyBackup: z.boolean().optional(),
   jobRetentionHours: z.number().refine(isJobRetention).optional(),

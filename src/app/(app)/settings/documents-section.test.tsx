@@ -66,6 +66,18 @@ describe("Documents settings (E10-3)", () => {
     expect(updateSettings).toHaveBeenLastCalledWith({ includeRefs: true });
   });
 
+  it("writes German only for jobs that need German she has, while documents follow the posting", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<DocumentsSection initial={{ ...initial, docLanguage: null, germanOnlyWhenFit: true }} preview={preview} />);
+    const toggle = screen.getByRole("switch", { name: "German only when the job needs German you have" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(updateSettings).toHaveBeenLastCalledWith({ germanOnlyWhenFit: false });
+    unmount();
+    render(<DocumentsSection initial={{ ...initial, docLanguage: "English", germanOnlyWhenFit: true }} preview={preview} />);
+    expect(screen.queryByRole("switch", { name: "German only when the job needs German you have" })).not.toBeInTheDocument();
+  });
+
   it("chooses which documents New application writes (#367)", async () => {
     const user = userEvent.setup();
     open();
