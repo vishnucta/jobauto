@@ -8,6 +8,7 @@ import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { DASHBOARD_PERIODS, DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import type { DayPeriod } from "@/lib/greeting";
 import type { Insights } from "@/lib/insights";
+import type { ArmResult, Experiment } from "@/lib/experiments";
 import { STATUSES } from "@/lib/status";
 import type { WeeklyProgress } from "@/lib/weekly-target";
 
@@ -18,6 +19,7 @@ import { PeriodFilter, PeriodScoped } from "./period-filter";
 import { QuietDays } from "./quiet-days";
 import { WeeklyTarget } from "./weekly-target";
 import { WhatsWorking } from "./whats-working";
+import { ExperimentCard } from "./experiment-card";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -33,6 +35,7 @@ export function Dashboard({
   calendar,
   week,
   working,
+  experiment,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -49,6 +52,8 @@ export function Dashboard({
   week?: WeeklyProgress;
   /** What's working, from every sent application; left out until one is sent. */
   working?: Insights;
+  /** The experiment running, with its results so far; null when none runs, missing in older callers. */
+  experiment?: { experiment: Experiment; results: ArmResult[] } | null;
 }) {
   const { sent, heardBack } = figures;
   // The summary follows the time filter, so it says which period it covers.
@@ -85,6 +90,7 @@ export function Dashboard({
               <WhereThingsStand byStatus={figures.byStatus} />
               <WorthALook items={figures.attention} quietDays={quietDays} />
               {working && working.sent > 0 && <WhatsWorking insights={working} />}
+              {experiment !== undefined && <ExperimentCard running={experiment} />}
             </PeriodScoped>
           </Columns>
         </PeriodFilter>

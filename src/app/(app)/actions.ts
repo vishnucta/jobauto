@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { action } from "@/lib/action";
+import { experimentSchema } from "@/lib/experiments";
 import { saveSettings } from "@/lib/settings-data";
 
 /** Remembers the dashboard's period (E9-8), for the next visit. */
@@ -20,5 +21,18 @@ export const rememberQuietDays = action(z.object({ days: z.number().int().min(1)
 /** Applications to send each week (weekly-target.ts); 0 turns the target off. */
 export const rememberWeeklyTarget = action(z.object({ target: z.number().int().min(0).max(50) }), async ({ target }) => {
   await saveSettings({ weeklyTarget: target });
+  return null;
+});
+
+/** Starts an experiment (experiments.ts): new applications get version A or B from now on. */
+export const startExperiment = action(experimentSchema.omit({ startedAt: true }), async (experiment, { toast }) => {
+  await saveSettings({ experiment: { ...experiment, startedAt: new Date().toISOString() } });
+  toast("Started. Each new application gets version A or B: its page says which.");
+  return null;
+});
+
+/** Stops the experiment: new applications get no version; the ones made keep theirs. */
+export const stopExperiment = action(z.object({}), async () => {
+  await saveSettings({ experiment: null });
   return null;
 });

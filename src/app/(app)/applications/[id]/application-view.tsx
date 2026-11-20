@@ -224,6 +224,8 @@ export type ApplicationViewProps = {
   doubts?: readonly Doubt[];
   /** The people she knows at its employer (network.ts). */
   known?: readonly Person[];
+  /** The experiment's version this application gets, while the experiment runs (experiments.ts). */
+  version?: { experiment: string; label: string } | null;
 };
 
 /**
@@ -276,6 +278,7 @@ export function ApplicationView({
   letterAsks = [],
   doubts = [],
   known = [],
+  version = null,
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -922,6 +925,11 @@ export function ApplicationView({
         </TabsList>
       </ApplicationHeader>
 
+      {version && application.status === "DRAFT" && (
+        <p role="note" className="flex-none border-b border-line bg-selected px-10 py-2.5 text-meta">
+          <span className="font-medium">Experiment “{version.experiment}”:</span> this one is version {version.label}. Write it that way before you send it.
+        </p>
+      )}
       <div className="@container flex min-h-0 flex-1 flex-wrap @min-[780px]/page:flex-nowrap">
         <TabsContent value="resume" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           {resume && resumeTheme && resumeUnits ? (

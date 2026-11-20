@@ -548,6 +548,10 @@ model Application {
   prep                Json?
   /// The prompt version that wrote `prep`, e.g. "prepare-call@1".
   prepWith            String?
+  /// The experiment running when it was made (experiments.ts), by name, and
+  /// which version it got: "A" or "B". Null outside an experiment.
+  experiment          String?
+  arm                 String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 

@@ -46,7 +46,8 @@ export type Insights = {
 /** About this many sent applications before the differences mean much. */
 export const ENOUGH_SENT = 20;
 
-const MOVED_ON = new Set<FunnelStage>(["SCREENING", "INTERVIEW", "OFFER", "ACCEPTED"]);
+/** The stages that mean an answer that moved it on. */
+export const MOVED_ON: ReadonlySet<FunnelStage> = new Set<FunnelStage>(["SCREENING", "INTERVIEW", "OFFER", "ACCEPTED"]);
 const replied = (application: SentApplication) => application.furthestStage !== null && MOVED_ON.has(application.furthestStage);
 
 const GERMAN_LABELS = { fits: "Within your German", stretch: "A stretch", out: "Needed more German" } as const;

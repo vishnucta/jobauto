@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { demoResumeUnits } from "@/lib/demo-profile";
+import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
@@ -74,5 +75,22 @@ describe("a draft asked for from Claude chat (#221)", () => {
     // A retry finds the application it made rather than making a second.
     expect(await connectorDraftJob.run(input, context)).toEqual({ applicationId });
     expect(await prisma().application.count()).toBe(1);
+  });
+});
+
+describe("experiments (jobauto fork)", () => {
+  it("gives each new application of a running experiment the version with fewer so far, and none without one", async () => {
+    const run = async (n: number) => {
+      const job = await prisma().job.create({ data: { type: "connector-draft", status: "RUNNING", input: {} } });
+      const { applicationId } = await connectorDraftJob.run({ posting: `Analyst ${n} at Acme.`, postingUrl: "", note: "", postingId: null }, { id: job.id, step: async () => {}, signal: new AbortController().signal });
+      return prisma().application.findUniqueOrThrow({ where: { id: applicationId }, select: { experiment: true, arm: true } });
+    };
+    expect(await run(0)).toEqual({ experiment: null, arm: null });
+    await saveSettings({ experiment: { name: "Letter language", a: "English letter", b: "German letter", startedAt: "2026-11-20T10:00:00.000Z" } });
+    expect([await run(1), await run(2), await run(3)]).toEqual([
+      { experiment: "Letter language", arm: "A" },
+      { experiment: "Letter language", arm: "B" },
+      { experiment: "Letter language", arm: "A" },
+    ]);
   });
 });

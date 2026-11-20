@@ -4,6 +4,7 @@ import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated
 import { announcementFeedSchema } from "@/lib/announcements/contract";
 import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
+import { experimentSchema } from "@/lib/experiments";
 import { DEFAULT_SECTION_LAYOUT, sectionLayoutSchema } from "@/lib/resume-sections";
 import { setupGuideSchema } from "@/lib/setup-guide";
 import { SCORERS } from "@/lib/scoring/scorers";
@@ -146,6 +147,8 @@ export const settingsSchema = z.object({
   applicationsSort: z.string().catch("updated"),
   /** The dashboard's period as last left (E9-8). */
   dashboardPeriod: z.enum(["30d", "90d", "all"]).catch("all"),
+  /** The experiment running (experiments.ts); null when none is. */
+  experiment: json(experimentSchema).nullable().catch(null),
   /** Applications to send each week, Monday to Sunday (weekly-target.ts); 0 is no target. */
   weeklyTarget: z.coerce.number().int().min(0).max(50).catch(0),
   /** Days without news before "Worth a look" suggests a follow-up (E9-9). */

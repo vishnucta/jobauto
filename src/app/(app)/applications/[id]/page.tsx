@@ -31,6 +31,7 @@ import { callPrepOf, prepJobKey } from "@/lib/call-prep";
 import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
 import { recruiterDoubts } from "@/lib/recruiter-eye";
+import { armLabel } from "@/lib/experiments";
 import { peopleAt } from "@/lib/network-data";
 
 import { ApplicationView } from "./application-view";
@@ -187,6 +188,11 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       anlagen={anlagen}
       letterAsks={letterAvailability(application.postingText, settings.applyAnswers).missing}
       known={(await peopleAt([application.company]))[application.company] ?? []}
+      version={
+        application.experiment && (application.arm === "A" || application.arm === "B") && settings.experiment?.name === application.experiment
+          ? { experiment: application.experiment, label: armLabel(settings.experiment, application.arm) }
+          : null
+      }
       doubts={recruiterDoubts({
         profile,
         answers: settings.applyAnswers,

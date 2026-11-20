@@ -9,6 +9,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
+import { nextArm } from "@/lib/experiments";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { noteAgencies } from "@/lib/recruiters/store";
@@ -118,8 +119,17 @@ export async function createApplicationFromDocuments({ reading, documents, match
       if (count === 0) throw new ActionError("That posting is no longer waiting for a draft.");
     }
 
+    // While an experiment runs, a new application gets the version with fewer so far (experiments.ts).
+    const arm = settings.experiment
+      ? nextArm({
+          A: await tx.application.count({ where: { experiment: settings.experiment.name, arm: "A" } }),
+          B: await tx.application.count({ where: { experiment: settings.experiment.name, arm: "B" } }),
+        })
+      : null;
+
     const application = await tx.application.create({
       data: {
+        ...(settings.experiment && arm ? { experiment: settings.experiment.name, arm } : {}),
         // An agent draft stays on the Agent screen until it's approved (#195).
         ...(claim.kind === "agent" ? { origin: ApplicationOrigin.AGENT, agentScore: claim.score, awaitingReview: true } : {}),
         title: details.title || [details.role, details.company].filter(Boolean).join(" · ") || "Untitled application",
