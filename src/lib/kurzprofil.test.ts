@@ -25,15 +25,15 @@ const answers = { salary: "62.000 € brutto/Jahr", startDate: "2027-03-01", not
 describe("kurzprofil", () => {
   it("puts the key facts first, in German, from the profile and the standard answers", () => {
     const sheet = kurzprofil(profile, answers, new Date("2026-11-20T10:00:00Z"));
-    expect(sheet).toMatchObject({ name: "Erika Mustermann", contact: ["erika@example.com", "+49 40 1234567", "Pinneberg, Germany"] });
+    expect(sheet).toMatchObject({ name: "Erika Mustermann", contact: ["erika@example.com", "+49 40 1234567", "Pinneberg, Deutschland"] });
     expect(Object.fromEntries(sheet.facts)).toEqual({
       Berufserfahrung: "12 Jahre",
       Schwerpunkte: "EMIR · MiFIR · SAP S/4HANA",
-      Sprachen: "English (Fließend (C2)) · German (Grundkenntnisse (A2), B1-Kurs, Prüfung März 2027)",
+      Sprachen: "Englisch: Fließend (C2) · Deutsch: Grundkenntnisse (A2), B1-Kurs, Prüfung März 2027",
       Verfügbarkeit: "ab 1. März 2027 · Kündigungsfrist: keine",
       Gehaltsvorstellung: "62.000 € brutto/Jahr",
       Arbeitserlaubnis: "Ja, ohne Visum oder Sponsoring",
-      Wohnort: "Pinneberg, Germany",
+      Wohnort: "Pinneberg, Deutschland",
       Einsatzort: "Ganz Deutschland, auch remote",
     });
   });
@@ -45,6 +45,15 @@ describe("kurzprofil", () => {
     expect(sheet.education[0]).toMatchObject({ degree: "B.Com (Hons)", dates: "2008 – 2011" });
     expect(sheet.facts.map(([label]) => label)).not.toContain("Gehaltsvorstellung");
     expect(sheet.facts.map(([label]) => label)).not.toContain("Arbeitserlaubnis");
+  });
+});
+
+describe("kurzprofil salary", () => {
+  it("writes a bare amount out in German, and keeps one she wrote out", () => {
+    const salary = (value: string) => Object.fromEntries(kurzprofil(profile, { ...answers, salary: value }, new Date("2026-11-20")).facts).Gehaltsvorstellung;
+    expect(salary("55000")).toBe("55.000 € brutto/Jahr");
+    expect(salary("55.000 €")).toBe("55.000 € brutto/Jahr");
+    expect(salary("55–60k, je nach Rolle")).toBe("55–60k, je nach Rolle");
   });
 });
 

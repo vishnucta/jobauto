@@ -22,6 +22,22 @@ export type Kurzprofil = {
 const MAX_ROLES = 6;
 const MAX_FOCUS = 8;
 
+// Language and country names as the profile usually has them, in German.
+const GERMAN_NAMES: Record<string, string> = {
+  english: "Englisch", german: "Deutsch", french: "Französisch", spanish: "Spanisch", italian: "Italienisch", portuguese: "Portugiesisch",
+  dutch: "Niederländisch", polish: "Polnisch", russian: "Russisch", turkish: "Türkisch", arabic: "Arabisch", chinese: "Chinesisch",
+  mandarin: "Mandarin", japanese: "Japanisch", korean: "Koreanisch", greek: "Griechisch", swedish: "Schwedisch", danish: "Dänisch",
+  germany: "Deutschland", india: "Indien", ireland: "Irland", austria: "Österreich", switzerland: "Schweiz", netherlands: "Niederlande",
+};
+const inGerman = (name: string) => GERMAN_NAMES[name.trim().toLowerCase()] ?? name.trim();
+
+/** A bare amount such as "55000" as "55.000 € brutto/Jahr"; anything she wrote out stays as it is. */
+function salaryText(salary: string): string {
+  const amount = /^(\d{1,3}(?:[.,\s]?\d{3})+|\d+)\s*(?:€|eur|euro)?$/i.exec(salary.trim());
+  if (!amount) return salary.trim();
+  return `${Number(amount[1]!.replace(/[.,\s]/g, "")).toLocaleString("de-DE")} € brutto/Jahr`;
+}
+
 /** "sofort", or a day as "1. März 2027". */
 function startText(startDate: string): string {
   const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startDate.trim());
@@ -40,17 +56,17 @@ export function kurzprofil(
   const focus = profile.skills.slice(0, MAX_FOCUS).map((skill) => skill.name.trim()).filter(Boolean);
   const languages = profile.languages.map((language) => {
     const course = /^(german|deutsch)/i.test(language.name) && answers.germanCourse.trim() ? `, ${answers.germanCourse.trim()}` : "";
-    return `${language.name} (${labels.levels[language.level]}${course})`;
+    return `${inGerman(language.name)}: ${labels.levels[language.level]}${course}`;
   });
   const availability = [answers.startDate.trim() ? `ab ${startText(answers.startDate)}` : "", answers.noticePeriod.trim() ? `Kündigungsfrist: ${answers.noticePeriod.trim()}` : ""].filter(Boolean).join(" · ");
-  const city = [profile.basics.city.trim(), profile.basics.country.trim()].filter(Boolean).join(", ");
+  const city = [profile.basics.city.trim(), inGerman(profile.basics.country)].filter(Boolean).join(", ");
 
   const facts: [string, string][] = [
     ["Berufserfahrung", years > 0 ? `${years} Jahre` : ""],
     ["Schwerpunkte", focus.join(" · ")],
     ["Sprachen", languages.join(" · ")],
     ["Verfügbarkeit", availability],
-    ["Gehaltsvorstellung", answers.salary.trim()],
+    ["Gehaltsvorstellung", salaryText(answers.salary)],
     ["Arbeitserlaubnis", answers.workPermit ? "Ja, ohne Visum oder Sponsoring" : ""],
     ["Wohnort", city],
     ["Einsatzort", answers.mobility.trim()],
