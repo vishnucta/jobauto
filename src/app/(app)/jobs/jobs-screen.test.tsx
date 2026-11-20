@@ -208,6 +208,13 @@ describe("the results", () => {
     expect(screen.getByRole("link", { name: /Open posting/ })).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it("offers the titles employers use for her skills as one-click search words (jobauto fork)", async () => {
+    renderScreen({ alsoAdvertised: [{ title: "Middle Office Specialist", postings: 3 }] });
+    const group = screen.getByRole("group", { name: "Titles employers use for your skills" });
+    await userEvent.click(within(group).getByRole("button", { name: "Middle Office Specialist 3" }));
+    expect(screen.getByLabelText("What")).toHaveValue("Middle Office Specialist");
+  });
+
   it("hides postings that need far more German than the profile has, until shown, and badges the rest", async () => {
     const fluent = posting("a", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." });
     const english = posting("b", { description: "Our working language is English." });

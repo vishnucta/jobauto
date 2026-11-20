@@ -45,6 +45,8 @@ export type JobsScreenProps = {
   sources: SourceState[];
   /** Search words from the profile, for one-click chips above the form. */
   suggestions?: string[];
+  /** Titles of jobs seen that ask for her skills but her searches miss (hidden-titles.ts), with how many postings. */
+  alsoAdvertised?: { title: string; postings: number }[];
   /** The Bundesagentur für Arbeit is chosen, but its note isn't accepted yet: it isn't searched until then (#223). */
   arbeitsagenturNote?: boolean;
   /** Score opens a Claude chat, which scores through the connector (#221). */
@@ -84,6 +86,7 @@ export function JobsScreen({
   source,
   sources,
   suggestions = [],
+  alsoAdvertised = [],
   arbeitsagenturNote = false,
   scoreInClaude = false,
   german = "NONE",
@@ -201,7 +204,7 @@ export function JobsScreen({
     <>
       {header}
       {arbeitsagenturNote && <ArbeitsagenturNote accepted={false} onAccept={acceptArbeitsagentur} className="mx-10 mb-5 max-w-[760px]" />}
-      <SearchForm sources={sources} startSources={startSources} suggestions={suggestions} countries={countries} query={query} pending={pending} onSearch={run} />
+      <SearchForm sources={sources} startSources={startSources} suggestions={suggestions} alsoAdvertised={alsoAdvertised} countries={countries} query={query} pending={pending} onSearch={run} />
       {/* Announces each new set of results; the list itself is replaced. */}
       <p role="status" className="sr-only">
         {pending ? "Searching…" : failed ? failed.problem.message : search ? `${search.postings.length} postings found.` : ""}
@@ -236,6 +239,7 @@ function SearchForm({
   sources,
   startSources,
   suggestions,
+  alsoAdvertised,
   countries,
   query,
   pending,
@@ -244,6 +248,7 @@ function SearchForm({
   sources: readonly SourceState[];
   startSources: readonly JobSource[];
   suggestions: readonly string[];
+  alsoAdvertised: readonly { title: string; postings: number }[];
   countries: readonly Country[];
   query: SearchQuery;
   pending: boolean;
@@ -300,6 +305,27 @@ function SearchForm({
               )}
             >
               {word}
+            </button>
+          ))}
+        </div>
+      )}
+      {alsoAdvertised.length > 0 && (
+        <div role="group" aria-label="Titles employers use for your skills" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-7">
+          <span className="text-meta text-muted" title="Titles of jobs you've seen that ask for your skills, which your searches don't cover.">
+            Also advertised as:
+          </span>
+          {alsoAdvertised.map(({ title, postings }) => (
+            <button
+              key={title}
+              type="button"
+              aria-pressed={form.keywords === title}
+              onClick={() => set({ keywords: title })}
+              className={cn(
+                "rounded-full border border-dashed px-3 py-1 text-control",
+                form.keywords === title ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink",
+              )}
+            >
+              {title} <span className="text-xs opacity-65">{postings}</span>
             </button>
           ))}
         </div>

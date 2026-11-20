@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { isAiUsable } from "@/lib/ai/config";
 import { profileGerman } from "@/lib/german-need";
+import { loadHiddenTitles } from "@/lib/hidden-titles-data";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -58,6 +59,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       source={config.source}
       // The profile's own search words, as one-click chips above the form.
       suggestions={searchChips(searchWords(profile, now))}
+      alsoAdvertised={await loadHiddenTitles(profile, now)}
       sources={sourceStates(config)}
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
