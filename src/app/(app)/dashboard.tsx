@@ -7,6 +7,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { DASHBOARD_PERIODS, DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import type { DayPeriod } from "@/lib/greeting";
+import type { TodayItem } from "@/lib/today";
 import type { Insights } from "@/lib/insights";
 import type { ArmResult, Experiment } from "@/lib/experiments";
 import { STATUSES } from "@/lib/status";
@@ -20,6 +21,7 @@ import { QuietDays } from "./quiet-days";
 import { WeeklyTarget } from "./weekly-target";
 import { WhatsWorking } from "./whats-working";
 import { ExperimentCard } from "./experiment-card";
+import { TodayCard } from "./today-card";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -36,6 +38,7 @@ export function Dashboard({
   week,
   working,
   experiment,
+  today,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -54,6 +57,8 @@ export function Dashboard({
   working?: Insights;
   /** The experiment running, with its results so far; null when none runs, missing in older callers. */
   experiment?: { experiment: Experiment; results: ArmResult[] } | null;
+  /** Today's three (today.ts); missing in older callers. */
+  today?: TodayItem[];
 }) {
   const { sent, heardBack } = figures;
   // The summary follows the time filter, so it says which period it covers.
@@ -78,12 +83,16 @@ export function Dashboard({
 
       {empty ? (
         <Columns calendar={calendar}>
-          <Welcome />
+          <div className="flex min-w-0 flex-col gap-5">
+            {today && today.length > 0 && <TodayCard items={today} />}
+            <Welcome />
+          </div>
         </Columns>
       ) : (
         <PeriodFilter period={range}>
           <Columns calendar={calendar}>
             <PeriodScoped className="grid max-w-[1200px] grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] items-start gap-5">
+              {today && <TodayCard items={today} />}
               <Funnel figures={figures} />
               {week && <WeeklyTarget progress={week} />}
               <ActivityChart weeks={figures.weeks} />
