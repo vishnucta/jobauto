@@ -197,6 +197,8 @@ export const settingsSchema = z.object({
   agentMaxDrafts: z.coerce.number().int().min(0).max(10).catch(3),
   /** Whether a run prepares drafts for its best postings, or only scores them (off by default, #197). */
   agentAutoDraft: flag(false),
+  /** The job agent's own source (agent/source.ts); null is Automatic: Find jobs' source, or the first with a key. */
+  agentSource: z.enum(["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE", "FREEHIRE"]).nullable().catch(null),
   /** The latest runs, newest first. They belong to the install: exports leave them out (INSTALL_SETTINGS). */
   agentRuns: json(z.array(agentRunSchema)).catch([]),
   // Phone alerts (alerts.ts): the ntfy topic strong new matches and new jobs

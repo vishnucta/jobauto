@@ -28,6 +28,7 @@ import { attributeAgentCandidates } from "./attribution";
 import { agentDedupeKey, candidateData } from "./candidates";
 import { agentDraftJob, draftJobKey } from "./draft";
 import { reconcileInterruptedRuns, recordRunEnd, recordSourceRequest, reserveRun } from "./runs";
+import { agentSourceFor, type AgentSource } from "./source";
 import { listAgentSearches } from "./searches";
 import { withAgentScanLock } from "./scan-lock";
 import { agentSearchSetupProblem, type SavedAgentSearch } from "./search";
@@ -54,21 +55,25 @@ const stopped = (message: string): AgentScanResult => ({ found: 0, fresh: 0, sco
 
 /** Why the agent can't run at all, in words, or null when it's set up. */
 export async function agentSetupProblem(): Promise<string | null> {
-  const [searches, config] = await Promise.all([listAgentSearches(), loadJobSearchConfig()]);
-  return setupProblemFor(searches, config);
+  const [searches, config, settings] = await Promise.all([listAgentSearches(), loadJobSearchConfig(), loadSettings()]);
+  return setupProblemFor(searches, config, settings.agentSource);
 }
 
-async function setupProblemFor(searches: readonly SavedAgentSearch[], config: JobSearchConfig): Promise<string | null> {
+/** What the agent can't search without, in words (source.ts). */
+const NO_AGENT_SOURCE =
+  "The job agent has no source it may search: the Bundesagentur can't be searched automatically, and no other source has a key yet. Add a JSearch, SerpApi, Adzuna or Jooble key in Settings → Job search, or choose FreeHire in Settings → Job agent.";
+
+async function setupProblemFor(searches: readonly SavedAgentSearch[], config: JobSearchConfig, chosen: AgentSource | null): Promise<string | null> {
   const searchProblem = agentSearchSetupProblem(searches);
   if (searchProblem) return searchProblem;
   // Scoring is what a run does; drafts ask the AI provider when there are any.
   const scoring = await scoringProblem();
   if (scoring) return scoring;
-  if (!config.source) return "Choose a job source in Settings → Job search first.";
-  // It searches on its own, which the BA's terms forbid most clearly (#223).
-  if (config.source === "ARBEITSAGENTUR") return "The job agent doesn't search the Bundesagentur für Arbeit. Choose JSearch, SerpApi, Adzuna or FreeHire in Settings → Job search for it.";
+  // Its own source, never the Bundesagentur: it searches on its own, which the BA's terms forbid most clearly (#223).
+  const source = agentSourceFor(config, chosen);
+  if (!source) return config.source ? NO_AGENT_SOURCE : "Choose a job source in Settings → Job search first.";
   try {
-    credentialsFor(config, config.source);
+    credentialsFor(config, source);
   } catch (error) {
     if (error instanceof JobSearchError) return error.message;
     throw error;
@@ -129,12 +134,12 @@ async function scan(manual: boolean, context: JobContext, now: Date, requestNow:
   // Validate and execute one configuration snapshot. Concurrent source/key
   // edits apply to the next run, not to slots already admitted for this one.
   const [allSearches, config] = await Promise.all([listAgentSearches(), loadJobSearchConfig()]);
-  const setup = await setupProblemFor(allSearches, config);
+  const setup = await setupProblemFor(allSearches, config, settings.agentSource);
   if (setup) return stopped(setup);
   const searches = allSearches.filter((search) => search.enabled);
-  const source = config.source;
-  // Keep this explicit server-side guard before admission as well as setup.
-  if (!source || source === "ARBEITSAGENTUR") return stopped("Choose JSearch, SerpApi, Adzuna or FreeHire in Settings → Job search for the job agent.");
+  // Never the Bundesagentur: AgentSource leaves it out. Kept as a guard before admission as well as setup.
+  const source = agentSourceFor(config, settings.agentSource);
+  if (!source) return stopped(NO_AGENT_SOURCE);
   const credentials = credentialsFor(config, source);
   const run = await reserveRun(now, manual, searches.length, await lastKnownTimeZone());
   if (typeof run === "string") return stopped(run);

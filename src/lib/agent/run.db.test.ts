@@ -50,6 +50,8 @@ const fake = vi.hoisted(() => ({
   ai: true,
   failOn: null as string | null,
   onScore: (() => {}) as (title: string) => void,
+  /** No source has a key: only FreeHire, which needs none, is ready. */
+  keyless: false,
 }));
 vi.mock("@/lib/job-search", () => ({
   searchPostings: vi.fn(async () => {
@@ -57,16 +59,22 @@ vi.mock("@/lib/job-search", () => ({
     return { postings: fake.postings, next: "page-2" };
   }),
 }));
-vi.mock("@/lib/job-search/config", () => ({
+vi.mock("@/lib/job-search/config", async () => {
+  const { JobSearchError } = await import("@/lib/job-search/errors");
+  return {
   loadJobSearchConfig: vi.fn(async () => ({
     source: fake.source,
     saved: true,
     jsearch: { key: "jsearch-key", host: "openwebninja", keyState: "set" },
     adzuna: { appId: "app", key: "adzuna-key", keyState: "set" },
   })),
-  credentialsFor: () => ({ key: "jsearch-key", host: "openwebninja" }),
+  credentialsFor: (_config: unknown, source: string) => {
+    if (fake.keyless && source !== "FREEHIRE") throw new JobSearchError("no-key", "No key.");
+    return { key: "jsearch-key", host: "openwebninja" };
+  },
   requestContext: () => ({}),
-}));
+  };
+});
 vi.mock("@/lib/ai/config", () => ({ isAiConfigured: async () => fake.ai }));
 vi.mock("@/lib/alerts", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/alerts")>()), alertIfOn: vi.fn(async () => {}) }));
 vi.mock("@/lib/ai", async (importOriginal) => ({
@@ -116,7 +124,7 @@ const context = (abort?: AbortController): JobContext & { steps: string[] } => {
 
 beforeEach(async () => {
   await resetDatabase(prisma());
-  Object.assign(fake, { postings: page, searches: 0, source: "JSEARCH", ai: true, failOn: null, onScore: () => {} });
+  Object.assign(fake, { postings: page, searches: 0, source: "JSEARCH", ai: true, failOn: null, onScore: () => {}, keyless: false });
   await saveSettings({ agentEnabled: true });
   await prisma().agentSearch.create({ data: { name: "My search", query } });
 });
@@ -258,12 +266,24 @@ describe("runAgentScan (E16-3)", () => {
     expect(fake.searches).toBe(1);
   });
 
-  it("excludes Bundesagentur for all enabled searches and manual Agent runs too", async () => {
+  it("never searches the Bundesagentur: it takes another source with a key, or stops", async () => {
     await saveAgentSearch({ name: "Second", query, sort: 1, enabled: true });
     fake.source = "ARBEITSAGENTUR";
-    expect((await runAgentScan({ manual: true }, context(), now)).message).toContain("doesn't search the Bundesagentur");
+    fake.keyless = true;
+    expect((await runAgentScan({ manual: true }, context(), now)).message).toContain("the Bundesagentur can't be searched automatically");
     expect(fake.searches).toBe(0);
     expect((await loadSettings()).agentRuns).toEqual([]);
+    fake.keyless = false;
+    const { searchPostings } = await import("@/lib/job-search");
+    await runAgentScan({ manual: true }, context(), now);
+    expect(vi.mocked(searchPostings).mock.calls.at(-1)?.[0]).toBe("JSEARCH");
+  });
+
+  it("searches the source chosen for it, whatever Find jobs uses", async () => {
+    await saveSettings({ agentSource: "FREEHIRE" });
+    const { searchPostings } = await import("@/lib/job-search");
+    await runAgentScan({ manual: true }, context(), now);
+    expect(vi.mocked(searchPostings).mock.calls.at(-1)?.[0]).toBe("FREEHIRE");
   });
 
   it("searches once, scores the new postings and keeps them, below the minimum too", async () => {
@@ -389,7 +409,9 @@ describe("runAgentScan (E16-3)", () => {
     expect(await stop()).toBe("Choose a job source in Settings → Job search first.");
     // It never searches the Bundesagentur für Arbeit on its own (#223).
     fake.source = "ARBEITSAGENTUR";
-    expect(await stop()).toBe("The job agent doesn't search the Bundesagentur für Arbeit. Choose JSearch, SerpApi, Adzuna or FreeHire in Settings → Job search for it.");
+    fake.keyless = true;
+    expect(await stop()).toMatch(/^The job agent has no source it may search: the Bundesagentur can't be searched automatically/);
+    fake.keyless = false;
     fake.source = "JSEARCH";
     expect(fake.searches).toBe(0);
     expect((await loadSettings()).agentRuns).toEqual([]);

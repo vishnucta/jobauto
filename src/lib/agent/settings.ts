@@ -7,6 +7,7 @@ import type { SearchQuery } from "@/lib/job-search/search";
 import { saveSettings } from "@/lib/settings-data";
 
 import { agentSearchSetupProblem, type SavedAgentSearch } from "./search";
+import { AGENT_SOURCES } from "./source";
 import { listAgentSearches, saveAgentSearch } from "./searches";
 
 // Settings → Job agent (E16-7), from the screen or from Claude: each change
@@ -22,6 +23,8 @@ export const agentSettingsChangeSchema = z
     maxScores: z.number().int().min(1).max(30).optional(),
     maxDrafts: z.number().int().min(0).max(10).optional(),
     autoDraft: z.boolean().optional(),
+    /** The agent's own source; null is Automatic (source.ts). */
+    source: z.enum(AGENT_SOURCES).nullable().optional(),
   })
   .strict();
 export type AgentSettingsChange = z.output<typeof agentSettingsChangeSchema> & {
@@ -65,5 +68,6 @@ export async function updateAgentSettings({ query, ...changes }: AgentSettingsCh
     agentMaxScores: changes.maxScores,
     agentMaxDrafts: changes.maxDrafts,
     agentAutoDraft: changes.autoDraft,
+    agentSource: changes.source,
   });
 }

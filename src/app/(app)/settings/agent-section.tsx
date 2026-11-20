@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import type { SavedAgentSearch } from "@/lib/agent/search";
+import type { AgentSource } from "@/lib/agent/source";
 import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
 import type { Country } from "@/lib/job-search/countries";
 import type { JobSource, SearchQuery } from "@/lib/job-search/search";
@@ -21,6 +22,8 @@ import { RecurringSearches } from "./recurring-searches";
 import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
 
+const SOURCE_NAMES: Record<AgentSource, string> = { JSEARCH: "JSearch", SERPAPI: "SerpApi", ADZUNA: "Adzuna", JOOBLE: "Jooble", FREEHIRE: "FreeHire" };
+
 export type AgentSettings = {
   enabled: boolean;
   hour: number;
@@ -28,6 +31,8 @@ export type AgentSettings = {
   maxScores: number;
   maxDrafts: number;
   autoDraft: boolean;
+  /** The agent's own source; null or missing is Automatic. */
+  source?: AgentSource | null;
 };
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -43,6 +48,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 export function AgentSection({
   initial,
   source,
+  agentSource,
   scoring,
   countries,
   timeZone,
@@ -55,6 +61,11 @@ export function AgentSection({
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
   source: JobSource | null;
+  /**
+   * The agent's own source (agent/source.ts): what's chosen (null is
+   * Automatic), what it searches in effect, and what she could choose.
+   */
+  agentSource?: { chosen: AgentSource | null; effective: AgentSource | null; choices: AgentSource[] };
   /** What scores the postings (Settings → Scoring), and whether it's set up. */
   scoring: { scorer: Scorer; ready: boolean };
   countries: readonly Country[];
@@ -86,7 +97,7 @@ export function AgentSection({
         Once a day it runs all enabled searches, scores the new postings against your profile, and keeps the best on the Agent screen. It never sends or applies.
       </SettingsSectionIntro>
 
-      {source === "ARBEITSAGENTUR" ? (
+      {source === "ARBEITSAGENTUR" && agentSource?.effective ? null : source === "ARBEITSAGENTUR" ? (
         // It searches on its own, which the BA's terms forbid most clearly (#223).
         <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
           The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch, SerpApi, Adzuna or FreeHire in{" "}
@@ -118,7 +129,30 @@ export function AgentSection({
         />
       </Card>
 
-      <RecurringSearches initial={searches} suggestedQuery={suggestedQuery} source={source} countries={countries} />
+      {agentSource && (
+        <Card padding="none" className="flex flex-col gap-2 px-7 py-[22px]">
+          <Select
+            label="Searches with"
+            className="max-w-[420px]"
+            value={settings.source ?? ""}
+            onChange={(event) => change({ source: (event.target.value || null) as AgentSource | null })}
+          >
+            <option value="">Automatic{agentSource.effective && !settings.source ? ` (${SOURCE_NAMES[agentSource.effective]})` : ""}</option>
+            {agentSource.choices.map((choice) => (
+              <option key={choice} value={choice}>
+                {SOURCE_NAMES[choice]}
+              </option>
+            ))}
+          </Select>
+          <p className="text-meta text-muted">
+            {source === "ARBEITSAGENTUR"
+              ? "Find jobs searches the Bundesagentur, which the agent may not search on its own, so it uses one of your other sources. Automatic takes the first with a key."
+              : "Automatic searches the same source as Find jobs. Choose another to keep the agent on a source of its own."}
+          </p>
+        </Card>
+      )}
+
+      <RecurringSearches initial={searches} suggestedQuery={suggestedQuery} source={agentSource?.effective ?? source} countries={countries} />
 
       <Card padding="none" className="grid gap-x-[18px] gap-y-5 px-7 py-[26px] sm:grid-cols-2">
         <Select label="Runs after" hint={`Your time (${timeZone})`} value={String(settings.hour)} onChange={(event) => change({ hour: Number(event.target.value) })}>

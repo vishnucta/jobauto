@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 
 import { loadAiConfig, loadAiSettingsView } from "@/lib/ai/config";
+import { agentSourceChoices, agentSourceFor } from "@/lib/agent/source";
 import { jobSearchView, loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
 import { isDesktopApp } from "@/lib/desktop";
@@ -47,6 +48,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
   const params = await searchParams;
   const section = settingsSectionFromParam(params.section);
   const settings = await loadSettings();
+  const jobConfig = section === "agent" ? await loadJobSearchConfig() : null;
 
   return (
     <SettingsScreen section={section}>
@@ -68,12 +70,14 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             maxScores: settings.agentMaxScores,
             maxDrafts: settings.agentMaxDrafts,
             autoDraft: settings.agentAutoDraft,
+            source: settings.agentSource,
           }}
           searches={await listAgentSearches()}
           alerts={{ address: settings.alertAddress, minScore: settings.alertMinScore, problem: settings.alertProblem }}
           supporter={{ address: settings.supporterAddress, day: settings.supporterDay, hour: settings.supporterHour }}
           suggestedQuery={(await loadSearch())?.query}
-          source={(await loadJobSearchConfig()).source}
+          source={jobConfig!.source}
+          agentSource={{ chosen: settings.agentSource, effective: agentSourceFor(jobConfig!, settings.agentSource), choices: agentSourceChoices(jobConfig!) }}
           scoring={await scoringReadiness()}
           countries={COUNTRIES}
           timeZone={await lastKnownTimeZone()}

@@ -159,6 +159,18 @@ describe("Settings → Job agent", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Add search" })).toBeEnabled());
   });
 
+  it("searches another source of hers while Find jobs uses the Bundesagentur, and can be given one", async () => {
+    const user = userEvent.setup();
+    open({ source: "ARBEITSAGENTUR", agentSource: { chosen: null, effective: "JSEARCH", choices: ["JSEARCH", "FREEHIRE"] } });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Searches with")).toHaveDisplayValue("Automatic (JSearch)");
+    expect(screen.getByText(/which the agent may not search on its own/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Searches with"), "FreeHire");
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ source: "FREEHIRE" });
+    await user.selectOptions(screen.getByLabelText("Searches with"), "Automatic");
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ source: null });
+  });
+
   it("warns for Bundesagentur without disabling manual search and points to missing global providers", () => {
     const { unmount } = open({ source: "ARBEITSAGENTUR" });
     expect(screen.getByRole("note")).toHaveTextContent("Manual Find jobs searches are unaffected.");

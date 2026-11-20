@@ -78,6 +78,7 @@ describe("stored settings", () => {
       agentMaxScores: 15,
       agentMaxDrafts: 3,
       agentAutoDraft: false,
+      agentSource: null,
       agentRuns: [],
       alertAddress: null,
       alertProblem: null,
