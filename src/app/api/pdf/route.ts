@@ -10,7 +10,8 @@ const notFound = (error: string) => NextResponse.json({ error }, { status: 404 }
  * Downloads a document as a PDF (RES-5, APP-12): `?doc=base` for the base
  * resume, `?doc=resume&application={id}` or `?doc=letter&application={id}`
  * for an application's tailored resume or cover letter, `?doc=mappe&application={id}`
- * for its Bewerbungsmappe (letter, resume and Anlagen in one). The file is named
+ * for its Bewerbungsmappe (letter, resume and Anlagen in one), `?doc=kurzprofil` for the
+ * one-page German profile for agencies. The file is named
  * with Settings → PDF file name (SET-8).
  */
 export const GET = route(async (request) => {
@@ -33,7 +34,7 @@ export const POST = route(async (request) => {
 async function renderRequested(request: NextRequest): Promise<{ pdf: Uint8Array; fileName: string } | Response> {
   const params = request.nextUrl.searchParams;
   const doc = params.get("doc");
-  if (doc !== "base" && doc !== "resume" && doc !== "letter" && doc !== "mappe") return notFound("There's no such document to download.");
+  if (doc !== "base" && doc !== "resume" && doc !== "letter" && doc !== "mappe" && doc !== "kurzprofil") return notFound("There's no such document to download.");
   const rendered = await renderDocumentPdf(doc, params.get("application") ?? "");
   return "error" in rendered ? notFound(rendered.error) : rendered;
 }

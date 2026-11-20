@@ -32,6 +32,8 @@ export const applyAnswersSchema = z.object({
   germanCourse: z.string().max(120).catch(""),
   /** Her degree's German equivalence, e.g. "ZAB statement: equivalent to a German Bachelor" (recruiter-eye.ts). */
   degreeRecognition: z.string().max(160).catch(""),
+  /** Where she'd work, e.g. "Ganz Deutschland, auch remote", for the Kurzprofil and agencies (kurzprofil.ts). */
+  mobility: z.string().max(120).catch(""),
   germanLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("A2"),
   englishLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("C1"),
   /** Press Send for the user, on systems where that's safe; off, the user presses it herself. */

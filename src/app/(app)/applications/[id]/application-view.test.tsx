@@ -176,7 +176,7 @@ const props: ApplicationViewProps = {
   suggestions: { resume: ["Make the summary shorter"], letter: ["Make it more formal"], email: ["Shorter, under 100 words"] },
   apply: {
     plan: { kind: "none" },
-    answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanCourse: "", degreeRecognition: "", germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
+    answers: { salary: "", startDate: "", noticePeriod: "", street: "", postalCode: "", workPermit: true, germanCourse: "", degreeRecognition: "", mobility: "", germanLevel: "A2", englishLevel: "C1", autoSubmit: false },
     attempts: [],
     running: null,
     runningKind: null,

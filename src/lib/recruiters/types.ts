@@ -223,7 +223,21 @@ export type OutreachFacts = {
   headline: string;
   city: string;
   languages: { name: string; level: string }[];
+  /**
+   * For agencies (jobauto fork): what she's looking for, from the profile's
+   * search words and her standard answers. An agency places someone faster
+   * when the first message says it.
+   */
+  brief?: { targets: string[]; mobility: string; start: string; salary: string };
 };
+
+/** "Financial Analyst or Regulatory Reporting Analyst, anywhere in Germany. Available from 1 March 2027; salary expectation 60.000 €." */
+export function briefLine(brief: NonNullable<OutreachFacts["brief"]>): string {
+  const targets = brief.targets.length <= 1 ? (brief.targets[0] ?? "") : `${brief.targets.slice(0, -1).join(", ")} or ${brief.targets.at(-1)}`;
+  const what = [targets && `I am looking for roles as ${targets}`, brief.mobility && `(${brief.mobility})`].filter(Boolean).join(" ");
+  const terms = [brief.start && `Available ${/^\d{4}-\d{2}-\d{2}$/.test(brief.start) ? `from ${brief.start}` : brief.start}`, brief.salary && `salary expectation ${brief.salary}`].filter(Boolean).join("; ");
+  return [what && `${what}.`, terms && `${terms.charAt(0).toUpperCase()}${terms.slice(1)}.`].filter(Boolean).join(" ");
+}
 
 export type OutreachKind = "first" | "follow-up";
 
@@ -268,7 +282,8 @@ export function outreachDraft(
       greeting,
       `I am ${sign || "writing to you"}${who ? `, ${who}` : ""}. I am looking for my next role${field ? ` and saw that you place people in ${field.toLowerCase()}` : ""}.`,
       languages.length > 0 ? `My languages: ${languages.join(", ")}.` : "",
-      "My resume is attached. I would be glad to hear whether a short call fits.",
+      facts.brief ? briefLine(facts.brief) : "",
+      facts.brief ? "My resume and a one-page Kurzprofil are attached. I would be glad to hear whether a short call fits." : "My resume is attached. I would be glad to hear whether a short call fits.",
       ["Kind regards,", sign].filter(Boolean).join("\n"),
     ]
       .filter(Boolean)

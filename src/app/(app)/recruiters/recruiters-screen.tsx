@@ -35,6 +35,7 @@ import {
 
 import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
 import { addRecruiter, addSuggestedRecruiters, deleteRecruiter, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
+import { AgencyRound } from "./agency-round";
 
 export type RecruitersScreenProps = {
   recruiters: RecruiterView[];
@@ -109,6 +110,8 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
           <Stat label="replied" value={count("REPLIED")} />
           <Stat label="follow-ups due" value={count("DUE")} />
         </dl>
+
+        <AgencyRound recruiters={recruiters} facts={facts} onChanged={refresh} />
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <section aria-labelledby="recruiters-list" className="flex min-w-0 flex-col gap-3 rounded-panel border border-line-card bg-card p-5">

@@ -65,6 +65,22 @@ beforeEach(() => {
   vi.mocked(addSuggestedRecruiters).mockResolvedValue({ ok: true, data: { added: 4 }, toast: "Added 4 agencies." });
 });
 
+describe("the agency round (jobauto fork)", () => {
+  it("offers the Kurzprofil, and each agency not written to with its message, brief included", async () => {
+    const briefed: OutreachFacts = { ...facts, brief: { targets: ["Financial Analyst"], mobility: "anywhere in Germany", start: "sofort", salary: "62.000 €" } };
+    render(<RecruitersScreen recruiters={all} facts={briefed} counts={counts} today={TODAY} />);
+    const round = screen.getByRole("region", { name: "Your Kurzprofil, and the agencies to write to" });
+    expect(within(round).getByRole("button", { name: "Kurzprofil (PDF)" })).toBeInTheDocument();
+    expect(round).toHaveTextContent("One agency is still to write to");
+    await userEvent.click(within(round).getByRole("button", { name: "Write to it" }));
+    const gmail = new URL(within(round).getByRole("link", { name: "Open in Gmail for Hays" }).getAttribute("href")!);
+    expect(gmail.searchParams.get("body")).toContain("I am looking for roles as Financial Analyst (anywhere in Germany). Available sofort; salary expectation 62.000 €.");
+    expect(gmail.searchParams.get("body")).toContain("My resume and a one-page Kurzprofil are attached.");
+    await userEvent.click(within(round).getByRole("button", { name: "I wrote to them (Hays)" }));
+    expect(moveRecruiter).toHaveBeenCalledWith({ id: "fresh", status: "CONTACTED" });
+  });
+});
+
 describe("the Recruiters screen", () => {
   it("is a tab of Find jobs, next to the others", () => {
     renderScreen();

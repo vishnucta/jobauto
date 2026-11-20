@@ -448,6 +448,13 @@ function AnswersPanel({
           onChange={(event) => set("germanCourse", event.target.value)}
         />
         <Input
+          label="Where you'd work"
+          hint="For agencies and your Kurzprofil"
+          placeholder="e.g. Ganz Deutschland, auch remote"
+          value={answers.mobility}
+          onChange={(event) => set("mobility", event.target.value)}
+        />
+        <Input
           label="Degree recognition"
           hint="Your degree's German equivalence, if assessed"
           placeholder="e.g. ZAB: equivalent to a German Bachelor"

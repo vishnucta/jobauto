@@ -71,7 +71,7 @@ const MISSING: Record<DocumentKind, string> = {
 const PRIVATE = "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.";
 
 /** The PDFs export_pdf makes, by the `?doc=` the Download PDF buttons ask src/app/api/pdf for. */
-const PDF_DOCS = { resume: "resume", cover_letter: "letter", base_resume: "base", bewerbungsmappe: "mappe" } as const satisfies Record<string, PdfDocument>;
+const PDF_DOCS = { resume: "resume", cover_letter: "letter", base_resume: "base", bewerbungsmappe: "mappe", kurzprofil: "kurzprofil" } as const satisfies Record<string, PdfDocument>;
 
 const applicationId = z.string().min(1).max(100);
 const documentName = z.enum(["resume", "cover_letter", "email"]);
@@ -653,27 +653,35 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
       title: "Make a PDF",
       description:
         "Renders an application's tailored resume or cover letter, or the base resume, as a PDF, exactly as Download PDF does, and returns the file with its name. " +
-        "bewerbungsmappe is the application's letter, resume and the Anlagen from Settings → Documents in one PDF, for job portals that take a single file.",
+        "bewerbungsmappe is the application's letter, resume and the Anlagen from Settings → Documents in one PDF, for job portals that take a single file. " +
+        "kurzprofil is the one-page German profile for recruitment agencies, from the profile and the standard answers.",
       inputSchema: z.object({
         application_id: applicationId.optional().describe("For resume, cover_letter and bewerbungsmappe: the application"),
-        document: z.enum(["resume", "cover_letter", "base_resume", "bewerbungsmappe"]).describe("base_resume is the one on the Base resume screen, built from the profile"),
+        document: z.enum(["resume", "cover_letter", "base_resume", "bewerbungsmappe", "kurzprofil"]).describe("base_resume is the one on the Base resume screen, built from the profile"),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ application_id = "", document }) => {
       const doc = PDF_DOCS[document];
-      if (doc !== "base" && !application_id) return failure("Give the application_id of the application whose resume or cover letter to make.");
+      // The base resume and the Kurzprofil come from the profile; the rest belong to an application.
+      const fromProfile = doc === "base" || doc === "kurzprofil";
+      if (!fromProfile && !application_id) return failure("Give the application_id of the application whose resume or cover letter to make.");
       let rendered: Awaited<ReturnType<typeof renderDocumentPdf>>;
       try {
         rendered = await renderDocumentPdf(doc, application_id);
       } catch (error) {
         logServerError("Claude connector export_pdf", error);
-        return failure(`The PDF couldn't be made just now. Try again in a moment, or use Download PDF on ${doc === "base" ? "the Base resume screen" : "the application's page"}.`);
+        return failure(`The PDF couldn't be made just now. Try again in a moment, or use Download PDF on ${doc === "base" ? "the Base resume screen" : doc === "kurzprofil" ? "Find jobs → Recruiters" : "the application's page"}.`);
       }
       if ("error" in rendered) return failure(rendered.error);
       // Where the signed-in user downloads it again, as the page's button does.
-      const download = linkTo(doc === "base" ? "/api/pdf?doc=base" : `/api/pdf?doc=${doc}&application=${encodeURIComponent(application_id)}`);
-      const link = document === "base_resume" ? linkTo("/resume") : documentLink(application_id, KINDS[document === "bewerbungsmappe" ? "cover_letter" : document]);
+      const download = linkTo(fromProfile ? `/api/pdf?doc=${doc}` : `/api/pdf?doc=${doc}&application=${encodeURIComponent(application_id)}`);
+      const link =
+        document === "base_resume"
+          ? linkTo("/resume")
+          : document === "kurzprofil"
+            ? linkTo("/recruiters")
+            : documentLink(application_id, KINDS[document === "bewerbungsmappe" ? "cover_letter" : document]);
       const answer = text({ file_name: rendered.fileName, document, pages: countPdfPages(rendered.pdf), download, link });
       return {
         content: [...answer.content, { type: "resource", resource: { uri: download, mimeType: "application/pdf", blob: Buffer.from(rendered.pdf).toString("base64") } }],
