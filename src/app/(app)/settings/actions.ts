@@ -11,6 +11,7 @@ import { AiError } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
 import { ntfyTarget } from "@/lib/alert-address";
 import { AlertError, sendAlert } from "@/lib/alerts";
+import { sendDigest } from "@/lib/supporter-digest-data";
 import { deleteAllAttachments, removeAttachment as deleteAttachment, updateAttachment } from "@/lib/attachments";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
@@ -352,5 +353,28 @@ export const saveAttachment = action(
 export const removeAttachment = action(z.object({ id: z.string().min(1).max(64) }), async ({ id }, { toast }) => {
   if (!(await deleteAttachment(id))) throw new ActionError("That Anlage is gone. Reload the page.");
   toast("Removed.");
+  return null;
+});
+
+// The supporter digest (supporter-digest.ts): a weekly summary on the supporter's phone.
+
+/** Sends the weekly digest to this ntfy topic, or stops it with null. */
+export const saveSupporterAddress = action(z.object({ address: z.string().trim().max(500).nullable() }), async ({ address }) => {
+  if (address && !ntfyTarget(address)) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/your-topic.");
+  await saveSettings({ supporterAddress: address || null });
+  return { address: address || null };
+});
+
+/** "Send this week's now": the digest as it stands, to the saved topic. */
+export const sendDigestNow = action(z.object({}), async (_input, { toast }) => {
+  const { supporterAddress } = await loadSettings();
+  if (!supporterAddress) throw new ActionError("Save the supporter's topic address first.");
+  try {
+    await sendDigest(supporterAddress);
+  } catch (error) {
+    if (error instanceof AlertError) throw new ActionError(error.message);
+    throw error;
+  }
+  toast("Sent. It should be on their phone in a few seconds.");
   return null;
 });

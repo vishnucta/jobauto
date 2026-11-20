@@ -163,6 +163,8 @@ export const settingChoicesSchema = z.strictObject({
   updateCheck: z.boolean().optional(),
   alertMinScore: z.number().int().min(0).max(100).optional(),
   weeklyTarget: z.number().int().min(0).max(50).optional(),
+  supporterDay: z.number().int().min(1).max(7).optional(),
+  supporterHour: z.number().int().min(0).max(23).optional(),
 });
 export type SettingChoices = z.output<typeof settingChoicesSchema>;
 

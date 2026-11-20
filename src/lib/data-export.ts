@@ -76,6 +76,9 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "alertProblem",
   // When this server last checked the careers pages.
   "careersCheckedOn",
+  // The supporter's own topic is as good as a password, and when it last went.
+  "supporterAddress",
+  "supporterSentOn",
   // The apply assistant's laptop Chrome is an address in this server's network.
   "applyBrowserAddress",
   // An import must never open the MCP connector's addresses on this server (#221), or let another app sign in (#281).

@@ -207,6 +207,14 @@ export const settingsSchema = z.object({
   alertProblem: z.string().nullable().catch(null),
   /** The job agent alerts about postings scored at least this. */
   alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
+  // The supporter digest (supporter-digest.ts): an ntfy topic of the
+  // supporter's own, the weekday (1 = Monday) and hour it goes, and the day
+  // it last went. The topic is as good as a password and belongs to the
+  // install, as does the day, so exports leave both out (INSTALL_SETTINGS).
+  supporterAddress: z.string().nullable().catch(null),
+  supporterDay: z.coerce.number().int().min(1).max(7).catch(1),
+  supporterHour: z.coerce.number().int().min(0).max(23).catch(8),
+  supporterSentOn: z.string().nullable().catch(null),
   /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
   careersCheckedOn: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh

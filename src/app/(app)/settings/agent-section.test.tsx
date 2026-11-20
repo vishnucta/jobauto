@@ -18,6 +18,8 @@ vi.mock("./actions", () => ({
   saveAlertAddress: vi.fn(async ({ address }: { address: string | null }) => ({ ok: true, data: { address } })),
   testAlert: vi.fn(async () => ({ ok: true, data: null })),
   updateSettings: vi.fn(async () => ({ ok: true, data: null })),
+  saveSupporterAddress: vi.fn(async ({ address }: { address: string | null }) => ({ ok: true, data: { address } })),
+  sendDigestNow: vi.fn(async () => ({ ok: true, data: null })),
 }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { ok: boolean; error?: string }) => (result.ok ? result : (toast(result.error!), result)) }));
 

@@ -16,6 +16,7 @@ import type { Scorer } from "@/lib/scoring/scorers";
 
 import { saveAgentSettings } from "../agent/actions";
 import { PhoneAlerts, type PhoneAlertSettings } from "./phone-alerts";
+import { SupporterDigest, type SupporterDigestSettings } from "./supporter-digest";
 import { RecurringSearches } from "./recurring-searches";
 import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
@@ -49,6 +50,7 @@ export function AgentSection({
   searches,
   suggestedQuery,
   alerts,
+  supporter,
 }: {
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
@@ -64,6 +66,8 @@ export function AgentSection({
   suggestedQuery?: SearchQuery;
   /** Phone alerts for strong matches and new jobs on careers pages. */
   alerts: PhoneAlertSettings;
+  /** The weekly digest for her supporter; missing in older callers. */
+  supporter?: SupporterDigestSettings;
 }) {
   const track = useTrackSave();
   const [settings, setSettings] = useState(initial);
@@ -170,6 +174,7 @@ export function AgentSection({
       </Card>
 
       <PhoneAlerts initial={alerts} />
+      {supporter && <SupporterDigest initial={supporter} />}
 
       <p className="text-meta text-muted">
         One shared daily schedule for all enabled searches, in {timeZone}. Each search requests only the first page, sequentially. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} source requests in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}

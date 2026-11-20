@@ -71,6 +71,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
           }}
           searches={await listAgentSearches()}
           alerts={{ address: settings.alertAddress, minScore: settings.alertMinScore, problem: settings.alertProblem }}
+          supporter={{ address: settings.supporterAddress, day: settings.supporterDay, hour: settings.supporterHour }}
           suggestedQuery={(await loadSearch())?.query}
           source={(await loadJobSearchConfig()).source}
           scoring={await scoringReadiness()}
