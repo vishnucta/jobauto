@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { listEmployers } from "@/lib/careers/store";
+import { peopleAt } from "@/lib/network-data";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { countSearches } from "@/lib/posting-searches";
 import { countPostings } from "@/lib/postings";
@@ -27,6 +28,7 @@ export default async function CareersPage() {
       suggestedWords={searchChips(searchWords(profile, now)).join(", ")}
       today={now.toISOString()}
       timeZone={timeZone ?? "UTC"}
+      network={await peopleAt(employers.map((employer) => employer.name))}
     />
   );
 }

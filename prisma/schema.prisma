@@ -1003,6 +1003,28 @@ model Employer {
   @@index([name])
 }
 
+// ─── Her network (jobauto fork) ──────────────────────────────────────────────
+
+/// One of her LinkedIn connections, from the Connections.csv LinkedIn's own
+/// data export gives her: who, where they work and what they do there, so a
+/// posting at their employer can say "you know someone here". A new import
+/// replaces them all. Kept only here: not in exports, never sent to an AI.
+model Connection {
+  id          String    @id @default(cuid())
+  firstName   String    @default("")
+  lastName    String    @default("")
+  company     String    @default("")
+  position    String    @default("")
+  /// Their LinkedIn profile; always http(s), or empty.
+  url         String    @default("")
+  connectedOn DateTime?
+  /// The company's name folded for matching (network.ts companyKey).
+  companyKey  String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([companyKey])
+}
+
 // ─── Anlagen (jobauto fork) ──────────────────────────────────────────────────
 
 /// A certificate or reference letter (Zeugnis, Zertifikat) kept once and sent

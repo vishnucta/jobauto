@@ -36,6 +36,7 @@ import {
 import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
 import { addRecruiter, addSuggestedRecruiters, deleteRecruiter, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
 import { AgencyRound } from "./agency-round";
+import { NetworkCard } from "./network-card";
 
 export type RecruitersScreenProps = {
   recruiters: RecruiterView[];
@@ -43,6 +44,8 @@ export type RecruitersScreenProps = {
   facts: OutreachFacts;
   /** The Find jobs tabs' counts, since Recruiters is one of them. */
   counts: JobsCounts;
+  /** Her imported LinkedIn connections (jobauto fork); missing in older callers. */
+  network?: { people: number; importedAt: string | null };
   today: string;
 };
 
@@ -67,7 +70,7 @@ const TONE = {
  * next, drafted from the profile. Dossier sends nothing: the message opens in
  * the user's own Gmail, and "I wrote to them" is the user's word.
  */
-export function RecruitersScreen({ recruiters, facts, counts, today }: RecruitersScreenProps) {
+export function RecruitersScreen({ recruiters, facts, counts, today, network = { people: 0, importedAt: null } }: RecruitersScreenProps) {
   const router = useRouter();
   const now = new Date(today);
   const [filter, setFilter] = useState<RecruiterFilter>("ALL");
@@ -112,6 +115,7 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
         </dl>
 
         <AgencyRound recruiters={recruiters} facts={facts} onChanged={refresh} />
+        <NetworkCard people={network.people} importedAt={network.importedAt} />
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <section aria-labelledby="recruiters-list" className="flex min-w-0 flex-col gap-3 rounded-panel border border-line-card bg-card p-5">

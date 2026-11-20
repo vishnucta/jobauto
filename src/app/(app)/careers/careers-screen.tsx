@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
+import { KnownPeople } from "@/components/known-people";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { BOARD_NAMES, type BoardKind } from "@/lib/careers/boards";
 import type { CareersCheckResult } from "@/lib/careers/check-result";
 import type { EmployerView } from "@/lib/careers/store-types";
 import { formatDateTime } from "@/lib/dates";
+import type { Person } from "@/lib/network";
 import { searchRunHref } from "@/lib/job-search/search";
 
 import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
@@ -28,6 +30,8 @@ export type CareersScreenProps = {
   suggestedWords: string;
   today: string;
   timeZone: string;
+  /** The people she knows at each employer, by its name (network.ts); missing in older callers. */
+  network?: Record<string, Person[]>;
 };
 
 type Draft = { name: string; careersUrl: string; keywords: string; places: string };
@@ -40,7 +44,7 @@ const boardName = (ats: string) => BOARD_NAMES[ats as BoardKind] ?? ats;
  * checked once a day. Jobs show there days before the job boards have them,
  * and an application sent in the first days is read first.
  */
-export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone }: CareersScreenProps) {
+export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone, network = {} }: CareersScreenProps) {
   const router = useRouter();
   const [employers, setEmployers] = useState(initial);
   // The check under way, and which employers it reads.
@@ -95,6 +99,7 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
             <EmployerCard
               key={employer.id}
               employer={employer}
+              people={network[employer.name] ?? []}
               now={now}
               timeZone={timeZone}
               checking={checking(employer.id)}
@@ -156,6 +161,7 @@ function EmployerCard({
   onCheck,
   onSaved,
   onRemoved,
+  people,
 }: {
   employer: EmployerView;
   now: Date;
@@ -166,6 +172,8 @@ function EmployerCard({
   onCheck: () => void;
   onSaved: (employer: EmployerView) => void;
   onRemoved: () => void;
+  /** The people she knows there. */
+  people: readonly Person[];
 }) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -223,6 +231,8 @@ function EmployerCard({
       ) : (
         <p className="text-meta text-muted">{checking ? (step ?? "Checking…") : last}</p>
       )}
+
+      <KnownPeople people={people} compact />
 
       {editing ? (
         <form onSubmit={(event) => void save(event)} aria-label={`Edit ${employer.name}`} className="grid gap-x-4 gap-y-3 sm:grid-cols-2">

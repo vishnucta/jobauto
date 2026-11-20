@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { isAiUsable } from "@/lib/ai/config";
 import { profileGerman } from "@/lib/german-need";
 import { loadHiddenTitles } from "@/lib/hidden-titles-data";
+import { peopleAt } from "@/lib/network-data";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -53,6 +54,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     view === "history" && !byScore ? listSearches({ timeZone, now }) : undefined,
     byScore ? foundPostings() : undefined,
   ]);
+  // Who she knows at the employers on screen (jobauto fork).
+  const network = await peopleAt([...(search?.postings ?? []), ...(kept ?? []), ...(found ?? [])].map((posting) => posting.company));
 
   return (
     <JobsScreen
@@ -64,6 +67,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       arbeitsagenturNote={config.source === "ARBEITSAGENTUR" && !config.arbeitsagentur.acceptedAt}
       scoreInClaude={scoreInClaude}
       german={profileGerman(profile.languages)}
+      network={network}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       view={view}

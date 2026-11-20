@@ -12,6 +12,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { ProfileGerman } from "@/lib/german-need";
+import type { Person } from "@/lib/network";
 import type { Country } from "@/lib/job-search/countries";
 import {
   isJobSource,
@@ -53,6 +54,8 @@ export type JobsScreenProps = {
   scoreInClaude?: boolean;
   /** The profile's German, which each posting's is read against. */
   german?: ProfileGerman;
+  /** The people she knows at each employer on screen, by the posting's company (network.ts). */
+  network?: Record<string, Person[]>;
   /** Every country by name, named on the server. */
   countries: readonly Country[];
   /** The search, past searches, or the Saved or Dismissed postings. */
@@ -90,6 +93,7 @@ export function JobsScreen({
   arbeitsagenturNote = false,
   scoreInClaude = false,
   german = "NONE",
+  network = {},
   countries,
   view,
   query,
@@ -133,6 +137,7 @@ export function JobsScreen({
           today={today}
           scoreInClaude={scoreInClaude}
           german={german}
+          network={network}
           empty={from ? `No postings from ${filterName(from)}.` : undefined}
         />
       </>
@@ -163,6 +168,7 @@ export function JobsScreen({
           today={today}
           scoreInClaude={scoreInClaude}
           german={german}
+          network={network}
           empty={from ? `Nothing ${view} from ${filterName(from)}.` : undefined}
         />
       </>
@@ -220,6 +226,7 @@ export function JobsScreen({
             today={today}
             scoreInClaude={scoreInClaude}
             german={german}
+            network={network}
             onSearchAgain={() => run(search.query, startSources)}
             searching={pending}
           />

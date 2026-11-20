@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 
 import { FitDetails } from "@/components/fit-details";
 import { GermanBadge, GermanNote } from "@/components/german-badge";
+import { KnownPeople } from "@/components/known-people";
 import { ScoreBadge } from "@/components/score-badge";
 import { linksAttribution, SourceAttribution } from "@/components/source-attribution";
 import { toast, toastResult } from "@/components/toast";
@@ -14,6 +15,7 @@ import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import type { PostingFit } from "@/lib/fit";
 import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
+import type { Person } from "@/lib/network";
 import type { JobView } from "@/lib/jobs/runner";
 import { byScore, isAddedSource, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 import { arbeitsagenturPage, describeSourceProblem, searchesWithin, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
@@ -30,6 +32,8 @@ export type PostingResultsProps = {
   scoreInClaude?: boolean;
   /** The profile's German, which each posting's is read against; postings that need far more are hidden until shown. */
   german?: ProfileGerman;
+  /** The people she knows at each employer, by the posting's company (network.ts). */
+  network?: Record<string, Person[]>;
 } & (
   | {
       mode: "search";
@@ -305,6 +309,7 @@ export function PostingResults(props: PostingResultsProps) {
           ref={detail}
           posting={selected}
           german={german}
+          people={props.network?.[selected.company] ?? []}
           now={now}
           onSave={() => void save(selected)}
           onUnsave={() => void unsave(selected)}
@@ -479,6 +484,7 @@ function PostingDetail({
   ref,
   posting,
   german,
+  people,
   now,
   onSave,
   onUnsave,
@@ -491,6 +497,8 @@ function PostingDetail({
   ref: Ref<HTMLElement>;
   posting: ShownPosting;
   german: ProfileGerman;
+  /** The people she knows at its employer. */
+  people: readonly Person[];
   now: Date;
   onSave: () => void;
   onUnsave: () => void;
@@ -587,6 +595,7 @@ function PostingDetail({
       </div>
 
       <GermanNote fit={fullGerman} />
+      <KnownPeople people={people} />
 
       {scoring ? (
         <p role="status" className="text-meta text-muted">

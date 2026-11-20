@@ -31,6 +31,7 @@ import { callPrepOf, prepJobKey } from "@/lib/call-prep";
 import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
 import { recruiterDoubts } from "@/lib/recruiter-eye";
+import { peopleAt } from "@/lib/network-data";
 
 import { ApplicationView } from "./application-view";
 import { metaLine } from "./meta";
@@ -185,6 +186,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
       anlagen={anlagen}
       letterAsks={letterAvailability(application.postingText, settings.applyAnswers).missing}
+      known={(await peopleAt([application.company]))[application.company] ?? []}
       doubts={recruiterDoubts({
         profile,
         answers: settings.applyAnswers,

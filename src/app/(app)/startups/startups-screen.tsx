@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
+import { KnownPeople } from "@/components/known-people";
 import { PageHeader } from "@/components/page-header";
 import { ScoreBadge } from "@/components/score-badge";
 import { toast, toastResult } from "@/components/toast";
@@ -15,6 +16,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useJob } from "@/hooks/use-job";
 import { cn } from "@/lib/cn";
+import type { Person } from "@/lib/network";
 import { formatDateTime } from "@/lib/dates";
 import { postedAgo } from "@/lib/job-search/search";
 import {
@@ -43,6 +45,8 @@ export type StartupsScreenProps = {
   /** Whether an AI provider is set up, so "Write to them" can start an application. */
   aiReady: boolean;
   today: string;
+  /** The people she knows at each startup or firm, by its name (network.ts); missing in older callers. */
+  network?: Record<string, Person[]>;
 };
 
 const VIEWS: { status: StartupStatusName; label: string }[] = [
@@ -58,7 +62,7 @@ const VIEWS: { status: StartupStatusName; label: string }[] = [
  * the addresses they publish for applications. Dossier sends nothing: the
  * user writes to each one, from New application or their own mail.
  */
-export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, country, headline, aiReady, today }: StartupsScreenProps) {
+export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, country, headline, aiReady, today, network = {} }: StartupsScreenProps) {
   const router = useRouter();
   const [jobId, setJobId] = useState(refreshJobId);
   const [starting, startTransition] = useTransition();
@@ -109,7 +113,7 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
                 <ul className="flex flex-col gap-3">
                   {list.startups.map((startup) => (
                     <li key={`${startup.id}:${startup.status}:${startup.emails.length}:${startup.score}`}>
-                      <StartupCard startup={startup} headline={headline} aiReady={aiReady} today={today} />
+                      <StartupCard startup={startup} headline={headline} aiReady={aiReady} today={today} people={network[startup.company] ?? []} />
                     </li>
                   ))}
                 </ul>
@@ -246,7 +250,7 @@ function Empty({ filter }: { filter: StartupFilter }) {
 const mailto = (email: string, company: string, headline: string) =>
   `mailto:${email}?subject=${encodeURIComponent(headline ? `${headline}, interested in joining ${company}` : `Interested in joining ${company}`)}`;
 
-function StartupCard({ startup: initial, headline, aiReady, today }: { startup: StartupView; headline: string; aiReady: boolean; today: string }) {
+function StartupCard({ startup: initial, headline, aiReady, today, people }: { startup: StartupView; headline: string; aiReady: boolean; today: string; people: readonly Person[] }) {
   const router = useRouter();
   const [startup, setStartup] = useState(initial);
   const [open, setOpen] = useState(false);
@@ -317,6 +321,7 @@ function StartupCard({ startup: initial, headline, aiReady, today }: { startup: 
       )}
 
       {startup.reasons.length > 0 && <p className="text-meta text-muted">{startup.reasons.join(" · ")}</p>}
+      <KnownPeople people={people} />
 
       {blocked && (
         <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">

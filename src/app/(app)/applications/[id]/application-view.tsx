@@ -14,6 +14,7 @@ import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { KnownPeople } from "@/components/known-people";
 import {
   DocumentKind,
   type ApplicationStatus,
@@ -29,6 +30,7 @@ import { copyText } from "@/lib/copy-text";
 import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { missingWords } from "@/lib/letter-availability";
 import type { Doubt } from "@/lib/recruiter-eye";
+import type { Person } from "@/lib/network";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
 import type { ApplyTabData } from "@/lib/apply/view";
@@ -220,6 +222,8 @@ export type ApplicationViewProps = {
   letterAsks?: readonly ("salary" | "start")[];
   /** What a German recruiter may wonder, answered or not (recruiter-eye.ts), for the Job posting tab. */
   doubts?: readonly Doubt[];
+  /** The people she knows at its employer (network.ts). */
+  known?: readonly Person[];
 };
 
 /**
@@ -271,6 +275,7 @@ export function ApplicationView({
   anlagen = [],
   letterAsks = [],
   doubts = [],
+  known = [],
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -1083,6 +1088,11 @@ export function ApplicationView({
             facts={facts}
             setFacts={setFacts}
           >
+            {known.length > 0 && (
+              <div className="w-full max-w-[640px]">
+                <KnownPeople people={known} />
+              </div>
+            )}
             <RecruiterEyeCard doubts={doubts} onOpenAnswers={() => selectTab("apply")} />
           </PostingTab>
         </TabsContent>

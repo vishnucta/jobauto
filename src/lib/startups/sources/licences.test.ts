@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { placeOf } from "../place";
 import { matchStartup } from "../match";
-import { cityFromAddress, decodeMixed, ESMA_UPREG, fetchLicensedFirms, firmFromCasp, firmFromRegister, MICA_CASPS_CSV, parseCsv } from "./licences";
+import { parseCsv } from "@/lib/csv";
+
+import { cityFromAddress, decodeMixed, ESMA_UPREG, fetchLicensedFirms, firmFromCasp, firmFromRegister, MICA_CASPS_CSV } from "./licences";
 
 vi.mock("@/lib/env", () => ({ env: {} }));
 
