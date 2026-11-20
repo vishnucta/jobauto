@@ -8,6 +8,7 @@ import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
 import { englishCopyJob } from "@/lib/jobs/english-copy";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
+import { writeWorkSampleJob } from "@/lib/jobs/write-work-sample";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
 import { searchRunHref, viewHref } from "@/lib/job-search/search";
@@ -189,6 +190,15 @@ const KINDS: Record<string, Tell> = {
       result: resultOf(prepareCallJob, task) ? { prepared: true } : undefined,
       link: applicationId ? linkTo(`/applications/${applicationId}?tab=prep`) : undefined,
       next: "get_call_prep reads the pack.",
+    };
+  },
+  [writeWorkSampleJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(writeWorkSampleJob, task)?.applicationId;
+    return {
+      task: "Writing a work sample (first 90 days)",
+      about: { application_id: applicationId },
+      result: resultOf(writeWorkSampleJob, task) ? { written: true } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}?tab=sample`) : undefined,
     };
   },
   [englishCopyJob.type]: (task, linkTo) => {

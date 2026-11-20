@@ -34,7 +34,7 @@ export const POST = route(async (request) => {
 async function renderRequested(request: NextRequest): Promise<{ pdf: Uint8Array; fileName: string } | Response> {
   const params = request.nextUrl.searchParams;
   const doc = params.get("doc");
-  if (doc !== "base" && doc !== "resume" && doc !== "letter" && doc !== "mappe" && doc !== "kurzprofil") return notFound("There's no such document to download.");
+  if (doc !== "base" && doc !== "resume" && doc !== "letter" && doc !== "mappe" && doc !== "kurzprofil" && doc !== "sample") return notFound("There's no such document to download.");
   const rendered = await renderDocumentPdf(doc, params.get("application") ?? "");
   return "error" in rendered ? notFound(rendered.error) : rendered;
 }

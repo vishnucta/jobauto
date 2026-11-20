@@ -171,6 +171,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
           frozen: json(application.frozen),
           resumeFit: json(application.resumeFit),
           prep: json(application.prep),
+          workSample: json(application.workSample),
         })),
       });
       await tx.statusEvent.createMany({

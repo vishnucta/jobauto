@@ -30,7 +30,7 @@ describe("UsageScreen (#290)", () => {
     const tasks = screen.getAllByRole("rowheader").map((header) => header.querySelector("span")?.textContent ?? header.textContent);
     expect(tasks.slice(0, 2)).toEqual(["Writing resumes", "Scoring postings with Jev"]);
     // Upstream's 13 tasks, the fork's Rewrite in… and apply assistant, and the sum.
-    expect(tasks).toHaveLength(17);
+    expect(tasks).toHaveLength(18);
     expect(tasks.at(-1)).toBe("All tasks");
     expect(cells("Writing resumes")).toEqual(["4", "24,000", "6,500", "30,500"]);
     expect(cells("Connection checks")).toEqual(["0", "0", "0", "0"]);

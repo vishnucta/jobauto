@@ -14,4 +14,5 @@ export { CLASSIFY_REPLY_VERSION, classifyReply, type Classified } from "./classi
 export { DRAFT_REPLY_VERSION, draftReply, type DraftedReply } from "./draft-reply";
 export { SCORE_POSTING_VERSION, scorePosting, type PostingScore } from "./score-posting";
 export { PREPARE_CALL_VERSION, prepareCall } from "./prepare-call";
+export { WRITE_WORK_SAMPLE_VERSION, writeWorkSample } from "./write-work-sample";
 export { PLAN_APPLY_FORM_VERSION, planApplyForm, type FieldAdvice, type FieldForAdvice } from "./plan-apply-form";

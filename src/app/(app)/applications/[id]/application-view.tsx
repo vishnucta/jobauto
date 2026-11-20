@@ -81,6 +81,7 @@ import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
 import { PrepTab, type PrepTabData } from "./prep-tab";
 import { RecruiterEyeCard } from "./recruiter-eye-card";
+import { WorkSampleTab, type WorkSampleTabData } from "./work-sample-tab";
 import { EnglishCopy } from "./english-copy";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
@@ -216,6 +217,8 @@ export type ApplicationViewProps = {
   apply: ApplyTabData;
   /** The Call prep tab (jobauto fork). */
   prep: PrepTabData;
+  /** The Work sample tab (jobauto fork); missing in older callers. */
+  workSample?: WorkSampleTabData;
   /** The Anlagen that go with it, by name, for a German letter's list. */
   anlagen?: readonly string[];
   /** What the posting asks the letter to state that has no standard answer yet: salary, start date (letter-availability.ts). */
@@ -274,6 +277,7 @@ export function ApplicationView({
   suggestions,
   apply,
   prep,
+  workSample = { sample: null, jobId: null },
   anlagen = [],
   letterAsks = [],
   doubts = [],
@@ -920,6 +924,7 @@ export function ApplicationView({
             </TabsTrigger>
           )}
           <TabsTrigger value="prep">Call prep</TabsTrigger>
+          <TabsTrigger value="sample">Work sample</TabsTrigger>
           <TabsTrigger value="posting">{score ? `Job posting · ${score.hit}/${score.total} match` : "Job posting"}</TabsTrigger>
           <TabsTrigger value="notes">{notes > 0 ? `Notes · ${notes}` : "Notes"}</TabsTrigger>
         </TabsList>
@@ -1076,6 +1081,18 @@ export function ApplicationView({
 
         <TabsContent value="apply" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} />
+        </TabsContent>
+
+        <TabsContent value="sample" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
+          <WorkSampleTab
+            applicationId={application.id}
+            data={workSample}
+            aiReady={aiReady}
+            theme={letterTheme ?? null}
+            name={profile.basics.name}
+            paper={paper}
+            language={application.language}
+          />
         </TabsContent>
 
         <TabsContent value="prep" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

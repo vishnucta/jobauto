@@ -238,7 +238,7 @@ describe("the document tabs (E8-2)", () => {
   it("has Resume, Cover letter, Email and the posting with its match", () => {
     render(<ApplicationView {...props} />);
     const tabs = within(screen.getByRole("tablist", { name: "Application" })).getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Resume", "Cover letter", "Email", "Apply", "Call prep", "Job posting · 5/7 match", "Notes"]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Resume", "Cover letter", "Email", "Apply", "Call prep", "Work sample", "Job posting · 5/7 match", "Notes"]);
     expect(screen.getByRole("tab", { name: "Resume" })).toHaveAttribute("aria-selected", "true");
   });
 

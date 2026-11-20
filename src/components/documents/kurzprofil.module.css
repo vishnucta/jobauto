@@ -83,3 +83,22 @@
   font-weight: 600;
   color: var(--doc-ink);
 }
+
+/* The work sample (jobauto fork) shares this page: its steps, and the closing line. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 3);
+  padding-left: calc(var(--u) * 14);
+  list-style: disc;
+}
+
+.steps li {
+  break-inside: avoid;
+}
+
+.closing {
+  margin-top: calc(var(--u) * 18);
+  font-style: italic;
+  color: var(--doc-ink);
+}

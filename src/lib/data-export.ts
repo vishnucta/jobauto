@@ -280,6 +280,12 @@ const application = z.object({
   /** The phone-screen prep pack (jobauto fork); absent in files from before it. */
   prep: z.unknown().nullable().optional(),
   prepWith: text.nullable().optional(),
+  /** The work sample (jobauto fork); absent in files from before it. */
+  workSample: z.unknown().nullable().optional(),
+  workSampleWith: text.nullable().optional(),
+  /** The experiment and version it was made under (jobauto fork). */
+  experiment: text.nullable().optional(),
+  arm: text.nullable().optional(),
   awaitingReview: z.boolean().optional(),
   archivedAt: optionalDate,
   createdAt: date,

@@ -22,3 +22,4 @@ import "@/lib/connector/draft";
 import "./apply";
 import "./prepare-call";
 import "./english-copy";
+import "./write-work-sample";

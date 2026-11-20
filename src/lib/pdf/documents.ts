@@ -4,6 +4,7 @@ import { DocumentKind } from "@/generated/prisma/enums";
 import { AttachmentError, enabledAttachments, mergePdfs } from "@/lib/attachments";
 import { resolveFileName } from "@/lib/file-name";
 import { prisma } from "@/lib/prisma";
+import { workSampleOf } from "@/lib/work-sample";
 import { loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { FIT_LEVELS } from "@/lib/themes";
@@ -14,10 +15,11 @@ import { renderPdf } from "./render";
 /** The letter, the resume and the Anlagen, in the order a German application is read. */
 async function renderMappe(applicationId: string, name: string, pattern: string, date: Date): Promise<{ pdf: Uint8Array; fileName: string } | { error: string }> {
   const application = APPLICATION_ID.test(applicationId)
-    ? await prisma.application.findUnique({ where: { id: applicationId }, select: { company: true, role: true, documents: { select: { kind: true } } } })
+    ? await prisma.application.findUnique({ where: { id: applicationId }, select: { company: true, role: true, workSample: true, documents: { select: { kind: true } } } })
     : null;
   if (!application) return { error: "That application no longer exists." };
   const has = (kind: DocumentKind) => application.documents.some((document) => document.kind === kind);
+  const sample = workSampleOf(application.workSample);
   if (!has(DocumentKind.RESUME) && !has(DocumentKind.COVER_LETTER)) return { error: "This application has no resume or cover letter yet." };
   let anlagen: Awaited<ReturnType<typeof enabledAttachments>>;
   try {
@@ -29,6 +31,7 @@ async function renderMappe(applicationId: string, name: string, pattern: string,
   const parts = [
     has(DocumentKind.COVER_LETTER) ? await renderPdf(`/print/letter/${applicationId}`) : null,
     has(DocumentKind.RESUME) ? await renderPdf(`/print/resume/${applicationId}`) : null,
+    sample?.inMappe ? await renderPdf(`/print/sample/${applicationId}`) : null,
     ...anlagen.map((file) => file.data),
   ].filter((part): part is Uint8Array => part !== null);
   return {
@@ -49,7 +52,7 @@ async function renderMappe(applicationId: string, name: string, pattern: string,
  * the letter, the resume and the Anlagen in one PDF (jobauto fork), for the
  * many German job portals that take a single file.
  */
-export type PdfDocument = "base" | "resume" | "letter" | "mappe" | "kurzprofil";
+export type PdfDocument = "base" | "resume" | "letter" | "mappe" | "kurzprofil" | "sample";
 
 /** The tailored documents, by their `doc=` value. */
 const TAILORED = { resume: DocumentKind.RESUME, letter: DocumentKind.COVER_LETTER } as const;
@@ -70,6 +73,15 @@ export async function renderDocumentPdf(doc: PdfDocument, applicationId = ""): P
   }
 
   if (doc === "mappe") return renderMappe(applicationId, name, settings.fileNamePattern, date);
+  if (doc === "sample") {
+    const application = APPLICATION_ID.test(applicationId) ? await prisma.application.findUnique({ where: { id: applicationId }, select: { company: true, role: true, workSample: true } }) : null;
+    if (!application) return { error: "That application no longer exists." };
+    if (!workSampleOf(application.workSample)) return { error: "This application has no work sample yet." };
+    return {
+      pdf: await renderPdf(`/print/sample/${applicationId}`),
+      fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: DocumentKind.RESUME, label: "Arbeitsprobe", date }),
+    };
+  }
   // The Kurzprofil for agencies (jobauto fork): from the profile, like the base resume.
   if (doc === "kurzprofil") return { pdf: await renderPdf("/print/kurzprofil"), fileName: resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, label: "Kurzprofil", date }) };
 

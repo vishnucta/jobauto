@@ -543,6 +543,10 @@ model Application {
   prep                Json?
   /// The prompt version that wrote `prep`, e.g. "prepare-call@1".
   prepWith            String?
+  /// The work sample for this job (workSampleSchema in src/lib/work-sample.ts): "My first 90 days", once written.
+  workSample          Json?
+  /// The prompt version that wrote `workSample`, e.g. "write-work-sample@1".
+  workSampleWith      String?
   /// The experiment running when it was made (experiments.ts), by name, and
   /// which version it got: "A" or "B". Null outside an experiment.
   experiment          String?

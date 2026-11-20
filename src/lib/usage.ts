@@ -23,6 +23,7 @@ export const USAGE_TASKS = [
   { task: "draft-reply", label: "Drafting answers", hint: "Your answers to employers' replies" },
   // Call prep (jobauto fork).
   { task: "prepare-call", label: "Preparing for calls", hint: "An application's phone-screen prep pack" },
+  { task: "write-work-sample", label: "Writing work samples", hint: "An application's “first 90 days” page" },
   { task: "connection-check", label: "Connection checks", hint: "Test connection in Settings" },
 ] as const;
 
