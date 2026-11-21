@@ -8,6 +8,7 @@ import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
 import { englishCopyJob } from "@/lib/jobs/english-copy";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
+import { preparePracticeJob } from "@/lib/jobs/prepare-practice";
 import { writeWorkSampleJob } from "@/lib/jobs/write-work-sample";
 import { matchScore } from "@/lib/application-data";
 import { fitBand } from "@/lib/fit";
@@ -192,6 +193,11 @@ const KINDS: Record<string, Tell> = {
       next: "get_call_prep reads the pack.",
     };
   },
+  [preparePracticeJob.type]: (task, linkTo) => ({
+    task: "Preparing a practice call",
+    result: resultOf(preparePracticeJob, task) ? { prepared: true } : undefined,
+    link: linkTo("/practice"),
+  }),
   [writeWorkSampleJob.type]: (task, linkTo) => {
     const applicationId = inputOf(writeWorkSampleJob, task)?.applicationId;
     return {
