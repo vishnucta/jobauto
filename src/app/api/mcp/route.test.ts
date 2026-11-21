@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/env", () => ({ env: { DOSSIER_SECRET: "s".repeat(40), DOSSIER_PASSWORD: "argon2id:m=19456,t=2,p=1:c2FsdA:aGFzaA" } }));
 const settings = vi.hoisted(() => ({ resumeSections: { order: [] as string[], off: [] as string[] }, connectorEnabledAt: "2026-10-23T09:00:00.000Z" as string | null }));
 vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => settings }));
-const db = vi.hoisted(() => ({ postingSearch: { findUnique: vi.fn() }, postingScore: { upsert: vi.fn() } }));
+vi.mock("@/lib/profiles", () => ({
+  loadProfileSettings: async () => settings,
+  listProfiles: async () => [{ id: "first", name: "My profile" }],
+  profileNamed: async () => ({ id: "first", name: "My profile" }),
+  levelsProblem: async () => null,
+  loadProfileLevels: async () => ({ from: "mid", to: "senior" }),
+  loadProfileWorkplace: async () => ({ workplace: (await import("@/lib/profile-workplace")).DEFAULT_WORKPLACE, seen: true }),
+}));
+const db = vi.hoisted(() => ({ postingSearch: { findUnique: vi.fn() }, postingFind: { findMany: vi.fn() }, postingScore: { upsert: vi.fn() } }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/lib/ai/config", () => ({ isAiUsable: async () => false }));
 vi.mock("@/lib/profile-data", async () => {
@@ -12,8 +20,19 @@ vi.mock("@/lib/profile-data", async () => {
 });
 const searches = vi.hoisted(() => ({ ran: [] as unknown[] }));
 vi.mock("@/lib/posting-searches", () => ({
-  runSearch: async (query: unknown) => (searches.ran.push(query), { ok: true, id: "s1", problems: [] }),
-  loadSearch: async () => ({ id: "s1", sources: ["JSEARCH"], addedBy: "", postings: [], more: false, problems: [] }),
+  runSearch: async (query: unknown) => (searches.ran.push(query), { ok: true, id: "s1" }),
+  // Each portal it asked and where it stands (E22-4).
+  loadSearch: async () => ({
+    id: "s1",
+    source: "JSEARCH",
+    postings: [],
+    next: null,
+    portals: [
+      { id: "JSEARCH", status: "done", found: 0, next: null, message: null },
+      { id: "ADZUNA", status: "failed", found: 0, next: null, message: "The portal couldn't be reached. Try again." },
+    ],
+    jobId: null,
+  }),
   showMoreFor: async () => ({ ok: true, postings: [], next: null }),
 }));
 
@@ -170,6 +189,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "test_connection",
       "undo_status_change",
       "update_application",
+      "update_application_details",
       "update_careers_page",
       "update_email",
       "update_google_settings",
@@ -191,7 +211,9 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     const { isError, text } = await tool("get_profile", {});
     expect(isError).toBe(false);
     const profile = JSON.parse(text) as Record<string, unknown>;
-    expect(profile).toMatchObject({ name: demoProfile().basics.name, link: "https://dossier.example/profile" });
+    expect(profile).toMatchObject({ profile: "My profile", name: demoProfile().basics.name, link: "https://dossier.example/profile?profile=first" });
+    // With one profile, none are listed.
+    expect(profile).not.toHaveProperty("profiles");
     expect(text).not.toContain(demoProfile().basics.email);
     expect(text).not.toContain(demoProfile().basics.phone || "no phone");
   });
@@ -202,6 +224,8 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     const { city } = demoProfile().basics;
     expect(searches.ran.at(-1)).toMatchObject({ keywords: "product designer", place: city, radiusKm: 25, remoteOnly: false, postedWithin: "month" });
     expect(JSON.parse(text)).toMatchObject({ search_id: "s1", searched: `product designer in ${city}`, link: "https://dossier.example/jobs?search=s1" });
+    // Every portal switched on is asked; one that failed says why (jobauto fork, on 1.15's portals).
+    expect(JSON.parse(text)).toMatchObject({ portals: ["JSearch"], problems: ["Adzuna: The portal couldn't be reached. Try again."], more_available: false });
     // Any level, as Find jobs leaves it: no experience at all, not "any".
     expect(searches.ran.at(-1)).not.toHaveProperty("experience");
   });
@@ -220,19 +244,29 @@ describe("the Claude connector at /api/mcp (#221)", () => {
     expect(text).toContain("save_application");
   });
 
-  it("saves the fit scores Claude gives postings, so Find jobs shows them", async () => {
+  it("saves Claude's answers about postings as scores that count requirements, so Positions ranks them (#159)", async () => {
     const posting = { source: "JSEARCH", externalId: "j1", title: "Product Designer", company: "Acme", place: "Berlin", remote: null, salary: "", postedAt: null, url: "", via: "", description: "Figma", complete: true };
-    db.postingSearch.findUnique.mockResolvedValue({ postings: [posting] });
-    const { text } = await tool("save_job_scores", {
-      search_id: "s1",
-      scores: [
-        { number: 1, score: 78, reasons: ["Figma in the Acme role"] },
-        { number: 9, score: 10, reasons: ["?"] },
+    // What the search found is in the library (E22-5).
+    db.postingSearch.findUnique.mockResolvedValue({ id: "s1" });
+    db.postingFind.findMany.mockResolvedValue([{ posting: { ...posting, id: "row-1" } }]);
+    const answers = {
+      requirements: [
+        { text: "3+ years with Figma", must_have: true, covered: true, evidence: "Designer at Acme", skill: "Figma" },
+        { text: "Experience with design tokens", must_have: false, covered: false },
       ],
-    });
-    expect(JSON.parse(text)).toMatchObject({ saved: [{ number: 1, score: 78 }], not_found: [9] });
-    expect(db.postingScore.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ create: expect.objectContaining({ externalId: "j1", score: 78, reasons: ["Figma in the Acme role"], redFlags: [], scoredWith: "claude-chat" }) }),
-    );
+      work: { level: 3, reason: "You've designed products before." },
+      extra: { level: 1, reason: "" },
+      education: { level: 2, reason: "" },
+      seniority: { fit: "fits", reason: "" },
+      location: { fit: "fits", reason: "" },
+    };
+    const { text } = await tool("save_job_scores", { search_id: "s1", scores: [{ number: 1, ...answers }, { number: 9, ...answers }] });
+    expect(JSON.parse(text)).toMatchObject({ saved: [{ number: 1, covered: "1 of 2", fit: "Good fit" }], not_found: [9] });
+    const { create } = db.postingScore.upsert.mock.calls.at(-1)![0];
+    expect(create).toMatchObject({ externalId: "j1", scoredWith: "claude-chat" });
+    expect(create.breakdown.requirements).toEqual([
+      { text: "3+ years with Figma", mustHave: true, covered: true, evidence: "Designer at Acme", skill: "Figma" },
+      { text: "Experience with design tokens", mustHave: false, covered: false, evidence: null, skill: null },
+    ]);
   });
 });

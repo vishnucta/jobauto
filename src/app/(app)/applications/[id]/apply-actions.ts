@@ -88,7 +88,9 @@ export const settleApplyAttempt = action(z.object({ attemptId: z.string().min(1)
   const attempt = await prisma.applyAttempt.findUnique({ where: { id: attemptId }, select: { applicationId: true } });
   if (!attempt) throw new ActionError("That run no longer exists.");
   const settled = await resolveAttempt(attemptId, sent);
-  refresh(attempt.applicationId);
+  // Sent moves its status, and the sidebar and dashboard count those: every page is refreshed, as for any status change.
+  if (sent && settled) revalidatePath("/", "layout");
+  else refresh(attempt.applicationId);
   // It ended since the tab was loaded, e.g. the page confirmed it: it keeps how it ended.
   if (!settled) throw new ActionError("That run already ended.");
   toast(sent ? `Marked as sent. ${statusInfo(ApplicationStatus.SENT).toast}` : "Noted: nothing was sent.");

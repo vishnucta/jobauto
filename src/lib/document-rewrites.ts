@@ -120,13 +120,16 @@ const POSTING_REPLY = "I can change the resume, the cover letter or the email. S
 /**
  * Sends a message from the Refine with AI panel (E8-5): saves it and starts
  * the reply in the background, returning the job's id. On the Job posting
- * tab without a picked unit, the reply comes at once and needs no AI.
+ * tab without a picked unit, a change's reply comes at once and needs no AI.
+ * Ask (E30-10, AP5) only answers, about the whole application, so it never
+ * has a picked unit.
  */
 export async function sendChatMessage({
   applicationId,
   text,
   viewing,
   target,
+  mode = "change",
 }: {
   applicationId: string;
   text: string;
@@ -134,10 +137,13 @@ export async function sendChatMessage({
   viewing: DocumentKind | null;
   /** The unit picked with "Ask AI". */
   target: { document: DocumentKind; unitId: string } | null;
+  /** Change, or Ask, which only answers (E30-10, AP5). */
+  mode?: "change" | "ask";
 }): Promise<{ jobId: string | null }> {
   if (!(await prisma.application.count({ where: { id: applicationId } }))) throw new ActionError(GONE);
+  if (mode === "ask") target = null;
 
-  if (!viewing && !target) {
+  if (mode === "change" && !viewing && !target) {
     const now = Date.now();
     await prisma.chatMessage.createMany({
       data: [
@@ -164,7 +170,7 @@ export async function sendChatMessage({
     data: { applicationId, role: ChatRole.USER, text, targetUnit: targetLabel },
     select: { id: true },
   });
-  const jobId = await startJob(refineJob, { applicationId, messageId: message.id, request: text, target, viewing }, { key: refineJobKey(applicationId), applicationId });
+  const jobId = await startJob(refineJob, { applicationId, messageId: message.id, request: text, target, viewing, mode }, { key: refineJobKey(applicationId), applicationId });
   return { jobId };
 }
 

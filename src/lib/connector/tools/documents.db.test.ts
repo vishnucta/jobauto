@@ -4,7 +4,7 @@ import { demoProfile, demoResumeUnits } from "@/lib/demo-profile";
 import { documentLabels, ENGLISH_LABELS, type DocumentLabels } from "@/lib/document-labels";
 import { resumeContent, type ResumeContent } from "@/lib/resume-content";
 import { saveSettings } from "@/lib/settings-data";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { pdfWith } from "@/test/resume-files";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
@@ -596,11 +596,12 @@ describe("the connector's document tools", () => {
     expect(await tool("export_pdf", { application_id: id, document: "email" })).toMatchObject({ isError: true });
   });
 
-  it("makes the base resume's PDF, which needs no application", async () => {
+  it("makes a profile's base resume's PDF, which needs no application", async () => {
     const base = await tool("export_pdf", { document: "base_resume" });
-    expect(renderPdf).toHaveBeenLastCalledWith("/print/base");
-    const download = "https://dossier.example/api/pdf?doc=base";
-    expect(base.json).toEqual({ file_name: "Jane Doe – Resume.pdf", document: "base_resume", pages: 2, download, link: "https://dossier.example/resume" });
+    // The first profile's own Base resume (E24-2).
+    expect(renderPdf).toHaveBeenLastCalledWith(`/print/base?profile=${TEST_PROFILE_ID}`);
+    const download = `https://dossier.example/api/pdf?doc=base&profile=${TEST_PROFILE_ID}`;
+    expect(base.json).toEqual({ file_name: "Jane Doe – Resume.pdf", document: "base_resume", pages: 2, download, link: `https://dossier.example/resume?profile=${TEST_PROFILE_ID}` });
     expect(base.content[1]).toEqual({ type: "resource", resource: { uri: download, mimeType: "application/pdf", blob: Buffer.from(PDF).toString("base64") } });
 
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -616,6 +617,7 @@ describe("the connector's document tools", () => {
     expect(await tool("export_pdf", { document: "resume" })).toMatchObject(unnamed);
     expect(await tool("export_pdf", { document: "cover_letter" })).toMatchObject(unnamed);
     expect(renderPdf).not.toHaveBeenCalled();
+    expect(await tool("export_pdf", { document: "base_resume", profile: "Frontend" })).toMatchObject({ isError: true });
   });
 
   it("checks a tailored resume's PDF as a parser reads it, answering with verdicts, labels and counts only", async () => {
@@ -671,9 +673,9 @@ describe("the connector's document tools", () => {
     await saveSettings({ includeRefs: true });
     vi.mocked(renderPdf).mockResolvedValueOnce(pdfWith(resumeLines(resumeContent(demoProfile(), { includeReferences: true }))));
     const base = await tool("check_resume", { document: "base_resume" });
-    expect(renderPdf).toHaveBeenLastCalledWith("/print/base");
+    expect(renderPdf).toHaveBeenLastCalledWith(`/print/base?profile=${TEST_PROFILE_ID}`);
     const { reads, requirements, text, ...rest } = report(base);
-    expect(rest).toMatchObject({ document: "base_resume", file_name: "Jane Doe – Resume.pdf", pages: 1, link: "https://dossier.example/resume" });
+    expect(rest).toMatchObject({ document: "base_resume", file_name: "Jane Doe – Resume.pdf", pages: 1, link: `https://dossier.example/resume?profile=${TEST_PROFILE_ID}` });
     expect(requirements).toBeNull();
     expect(reads.map((item) => [item.id, item.level])).toEqual([
       ["text-layer", "ok"],

@@ -8,7 +8,7 @@ import { employerFields, type EmployerFields, type EmployerView } from "./store-
 
 export { employerFields, type EmployerFields, type EmployerView };
 
-// The employers whose careers pages Find jobs follows (jobauto fork).
+// The employers whose careers pages Dossier follows (jobauto fork).
 
 export const employerView = (employer: Employer): EmployerView => ({
   id: employer.id,
@@ -54,7 +54,7 @@ export async function setEmployerEnabled(id: string, enabled: boolean): Promise<
   return count ? employerView(await prisma.employer.findUniqueOrThrow({ where: { id } })) : null;
 }
 
-/** Stops following it. The jobs found on its page stay in Find jobs. */
+/** Stops following it. The jobs found on its page stay in Positions. */
 export async function removeEmployer(id: string): Promise<boolean> {
   const { count } = await prisma.employer.deleteMany({ where: { id } });
   return count > 0;

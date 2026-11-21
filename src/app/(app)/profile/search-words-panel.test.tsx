@@ -49,20 +49,20 @@ describe("the Search words panel", () => {
   it("lists the words from the profile in groups, for the place, with the German ones", () => {
     render(<SearchWordsPanel profile={profile()} />);
     const panel = screen.getByRole("complementary", { name: "Search words" });
-    expect(panel).toHaveTextContent("For Find jobs, Hamburg, Germany.");
+    expect(panel).toHaveTextContent("For searches in Positions, Hamburg, Germany.");
     expect(words("Job titles")).toEqual(["Financial Analyst", "Senior Financial Analyst", "Regulatory Reporting Analyst", "Reconciliation Analyst", "Finanzanalyst", "Senior Finanzanalyst", "Analyst Meldewesen"]);
     expect(words("Specialties")).toEqual(["Regulatory Reporting", "Reconciliation", "Meldewesen", "Kontenabstimmung"]);
     expect(words("From your skills")).toEqual(["Audit Support", "Data Analysis", "Datenanalyse"]);
   });
 
-  it("copies a word when it is clicked, and links to Find jobs with it filled in", async () => {
+  it("copies a word when it is clicked, and links to Positions with it filled in", async () => {
     const user = userEvent.setup();
     render(<SearchWordsPanel profile={profile()} />);
     await user.click(within(group("Specialties")).getByRole("button", { name: "Meldewesen" }));
     expect(await navigator.clipboard.readText()).toBe("Meldewesen");
-    expect(toast).toHaveBeenCalledWith("Copied “Meldewesen”. Paste it into What on Find jobs.");
-    expect(screen.getByRole("link", { name: "Search Find jobs for Meldewesen" })).toHaveAttribute("href", "/jobs?q=Meldewesen&where=Hamburg&country=de");
-    expect(screen.getByRole("link", { name: "Search Find jobs for Financial Analyst" })).toHaveAttribute("href", "/jobs?q=Financial+Analyst&where=Hamburg&country=de");
+    expect(toast).toHaveBeenCalledWith("Copied “Meldewesen”. Paste it into What on Positions.");
+    expect(screen.getByRole("link", { name: "Search Positions for Meldewesen" })).toHaveAttribute("href", "/jobs?q=Meldewesen&where=Hamburg&country=de");
+    expect(screen.getByRole("link", { name: "Search Positions for Financial Analyst" })).toHaveAttribute("href", "/jobs?q=Financial+Analyst&where=Hamburg&country=de");
   });
 
   it("shows only English or only German words, and copies what is shown, one per line", async () => {

@@ -28,7 +28,8 @@ export const prepareCallJob = defineJob({
   async run({ applicationId }, { step, signal }) {
     await step("Preparing for the call");
     const application = await prisma.application.findUniqueOrThrow({ where: { id: applicationId } });
-    const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(), loadFactTexts(applicationId)]);
+    // The profile the application is written from (E24-6); German is a shared language, the same for every profile.
+    const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(application.profileId), loadFactTexts(applicationId)]);
     const german = profileGerman(profile.languages);
     const { data, promptVersion } = await prepareCall(
       provider,

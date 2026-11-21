@@ -13,10 +13,7 @@ import { startJob } from "@/lib/jobs/runner";
 import { PHOTO_KEY, PHOTO_ON_RESUMES_KEY, photoFromFields } from "@/lib/photo";
 import { prisma } from "@/lib/prisma";
 import {
-  basicsFromFields,
   BASICS_FIELDS,
-  LEGACY_ADDRESS_KEY,
-  PROFILE_KEYS,
   type Basics,
   type BasicsField,
   type DateSpan,
@@ -46,12 +43,13 @@ import {
   storePhoto,
 } from "@/lib/profile-edits";
 import { findOrCreateSkill } from "@/lib/profile-entries";
-import { importCounts, type ImportedProfile } from "@/lib/profile-import";
+import { importCounts, type ImportedProfile, type ImportMode } from "@/lib/profile-import";
+import { listProfiles, loadProfileLevels, loadProfileSettings, loadProfileWorkplace } from "@/lib/profiles";
 import { sectionName } from "@/lib/resume-sections";
 import { RESUME_MESSAGES, resumeText } from "@/lib/resume-text";
-import { loadSettings } from "@/lib/settings-data";
+import { seniorityAndLocation } from "@/lib/scoring/questions";
 
-import { failure, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, profileInput, started, text, type ToolContext } from "../kit";
 import { connectorSince } from "../oauth";
 import { forgetRemoved, keepRemoved, keptRemoved, type Removed } from "../removed-entries";
 
@@ -59,6 +57,9 @@ import { forgetRemoved, keepRemoved, keptRemoved, type Removed } from "../remove
 // do (jobauto fork). Contact details go in but don't come out: Claude reads
 // which are filled in, never their values, and a reference's email and phone
 // stay in Dossier the same way. Links are left out like on the AI's prompts.
+// With several profiles (E24-1), each tool takes one by name, the first
+// without; the name, contact details, photo, languages and facts are every
+// profile's, the rest the profile's own.
 
 /** The entries save_profile_entry and remove_profile_entry work on. */
 const ENTRY_KINDS = ["experience", "project", "education", "publication", "reference"] as const;
@@ -297,63 +298,65 @@ function importView({ basics, ...profile }: ImportedProfile) {
 // What it takes out stays in the server's memory for an hour
 // (../removed-entries.ts), so a reference's email and phone never reach Claude.
 
-/** The entry with that id and its place, as remove_profile_entry keeps it; null when there's none. */
-function findEntry(profile: ProfileData, kind: EntryKind, id: string): Removed | null {
+/** The entry with that id in the profile and its place, as remove_profile_entry keeps it; null when there's none. */
+function findEntry(profile: ProfileData, profileId: string, kind: EntryKind, id: string): Removed | null {
   const listed = titles(profile, kind);
   const position = listed.findIndex((entry) => entry.id === id);
   if (position < 0) return null;
   const { title } = listed[position];
   switch (kind) {
     case "experience":
-      return { kind, entry: profile.experience[position], position, title };
+      return { kind, entry: profile.experience[position], position, title, profileId };
     case "project":
-      return { kind, entry: profile.projects[position], position, title };
+      return { kind, entry: profile.projects[position], position, title, profileId };
     case "education":
-      return { kind, entry: profile.education[position], position, title };
+      return { kind, entry: profile.education[position], position, title, profileId };
     case "publication":
-      return { kind, entry: profile.publications[position], position, title };
+      return { kind, entry: profile.publications[position], position, title, profileId };
     case "reference":
-      return { kind, entry: profile.references[position], position, title };
+      return { kind, entry: profile.references[position], position, title, profileId };
   }
 }
 
-/** Removes an entry, as the screen's Remove does. */
-async function deleteEntry(kind: EntryKind, id: string): Promise<void> {
-  if (kind === "experience") await prisma.experience.deleteMany({ where: { id } });
-  else if (kind === "project") await prisma.project.deleteMany({ where: { id } });
-  else if (kind === "education") await prisma.education.deleteMany({ where: { id } });
-  else if (kind === "publication") await prisma.publication.deleteMany({ where: { id } });
-  else await prisma.reference.deleteMany({ where: { id } });
+/** Removes an entry of the profile, as the screen's Remove does. */
+async function deleteEntry(profileId: string, kind: EntryKind, id: string): Promise<void> {
+  const where = { id, profileId };
+  if (kind === "experience") await prisma.experience.deleteMany({ where });
+  else if (kind === "project") await prisma.project.deleteMany({ where });
+  else if (kind === "education") await prisma.education.deleteMany({ where });
+  else if (kind === "publication") await prisma.publication.deleteMany({ where });
+  else await prisma.reference.deleteMany({ where });
 }
 
 /** Back in its place where the order is set by hand, as the screen's Undo does; in date order, its dates place it. References keep no order. */
-async function backInPlace(kind: Exclude<EntryKind, "reference">, id: string, position: number): Promise<void> {
-  if (kind !== "publication" && (await loadSettings())[ORDER_SETTING[kind]] !== "manual") return;
-  const ids = titles(await loadProfile(), kind)
+async function backInPlace(profileId: string, kind: Exclude<EntryKind, "reference">, id: string, position: number): Promise<void> {
+  if (kind !== "publication" && (await loadProfileSettings(profileId))[ORDER_SETTING[kind]] !== "manual") return;
+  const ids = titles(await loadProfile(profileId), kind)
     .map((entry) => entry.id)
     .filter((entryId) => entryId !== id);
   ids.splice(Math.min(position, ids.length), 0, id);
-  if (kind === "publication") await reorderPublicationList(ids);
-  else await reorderSection(kind, ids);
+  if (kind === "publication") await reorderPublicationList(profileId, ids);
+  else await reorderSection(profileId, kind, ids);
 }
 
-/** Puts back what remove_profile_entry took out. */
+/** Puts back what remove_profile_entry took out, into the profile it was in. */
 async function putBack(removed: Removed): Promise<void> {
+  const { profileId } = removed;
   switch (removed.kind) {
     case "experience":
-      await restoreExperienceEntry(removed.entry);
-      return backInPlace(removed.kind, removed.entry.id, removed.position);
+      await restoreExperienceEntry(profileId, removed.entry);
+      return backInPlace(profileId, removed.kind, removed.entry.id, removed.position);
     case "project":
-      await restoreProjectEntry(removed.entry);
-      return backInPlace(removed.kind, removed.entry.id, removed.position);
+      await restoreProjectEntry(profileId, removed.entry);
+      return backInPlace(profileId, removed.kind, removed.entry.id, removed.position);
     case "education":
-      await restoreEducationEntry(removed.entry);
-      return backInPlace(removed.kind, removed.entry.id, removed.position);
+      await restoreEducationEntry(profileId, removed.entry);
+      return backInPlace(profileId, removed.kind, removed.entry.id, removed.position);
     case "publication":
-      await restorePublicationEntry(removed.entry);
-      return backInPlace(removed.kind, removed.entry.id, removed.position);
+      await restorePublicationEntry(profileId, removed.entry);
+      return backInPlace(profileId, removed.kind, removed.entry.id, removed.position);
     case "reference":
-      await restoreReferenceEntry(removed.entry);
+      await restoreReferenceEntry(profileId, removed.entry);
       return;
     case "photo":
       return storePhoto(removed.entry.src, removed.entry.onResumes);
@@ -416,9 +419,9 @@ const referenceInput = z.object({
 const lines = (bullets: string[] | undefined) => (bullets === undefined ? {} : { bullets: bullets.filter(Boolean).join("\n") });
 
 /** Sets the skills used in a role or project, by name, adding the ones the profile doesn't have yet (PRO-6); answers with those. */
-async function setSkillsUsed(kind: "experience" | "project", id: string, names: string[]): Promise<string[]> {
+async function setSkillsUsed(profileId: string, kind: "experience" | "project", id: string, names: string[]): Promise<string[]> {
   const found = [];
-  for (const name of names) found.push(await findOrCreateSkill(name));
+  for (const name of names) found.push(await findOrCreateSkill(profileId, name));
   const skillIds = [...new Set(found.map(({ skill }) => skill.id))];
   // Only the links it doesn't have yet are made: SQLite can't skip duplicates.
   if (kind === "experience") {
@@ -450,37 +453,39 @@ type EntryInput = {
  * placed like one added there, then gets its fields. Answers with its id and
  * the skills that joined the profile, or null when the id is no longer there.
  */
-async function saveEntry(kind: EntryKind, input: EntryInput): Promise<{ id: string; newSkills: string[] } | null> {
+async function saveEntry(profileId: string, kind: EntryKind, input: EntryInput): Promise<{ id: string; newSkills: string[] } | null> {
+  // Only an entry of this profile changes (E24-1).
+  const own = (entryId: string) => ({ id: entryId, profileId });
   if (kind === "experience" && input.experience) {
     const { id, skills, bullets, start, end, current, ...fields } = input.experience;
-    const entryId = id ?? (await newExperience()).id;
+    const entryId = id ?? (await newExperience(profileId)).id;
     const data = { ...given(fields), ...lines(bullets), ...spanColumns({ start, end, current }) };
-    if ((await prisma.experience.updateMany({ where: { id: entryId }, data })).count === 0) return null;
-    return { id: entryId, newSkills: skills ? await setSkillsUsed(kind, entryId, skills) : [] };
+    if ((await prisma.experience.updateMany({ where: own(entryId), data })).count === 0) return null;
+    return { id: entryId, newSkills: skills ? await setSkillsUsed(profileId, kind, entryId, skills) : [] };
   }
   if (kind === "project" && input.project) {
     const { id, skills, bullets, start, end, current, ...fields } = input.project;
-    const entryId = id ?? (await newProject()).id;
+    const entryId = id ?? (await newProject(profileId)).id;
     const data = { ...given(fields), ...lines(bullets), ...spanColumns({ start, end, current }) };
-    if ((await prisma.project.updateMany({ where: { id: entryId }, data })).count === 0) return null;
-    return { id: entryId, newSkills: skills ? await setSkillsUsed(kind, entryId, skills) : [] };
+    if ((await prisma.project.updateMany({ where: own(entryId), data })).count === 0) return null;
+    return { id: entryId, newSkills: skills ? await setSkillsUsed(profileId, kind, entryId, skills) : [] };
   }
   if (kind === "education" && input.education) {
     const { id, start, end, current, ...fields } = input.education;
-    const entryId = id ?? (await newEducation()).id;
+    const entryId = id ?? (await newEducation(profileId)).id;
     const data = { ...given(fields), ...spanColumns({ start, end, current }) };
-    return (await prisma.education.updateMany({ where: { id: entryId }, data })).count === 0 ? null : { id: entryId, newSkills: [] };
+    return (await prisma.education.updateMany({ where: own(entryId), data })).count === 0 ? null : { id: entryId, newSkills: [] };
   }
   if (kind === "publication" && input.publication) {
     const { id, on_resumes, ...fields } = input.publication;
-    const entryId = id ?? (await newPublication()).id;
+    const entryId = id ?? (await newPublication(profileId)).id;
     const data = { ...given(fields), ...(on_resumes === undefined ? {} : { onResumes: on_resumes }) };
-    return (await prisma.publication.updateMany({ where: { id: entryId }, data })).count === 0 ? null : { id: entryId, newSkills: [] };
+    return (await prisma.publication.updateMany({ where: own(entryId), data })).count === 0 ? null : { id: entryId, newSkills: [] };
   }
   if (kind === "reference" && input.reference) {
     const { id, ...fields } = input.reference;
-    const entryId = id ?? (await newReference()).id;
-    return (await prisma.reference.updateMany({ where: { id: entryId }, data: given(fields) })).count === 0 ? null : { id: entryId, newSkills: [] };
+    const entryId = id ?? (await newReference(profileId)).id;
+    return (await prisma.reference.updateMany({ where: own(entryId), data: given(fields) })).count === 0 ? null : { id: entryId, newSkills: [] };
   }
   return null;
 }
@@ -496,7 +501,7 @@ const SORTABLE = { experience: "experience", projects: "project", education: "ed
 
 /** Registers these tools on the connector's server. */
 export function registerProfileTools({ server, linkTo }: ToolContext): void {
-  const sectionLink = (section: string) => linkTo(`/profile?section=${section}`);
+  const sectionLink = (profileId: string, section: string) => linkTo(`/profile?profile=${profileId}&section=${section}`);
 
   server.registerTool(
     "get_profile",
@@ -505,14 +510,34 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       description:
         "The user's profile in Dossier, with the ids save_application and the profile tools use: headline, summary, facts about them, skills, languages, experience and volunteering, projects, education, certifications, publications, sections they made and references. " +
         "Contact details, links and references' email and phone are left out; contact_details says which of the user's own are filled in. " +
-        "sections_off_resumes names the sections turned off on the base resume: leave them out of what you write, as save_application does.",
+        "sections_off_resumes names the sections turned off on the profile's base resume: leave them out of what you write, as save_application does. " +
+        "Once the user has chosen the levels it's for, it also has those levels, the years of paid work and where it wants to work, which save_job_scores judges against. " +
+        "The user can have several profiles, one per kind of job; the answer names them all. Without profile it's the first.",
+      inputSchema: z.object({ profile: profileInput }),
       annotations: { readOnlyHint: true },
     },
-    async () => {
-      const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+    async (input) => {
+      const chosen = await chooseProfile(input.profile);
+      if ("failure" in chosen) return chosen.failure;
+      const [profile, own, all, levels, { workplace }] = await Promise.all([
+        loadProfile(chosen.id),
+        loadProfileSettings(chosen.id),
+        listProfiles(),
+        loadProfileLevels(chosen.id),
+        loadProfileWorkplace(chosen.id),
+      ]);
       // All of it, for the profile tools' ids; what's off on the base resume (#297) is named, for writing.
-      const off = settings.resumeSections.off.map((key) => sectionName(key, profile.customSections));
-      return text({ ...profileView(profile), sections_off_resumes: off.length > 0 ? off : undefined, link: linkTo("/profile") });
+      const off = own.resumeSections.off.map((key) => sectionName(key, profile.customSections));
+      // What save_job_scores judges seniority and location against, as Dossier's scoring models read it (1.15.1).
+      const target = levels ? seniorityAndLocation({ data: profile, levels, workplace }) : null;
+      return text({
+        profile: chosen.name,
+        ...(all.length > 1 ? { profiles: all.map((entry) => entry.name) } : {}),
+        ...profileView(profile),
+        sections_off_resumes: off.length > 0 ? off : undefined,
+        ...(target ? { jobsItsFor: target.seniority.levels, yearsOfPaidWork: target.seniority.yearsOfPaidWork, whereItWantsToWork: target.location } : {}),
+        link: linkTo(`/profile?profile=${chosen.id}`),
+      });
     },
   );
 
@@ -522,9 +547,11 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       title: "Change the profile's basics",
       description:
         "Changes the profile's name, headline, summary and contact details, and whether resumes show the age and the photo. " +
+        "The headline and summary are the profile's own; the name, contact details, age and photo are every profile's. " +
         "Only the fields given change ('' clears one); answers with the fields that changed, without their values. " +
         "Save only what the user told you or confirmed; never add experience, numbers or facts they didn't give.",
       inputSchema: z.object({
+        profile: profileInput.describe("The profile whose headline and summary change; the first when left out"),
         name: z.string().trim().max(200).optional(),
         headline: z.string().trim().max(300).optional().describe("e.g. 'Senior Product Designer'"),
         summary: z.string().trim().max(5000).optional().describe("A few lines about the user"),
@@ -543,7 +570,9 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ date_of_birth, house_number, postal_code, show_age, photo_on_resumes, ...fields }) => {
+    async ({ profile: asked, date_of_birth, house_number, postal_code, show_age, photo_on_resumes, ...fields }) => {
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
       const changes: Partial<Basics> = {
         ...given(fields),
         ...given({ houseNumber: house_number, postalCode: postal_code }),
@@ -554,17 +583,17 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       const photo = photo_on_resumes === undefined ? null : await loadPhoto();
       if (photo_on_resumes !== undefined && !photo) return failure("There's no photo in the profile. The user can add one on the Profile screen.");
 
-      // With the old one-line address, which the address fields are read from until the next save.
-      const before = basicsFromFields(await prisma.profileField.findMany({ where: { key: { in: [...PROFILE_KEYS, LEGACY_ADDRESS_KEY] } } }));
+      // The shared basics with the profile's own headline and summary, the address read from the old one-line address until the next save.
+      const before = (await loadProfile(chosen.id)).basics;
       const after: Basics = { ...before, ...changes };
       const changed: string[] = BASICS_FIELDS.filter((field) => after[field] !== before[field]).map((field) => TOOL_NAMES[field] ?? field);
       if (after.showAge !== before.showAge) changed.push("show_age");
-      if (changed.length > 0) await saveBasicsFields(after);
+      if (changed.length > 0) await saveBasicsFields(chosen.id, after);
       if (photo && photo_on_resumes !== undefined && photo.onResumes !== photo_on_resumes) {
         await photoOnResumesRow(photo_on_resumes);
         changed.push("photo_on_resumes");
       }
-      return text({ changed, link: sectionLink("basics") });
+      return text({ profile: chosen.name, changed, link: sectionLink(chosen.id, "basics") });
     },
   );
 
@@ -575,9 +604,11 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       title: "Edit skills, languages and facts",
       description:
         "Adds and removes skills and languages, changes a language's level, and adds, changes or removes facts about the user, several at once. " +
+        "Skills are the profile's own; languages and facts are every profile's. " +
         "Removing a skill also takes it off every role and project, and can't be undone. " +
         "Save only what the user told you or confirmed; never add skills, languages or facts they didn't give.",
       inputSchema: z.object({
+        profile: profileInput.describe("The profile whose skills change; the first when left out"),
         add_skills: z.array(name).max(50).optional(),
         remove_skills: z.array(name).max(50).optional().describe("By name"),
         set_languages: z
@@ -599,13 +630,15 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
-    async (input) => {
+    async ({ profile: asked, ...input }) => {
       if (Object.values(input).every((list) => !list?.length)) {
         return failure("Say what to change: add_skills, remove_skills, set_languages, remove_languages, add_facts, change_facts or remove_facts.");
       }
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
       const skills = { added: [] as string[], already_there: [] as string[], removed: [] as string[], not_found: [] as string[] };
       for (const skillName of input.remove_skills ?? []) {
-        const skill = await prisma.skill.findUnique({ where: { name: skillName }, select: { id: true, name: true } });
+        const skill = await prisma.skill.findUnique({ where: { profileId_name: { profileId: chosen.id, name: skillName } }, select: { id: true, name: true } });
         if (!skill) {
           skills.not_found.push(skillName);
           continue;
@@ -615,7 +648,7 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         skills.removed.push(skill.name);
       }
       for (const skillName of input.add_skills ?? []) {
-        const { skill, added } = await findOrCreateSkill(skillName);
+        const { skill, added } = await findOrCreateSkill(chosen.id, skillName);
         (added ? skills.added : skills.already_there).push(skill.name);
       }
 
@@ -666,7 +699,7 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         return kept.length > 0 ? Object.fromEntries(kept) : undefined;
       };
       const onlyFacts = !input.add_skills?.length && !input.remove_skills?.length && !input.set_languages?.length && !input.remove_languages?.length;
-      return text({ skills: told(skills), languages: told(languages), facts: told(facts), link: sectionLink(onlyFacts ? "facts" : "skills") });
+      return text({ profile: chosen.name, skills: told(skills), languages: told(languages), facts: told(facts), link: sectionLink(chosen.id, onlyFacts ? "facts" : "skills") });
     },
   );
 
@@ -679,6 +712,7 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         "Dates are 'YYYY-MM' or 'YYYY' ('' clears one), and current means it's still going on; bullets and skills replace the entry's lists, and new skills join the profile's. " +
         "Save only what the user told you or confirmed; never add experience, numbers or facts they didn't give.",
       inputSchema: z.object({
+        profile: profileInput.describe("The profile the entry is in, or goes into; the first when left out"),
         experience: experienceInput.optional(),
         project: projectInput.optional(),
         education: educationInput.optional(),
@@ -687,22 +721,25 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async (input) => {
+    async ({ profile: asked, ...input }) => {
       const kinds = ENTRY_KINDS.filter((kind) => input[kind] !== undefined);
       if (kinds.length !== 1) return failure("Give exactly one entry: experience, project, education, publication or reference.");
       const [kind] = kinds;
       const { id, ...fields } = input[kind]!;
       if (Object.keys(given(fields)).length === 0) return failure(`Give the ${NOUN[kind]}'s fields to save.`);
-      const saved = await saveEntry(kind, input);
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
+      const saved = await saveEntry(chosen.id, kind, input);
       if (!saved) return noSuchEntry(kind);
-      const listed: { id: string }[] = profileView(await loadProfile())[SECTION[kind]];
+      const listed: { id: string }[] = profileView(await loadProfile(chosen.id))[SECTION[kind]];
       const entry = listed.find((item) => item.id === saved.id);
       return text({
+        profile: chosen.name,
         saved: kind,
         created: id === undefined,
         entry,
         new_skills: saved.newSkills.length > 0 ? saved.newSkills : undefined,
-        link: sectionLink(SECTION[kind]),
+        link: sectionLink(chosen.id, SECTION[kind]),
       });
     },
   );
@@ -715,16 +752,16 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         "Removes one experience, project, education, publication or reference entry by its id from get_profile, or the photo. " +
         "Called again within the hour with restore: true, it puts that one back, as Undo does on the Profile screen.",
       inputSchema: z.object({
+        profile: profileInput.describe("The profile the entry is in; the first when left out. A restored entry goes back to the profile it was in"),
         kind: z.enum([...ENTRY_KINDS, "photo"]),
         id: z.string().min(1).max(100).optional().describe("The entry's id from get_profile; not needed for the photo"),
         restore: z.boolean().optional().describe("Puts back one removed with this tool"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ kind, id, restore }) => {
+    async ({ profile: asked, kind, id, restore }) => {
       if (kind !== "photo" && !id) return failure("Give the entry's id from get_profile.");
       const key = kind === "photo" ? kind : `${kind}:${id}`;
-      const link = sectionLink(kind === "photo" ? "basics" : SECTION[kind]);
       const connection = await connectorSince();
       if (restore) {
         const removed = keptRemoved(key, connection);
@@ -735,19 +772,22 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         }
         await putBack(removed);
         forgetRemoved(key);
-        return text({ restored: kind, id, title: removed.title, link });
+        return text({ restored: kind, id, title: removed.title, link: sectionLink(removed.profileId, kind === "photo" ? "basics" : SECTION[kind]) });
       }
 
-      const profile = await loadProfile();
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
+      const link = sectionLink(chosen.id, kind === "photo" ? "basics" : SECTION[kind]);
+      const profile = await loadProfile(chosen.id);
       if (kind === "photo") {
         if (!profile.photo) return failure("There's no photo in the profile.");
         await deletePhoto();
-        keepRemoved(key, { kind, entry: profile.photo, position: 0, title: "The photo" }, connection);
+        keepRemoved(key, { kind, entry: profile.photo, position: 0, title: "The photo", profileId: chosen.id }, connection);
         return text({ removed: kind, undo: "remove_profile_entry with kind photo and restore: true puts it back within the hour.", link });
       }
-      const found = findEntry(profile, kind, id!);
+      const found = findEntry(profile, chosen.id, kind, id!);
       if (!found) return noSuchEntry(kind);
-      await deleteEntry(kind, id!);
+      await deleteEntry(chosen.id, kind, id!);
       keepRemoved(key, found, connection);
       return text({ removed: kind, id, title: found.title, undo: "remove_profile_entry with the same kind and id and restore: true puts it back within the hour.", link });
     },
@@ -761,26 +801,29 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         "Puts experience, projects, education or publications in an order set by hand (ids: every entry's id, in the new order), " +
         "or experience, projects or education back in date order, newest first (by_date), as the Profile screen does.",
       inputSchema: z.object({
+        profile: profileInput,
         section: z.enum(["experience", "projects", "education", "publications"]),
         ids: z.array(z.string().min(1).max(100)).max(200).optional().describe("Every entry's id in the section, in the new order"),
         by_date: z.boolean().optional().describe("Back to newest first by start date"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ section, ids, by_date }) => {
+    async ({ profile: asked, section, ids, by_date }) => {
       if (Boolean(ids) === Boolean(by_date)) return failure("Give either ids, every entry's id in the new order, or by_date: true.");
       const kind = SORTABLE[section];
       if (by_date && kind === "publication") return failure("Publications have no dates: give their ids in the order you want.");
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
       try {
-        if (kind === "publication") await reorderPublicationList(ids!);
-        else if (by_date) await sortSectionByDate(kind);
-        else await reorderSection(kind, ids!);
+        if (kind === "publication") await reorderPublicationList(chosen.id, ids!);
+        else if (by_date) await sortSectionByDate(chosen.id, kind);
+        else await reorderSection(chosen.id, kind, ids!);
       } catch (error) {
         if (!(error instanceof ActionError)) throw error;
         return failure("Give the id of every entry in that section once, in the new order. get_profile lists them.");
       }
-      const entries = titles(await loadProfile(), kind).map((entry) => entry.title);
-      return text({ section, order: by_date ? "by date" : "by hand", entries, link: sectionLink(section) });
+      const entries = titles(await loadProfile(chosen.id), kind).map((entry) => entry.title);
+      return text({ profile: chosen.name, section, order: by_date ? "by date" : "by hand", entries, link: sectionLink(chosen.id, section) });
     },
   );
 
@@ -822,14 +865,16 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       title: "Finish importing a resume",
       description:
         "Shows what a resume reading found (choice show), then does what the user chose: merge adds it to the profile, and the resume wins where both say something; " +
-        "replace clears the basics, skills, languages, roles, projects, education, certifications, publications and references first; discard sets it aside. Only merge or replace once the user has seen it and said so.",
+        "replace clears the profile's own headline, summary, skills, roles, projects, education, certifications, publications and references first, and keeps what every profile shares; discard sets it aside. " +
+        "Only merge or replace once the user has seen it and said so.",
       inputSchema: z.object({
         task_id: z.string().min(1).max(100).optional().describe("From import_profile_from_resume; leave it out for the latest reading, also one from the Import screen"),
         choice: z.enum(["show", "merge", "replace", "discard"]).default("show"),
+        profile: profileInput.describe("The profile it goes into on merge or replace; the first when left out"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
-    async ({ task_id, choice }) => {
+    async ({ task_id, choice, profile: asked }) => {
       const job = await prisma.job.findFirst({
         where: { type: importProfileJob.type, ...(task_id ? { id: task_id } : {}) },
         orderBy: { createdAt: "desc" },
@@ -858,13 +903,20 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
           link: linkTo(`/profile/import?job=${job.id}`),
         });
       }
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
       try {
-        await applyProfileImportJob(job.id, choice);
+        await applyProfileImportJob(job.id, chosen.id, choice as ImportMode);
       } catch (error) {
         if (!(error instanceof ActionError)) throw error;
         return failure("That reading is no longer there. Start again with import_profile_from_resume.");
       }
-      return text({ task_id: job.id, done: `${choice === "replace" ? "The profile now holds" : "Added to the profile"}: ${importCounts(profile)}.`, link: linkTo("/profile") });
+      return text({
+        task_id: job.id,
+        profile: chosen.name,
+        done: `${choice === "replace" ? "The profile now holds" : "Added to the profile"}: ${importCounts(profile)}.`,
+        link: linkTo(`/profile?profile=${chosen.id}`),
+      });
     },
   );
 }

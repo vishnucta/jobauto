@@ -9,11 +9,12 @@ import { clearJobSearchCache } from "@/lib/job-search/cache";
 import { startJob } from "@/lib/jobs/runner";
 import { zipPdfsJob } from "@/lib/jobs/zip-pdfs";
 import { encryptSecret, GOOGLE_CLIENT_SECRET, JOB_SOURCE_KEY } from "@/lib/secrets";
+import { loadProfileSettings } from "@/lib/profiles";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { themeFile } from "@/lib/theme-file";
 import { BUILT_IN_THEMES } from "@/lib/themes";
 import { appVersion } from "@/lib/version";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { jsearchV2LastPage } from "@/test/job-search-fixtures";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
@@ -63,8 +64,14 @@ import { POST } from "@/app/api/mcp/route";
 
 const prisma = () => db.client!;
 const settings = () => loadSettings();
+/** The first profile's own settings (E24-1): its Base resume's theme and language. */
+const own = () => loadProfileSettings(TEST_PROFILE_ID);
 const CLAUDE = "https://claude.ai/api/mcp/auth_callback";
 const THEME_GONE = "There's no theme with that id. list_themes shows them all.";
+/** The demo's one profile, named after its headline (prisma/seed/demo.ts), and its Base resume. */
+const DEMO_PROFILE = "Senior Product Designer";
+const RESUME = `https://dossier.example/resume?profile=${TEST_PROFILE_ID}`;
+const NOW_BASE = `It's now the base resume theme of ${DEMO_PROFILE}.`;
 
 let token = "";
 beforeEach(async () => {
@@ -116,9 +123,9 @@ async function tool(name: string, args: Record<string, unknown> = {}) {
 }
 
 describe("the theme tools (RES-2…RES-4, E5-7)", () => {
-  it("lists every theme with its look and use, and sets the base theme", async () => {
+  it("lists every theme with its look and use, and sets a profile's base theme", async () => {
     const listed = await tool("list_themes");
-    expect(listed.json.base_theme_id).toBe("editorial");
+    expect(listed.json).toMatchObject({ profile: DEMO_PROFILE, base_theme_id: "editorial" });
     const themes = listed.json.themes as Record<string, unknown>[];
     expect(themes.map((theme) => theme.id)).toEqual(BUILT_IN_THEMES.map((theme) => theme.id));
     // The demo's application uses Editorial for both its documents.
@@ -140,34 +147,35 @@ describe("the theme tools (RES-2…RES-4, E5-7)", () => {
       photo_shape: "CIRCLE",
       photo_position: "HEADER_END",
     });
-    expect(listed.json.link).toBe("https://dossier.example/resume");
+    expect(listed.json.link).toBe(RESUME);
 
-    expect((await tool("set_base_theme", { id: "modern" })).json).toEqual({ base_theme: { id: "modern", name: "Modern" }, link: "https://dossier.example/resume" });
-    expect((await settings()).baseThemeId).toBe("modern");
+    expect((await tool("set_base_theme", { id: "modern" })).json).toEqual({ profile: DEMO_PROFILE, base_theme: { id: "modern", name: "Modern" }, link: RESUME });
+    expect((await own()).baseThemeId).toBe("modern");
     expect(await tool("set_base_theme", { id: "gone" })).toMatchObject({ isError: true, text: THEME_GONE });
-    expect((await settings()).baseThemeId).toBe("modern");
+    expect((await own()).baseThemeId).toBe("modern");
+    expect(await tool("set_base_theme", { id: "classic", profile: "Frontend" })).toMatchObject({ isError: true });
   });
 
   it("makes a new theme from the base theme or another, and changes custom ones only", async () => {
     const made = await tool("save_theme", { accent: "#2D6A4F", head_font: "PLEX_MONO" });
     expect(made.json).toMatchObject({
-      message: "Saved “My theme”. It's now your base resume theme.",
+      message: `Saved “My theme”. ${NOW_BASE}`,
       // The rest is Editorial's, the base theme.
       theme: { name: "My theme", accent: "#2d6a4f", head_font: "PLEX_MONO", body_font: "GEIST", layout: "SINGLE" },
     });
     const id = (made.json.theme as { id: string }).id;
-    expect((await settings()).baseThemeId).toBe(id);
+    expect((await own()).baseThemeId).toBe(id);
 
     await tool("set_base_theme", { id: "classic" });
     const changed = await tool("save_theme", { id, name: "Green mono", density: "AIRY" });
     expect(changed.json).toMatchObject({ theme: { id, name: "Green mono", density: "AIRY", accent: "#2d6a4f", head_font: "PLEX_MONO" } });
-    expect((await settings()).baseThemeId).toBe(id);
+    expect((await own()).baseThemeId).toBe(id);
     expect(await prisma().theme.count({ where: { builtIn: false } })).toBe(1);
     expect((await tool("list_themes")).json.themes).toContainEqual(expect.objectContaining({ id, name: "Green mono", built_in: false, applications: 0 }));
 
     // From another theme: with changes, as the builder starts one; alone, a copy as Duplicate makes it.
     expect((await tool("save_theme", { based_on: "modern", accent: "#1f3a5f" })).json).toMatchObject({ theme: { name: "My theme", layout: "SPLIT", accent: "#1f3a5f" } });
-    expect((await tool("save_theme", { based_on: "modern" })).json).toMatchObject({ message: "Made “Modern copy”. It's now your base resume theme.", theme: { name: "Modern copy", accent: "#2f5d8a" } });
+    expect((await tool("save_theme", { based_on: "modern" })).json).toMatchObject({ message: `Made “Modern copy”. ${NOW_BASE}`, theme: { name: "Modern copy", accent: "#2f5d8a" } });
 
     expect(await tool("save_theme", { id: "editorial", accent: "#000000" })).toMatchObject({ isError: true, text: expect.stringMatching(/^Built-in themes can't be changed/) });
     expect((await prisma().theme.findUniqueOrThrow({ where: { id: "editorial" } })).accent).toBe("#7a3b2e");
@@ -183,8 +191,8 @@ describe("the theme tools (RES-2…RES-4, E5-7)", () => {
   it("imports a theme file's text, checked as the screen checks it", async () => {
     const file = themeFile({ ...BUILT_IN_THEMES[0], name: "Shared theme", accent: "#1F6F5C" });
     const imported = await tool("save_theme", { theme_file: JSON.stringify(file) });
-    expect(imported.json).toMatchObject({ message: "Imported “Shared theme”. It's now your base resume theme.", theme: { name: "Shared theme", accent: "#1f6f5c" } });
-    expect((await settings()).baseThemeId).toBe((imported.json.theme as { id: string }).id);
+    expect(imported.json).toMatchObject({ message: `Imported “Shared theme”. ${NOW_BASE}`, theme: { name: "Shared theme", accent: "#1f6f5c" } });
+    expect((await own()).baseThemeId).toBe((imported.json.theme as { id: string }).id);
 
     expect(await tool("save_theme", { theme_file: "{ not json" })).toMatchObject({ isError: true, text: "That file isn't a Dossier theme." });
     expect(await tool("save_theme", { theme_file: JSON.stringify({ ...file, theme: { ...file.theme, bodyFont: "PAPYRUS" } }) })).toMatchObject({
@@ -204,12 +212,13 @@ describe("the theme tools (RES-2…RES-4, E5-7)", () => {
     expect(await tool("save_theme", { delete: true })).toMatchObject({ isError: true });
     expect((await tool("save_theme", { id: copy.id, delete: true })).json).toEqual({
       message: "Deleted “Modern copy”.",
+      profile: DEMO_PROFILE,
       base_theme: { id: "editorial", name: "Editorial" },
-      link: "https://dossier.example/resume",
+      link: RESUME,
     });
     expect(await prisma().theme.findUnique({ where: { id: copy.id } })).toBeNull();
     expect(await prisma().document.count({ where: { applicationId: ledgerly.id, themeId: null } })).toBe(2);
-    expect((await settings()).baseThemeId).toBe("editorial");
+    expect((await own()).baseThemeId).toBe("editorial");
 
     expect(await tool("save_theme", { id: "editorial", delete: true })).toMatchObject({ isError: true, text: "Built-in themes can't be deleted." });
     expect(await tool("save_theme", { id: copy.id, delete: true })).toMatchObject({ isError: true, text: THEME_GONE });
@@ -222,9 +231,9 @@ describe("get_settings and update_settings", () => {
       provider: "ANTHROPIC",
       model: "claude-opus-5-5",
       apiKeyEnc: encryptApiKey("sk-ant-secret"),
-      jobSource: "JSEARCH",
-      jsearchKeyEnc: encryptSecret(JOB_SOURCE_KEY, "ak_secret"),
-      adzunaAppId: "app-1",
+      // Every portal with its own switch and fields (E22-3); keys apart, encrypted.
+      portals: { JSEARCH: { on: true, fields: {}, acceptedAt: null }, ADZUNA: { on: false, fields: { appId: "app-1" }, acceptedAt: null } },
+      portalKeysEnc: { JSEARCH: { key: encryptSecret(JOB_SOURCE_KEY, "ak_secret") } },
       googleClientId: "1234-client.apps.googleusercontent.com",
       googleClientSecretEnc: encryptSecret(GOOGLE_CLIENT_SECRET, "gcs_secret"),
       gmailInterval: 30,
@@ -234,7 +243,8 @@ describe("get_settings and update_settings", () => {
     const read = await tool("get_settings");
     expect(read.json).toMatchObject({
       ai: { ai_provider: "ANTHROPIC", provider_name: "Anthropic", ai_address: "https://api.anthropic.com", ai_model: "claude-opus-5-5", api_key: "set", ready: true, creativity: "BALANCED", never_invent_experience: true },
-      job_search: { job_source: "JSEARCH", jsearch_host: "openwebninja", jsearch_key: "set", serpapi_key: "none", adzuna_app_id: "app-1", adzuna_key: "none", jooble_key: "none", arbeitsagentur: { offered: true, understood: false } },
+      scoring: { scorer: "Your AI model" },
+      job_search: { archive_after_days: 30 },
       documents: { paper: "A4", document_language: "German", resume_language: "English", documents_to_write: "both", languages: expect.arrayContaining(["English", "German", "Hebrew"]) },
       your_data: { nightly_backup: true, last_backup: null, keep_task_data_hours: 24 },
       // Set up, but no account connected yet.
@@ -242,9 +252,21 @@ describe("get_settings and update_settings", () => {
       about: { version: appVersion, check_for_updates_daily: true, newer_version: null },
       link: "https://dossier.example/settings",
     });
-    expect((read.json.job_search as Record<string, unknown>).problem).toBeUndefined();
+    const portals = (read.json.job_search as { portals: Record<string, unknown>[] }).portals;
+    // SerpApi and Jooble (jobauto fork) are built-in portals beside upstream's.
+    expect(portals.map((portal) => [portal.id, portal.on])).toEqual([
+      ["JSEARCH", true],
+      ["SERPAPI", false],
+      ["ADZUNA", false],
+      ["JOOBLE", false],
+      ["FREEHIRE", false],
+      ["ARBEITSAGENTUR", false],
+    ]);
+    expect(portals[0]).toMatchObject({ name: "JSearch", fields: { key: "key: set" } });
+    expect(portals[2]).toMatchObject({ name: "Adzuna", fields: { appId: "app-1", key: "key: none" } });
+    expect(portals[5]).toMatchObject({ note_accepted: false });
     const stored = await settings();
-    for (const secret of ["sk-ant-secret", "ak_secret", "gcs_secret", stored.apiKeyEnc!, stored.jsearchKeyEnc!, stored.googleClientSecretEnc!, "1234-client"]) {
+    for (const secret of ["sk-ant-secret", "ak_secret", "gcs_secret", stored.apiKeyEnc!, stored.portalKeysEnc.JSEARCH.key, stored.googleClientSecretEnc!, "1234-client"]) {
       expect(read.text).not.toContain(secret);
     }
 
@@ -272,6 +294,7 @@ describe("get_settings and update_settings", () => {
     expect(changed.json).toMatchObject({
       saved: ["creativity", "never_invent_experience", "paper", "resume_language", "file_name_pattern", "documents_to_write", "keep_task_data_hours", "check_for_updates_daily"],
       ai: { creativity: "EXPRESSIVE", never_invent_experience: false, show_what_changed: true },
+      // The resume language is the first profile's own (E24-1).
       documents: { paper: "LETTER", documents_to_write: "resume", resume_language: "German", file_name_pattern: "{name} – {doc}" },
       your_data: { keep_task_data_hours: 168 },
       about: { check_for_updates_daily: false },
@@ -284,17 +307,18 @@ describe("get_settings and update_settings", () => {
       showDiff: true,
       paper: "LETTER",
       documentsToWrite: "resume",
-      resumeLanguage: "German",
       fileNamePattern: "{name} – {doc}",
       jobRetentionHours: 168,
       updateCheck: false,
       nightlyBackup: true,
     });
+    expect((await own()).resumeLanguage).toBe("German");
 
     // A new language goes on the list, as "Other language…" adds it; one there already, in any case, is picked.
     expect((await tool("update_settings", { document_language: " Hebrew " })).json).toMatchObject({ documents: { document_language: "Hebrew" }, link: "https://dossier.example/settings?section=documents" });
     await tool("update_settings", { document_language: "HEBREW", resume_language: "English", nightly_backup: false });
-    expect(await settings()).toMatchObject({ docLanguage: "Hebrew", customLanguages: ["Hebrew"], resumeLanguage: null, nightlyBackup: false });
+    expect(await settings()).toMatchObject({ docLanguage: "Hebrew", customLanguages: ["Hebrew"], nightlyBackup: false });
+    expect((await own()).resumeLanguage).toBeNull();
     await tool("update_settings", { document_language: null });
     expect((await settings()).docLanguage).toBeNull();
 
@@ -333,29 +357,30 @@ describe("get_settings and update_settings", () => {
     expect(local.json).not.toHaveProperty("next");
   });
 
-  it("chooses the job source, never ticking the Bundesagentur für Arbeit's note for the user (#223)", async () => {
-    const refused = await tool("update_settings", { job_source: "ARBEITSAGENTUR", paper: "LETTER" });
+  it("switches portals on and off and sets their fields, never ticking the Bundesagentur für Arbeit's note for the user (#223)", async () => {
+    const portal = async (id: string) => ((await tool("get_settings")).json.job_search as { portals: { id: string }[] }).portals.find((entry) => entry.id === id);
+    const refused = await tool("update_settings", { portals: [{ id: "JSEARCH", on: true }, { id: "ARBEITSAGENTUR", on: true }], paper: "LETTER" });
     expect(refused).toMatchObject({ isError: true, text: expect.stringContaining("“I understand”") });
     // Nothing else changed either.
-    expect(await settings()).toMatchObject({ jobSource: null, paper: "A4" });
+    expect(await settings()).toMatchObject({ portals: null, paper: "A4" });
 
-    const jsearch = await tool("update_settings", { job_source: "JSEARCH", jsearch_host: "rapidapi", adzuna_app_id: " app-1 " });
-    expect(jsearch.json).toMatchObject({
-      job_search: { job_source: "JSEARCH", jsearch_host: "rapidapi", adzuna_app_id: "app-1", jsearch_key: "none", problem: "Add your JSearch key in Settings → Job search first." },
-      link: "https://dossier.example/settings?section=jobs",
-    });
-    expect(await settings()).toMatchObject({ jobSource: "JSEARCH", jsearchHost: "rapidapi", adzunaAppId: "app-1" });
+    const jsearch = await tool("update_settings", { portals: [{ id: "JSEARCH", on: true, fields: { host: "rapidapi" } }, { id: "ADZUNA", fields: { appId: " app-1 " } }] });
+    expect(jsearch.json).toMatchObject({ saved: ["portals"], link: "https://dossier.example/settings?section=jobs" });
+    expect(await portal("JSEARCH")).toMatchObject({ on: true, fields: { host: "rapidapi", key: "key: none" } });
+    expect(await settings()).toMatchObject({ portals: { JSEARCH: { on: true, fields: { host: "rapidapi" } }, ADZUNA: { on: false, fields: { appId: "app-1" } } } });
+    expect(await tool("update_settings", { portals: [{ id: "JSEARCH", fields: { host: "elsewhere" } }] })).toMatchObject({ isError: true, text: expect.stringContaining("Choose one of the options.") });
 
-    // Once the user ticked it in Settings, switching back needs nothing more.
-    await saveSettings({ arbeitsagenturAcceptedAt: "2026-10-20T08:00:00.000Z" });
-    expect((await tool("update_settings", { job_source: "ARBEITSAGENTUR" })).json).toMatchObject({ job_search: { job_source: "ARBEITSAGENTUR", arbeitsagentur: { understood: true } } });
-    await tool("update_settings", { job_source: "OFF", adzuna_app_id: "" });
-    expect(await settings()).toMatchObject({ jobSource: "OFF", adzunaAppId: null });
+    // Once the user ticked it in Settings, switching it on needs nothing more.
+    await saveSettings({ portals: { ...(await settings()).portals, ARBEITSAGENTUR: { on: false, fields: {}, acceptedAt: "2026-10-20T08:00:00.000Z" } } });
+    await tool("update_settings", { portals: [{ id: "ARBEITSAGENTUR", on: true }] });
+    expect(await portal("ARBEITSAGENTUR")).toMatchObject({ on: true, note_accepted: true });
+    await tool("update_settings", { portals: [{ id: "JSEARCH", on: false }, { id: "ADZUNA", fields: { appId: "" } }] });
+    expect(await settings()).toMatchObject({ portals: { JSEARCH: { on: false }, ADZUNA: { fields: {} } } });
 
-    // A server can turn it off (DOSSIER_JOBS_ARBEITSAGENTUR=off).
+    // A server can turn it off (DOSSIER_JOBS_ARBEITSAGENTUR=off), and a portal it doesn't have isn't there to switch.
     fakeEnv.DOSSIER_JOBS_ARBEITSAGENTUR = "off";
-    expect(await tool("update_settings", { job_source: "ARBEITSAGENTUR" })).toMatchObject({ isError: true, text: "The Bundesagentur für Arbeit isn't offered on this server." });
-    expect((await settings()).jobSource).toBe("OFF");
+    expect(await tool("update_settings", { portals: [{ id: "ARBEITSAGENTUR", on: true }] })).toMatchObject({ isError: true, text: expect.stringContaining("isn't offered on this server") });
+    expect(await tool("update_settings", { portals: [{ id: "LINKEDIN", on: true }] })).toMatchObject({ isError: true });
   });
 });
 
@@ -383,11 +408,11 @@ describe("the AI provider's server, where the key and everything the AI reads go
       { ai_provider: "LOCAL", ai_address: "http://evil.example:11434" },
       { ai_provider: "OPENAI", ai_address: "https://evil.example/v1" },
       // Nothing else changes either.
-      { ai_address: "https://evil.example", job_source: "JSEARCH", paper: "LETTER" },
+      { ai_address: "https://evil.example", portals: [{ id: "JSEARCH", on: true }], paper: "LETTER" },
     ]) {
       expect(await tool("update_settings", change), JSON.stringify(change)).toMatchObject({ isError: true, text: ANOTHER_SERVER });
     }
-    expect(await settings()).toMatchObject({ provider: "ANTHROPIC", baseUrl: null, model: "claude-opus-5-5", jobSource: null, paper: "A4" });
+    expect(await settings()).toMatchObject({ provider: "ANTHROPIC", baseUrl: null, model: "claude-opus-5-5", portals: null, paper: "A4" });
     expect((await settings()).apiKeyEnc).not.toBeNull();
 
     expect((await tool("update_settings", { ai_address: "https://api.anthropic.com/" })).json).toMatchObject({ ai: { ai_address: "https://api.anthropic.com/", api_key: "set", ready: true } });
@@ -439,14 +464,25 @@ describe("the AI provider's models and the Test connection buttons", () => {
     expect((await tool("test_connection", { connection: "ai_provider" })).json).toMatchObject({ connected: false, problem: "Choose a model in Settings → AI provider first." });
   });
 
-  it("tests the job source with its key", async () => {
-    expect((await tool("test_connection", { connection: "job_source" })).json).toMatchObject({ job_source: "OFF", connected: false, problem: "Choose a source first." });
-    await saveSettings({ jobSource: "JSEARCH", jsearchKeyEnc: encryptSecret(JOB_SOURCE_KEY, "ak_secret") });
+  it("tests a portal with its key", async () => {
+    expect((await tool("test_connection", { connection: "portal", portal: "JSEARCH" })).json).toMatchObject({
+      portal: "JSearch",
+      connected: false,
+      problem: "Add your JSearch key in Settings → Job search first.",
+      link: "https://dossier.example/settings?section=jobs",
+    });
+    await saveSettings({ portalKeysEnc: { JSEARCH: { key: encryptSecret(JOB_SOURCE_KEY, "ak_secret") } } });
+    clearJobSearchCache();
     const requests = stubFetch(() => json(jsearchV2LastPage));
-    expect((await tool("test_connection", { connection: "job_source" })).json).toMatchObject({ job_source: "JSEARCH", connected: true, seconds: expect.any(Number) });
+    expect((await tool("test_connection", { connection: "portal", portal: "JSEARCH" })).json).toMatchObject({ portal: "JSearch", connected: true, seconds: expect.any(Number) });
     expect(requests[0].headers.get("x-api-key")).toBe("ak_secret");
     stubFetch(() => json({}, { status: 401 }));
-    expect((await tool("test_connection", { connection: "job_source" })).json).toMatchObject({ connected: false, problem: "JSearch didn't accept your key. Check it in Settings → Job search." });
+    expect((await tool("test_connection", { connection: "portal", portal: "JSEARCH" })).json).toMatchObject({
+      connected: false,
+      problem: "JSearch didn't accept your key. Check it in Settings → Job search.",
+    });
+    expect(await tool("test_connection", { connection: "portal" })).toMatchObject({ isError: true });
+    expect(await tool("test_connection", { connection: "portal", portal: "LINKEDIN" })).toMatchObject({ isError: true });
     expect(await tool("test_connection", { connection: "gmail" })).toMatchObject({ isError: true });
   });
 });
@@ -461,7 +497,7 @@ describe("your data", () => {
   });
 
   it("exports everything as the Export button does, as an embedded file without API keys", async () => {
-    await saveSettings({ provider: "ANTHROPIC", apiKeyEnc: encryptApiKey("sk-ant-secret"), jsearchKeyEnc: encryptSecret(JOB_SOURCE_KEY, "ak_secret"), paper: "LETTER" });
+    await saveSettings({ provider: "ANTHROPIC", apiKeyEnc: encryptApiKey("sk-ant-secret"), portalKeysEnc: { JSEARCH: { key: encryptSecret(JOB_SOURCE_KEY, "ak_secret") } }, paper: "LETTER" });
     const exported = await tool("export_data");
     expect(exported.isError).toBe(false);
     const [about, file] = exported.content;
@@ -481,7 +517,7 @@ describe("your data", () => {
     expect(data).not.toHaveProperty("apiKey");
     expect(data).not.toHaveProperty("jobSourceKeys");
     const stored = await settings();
-    for (const secret of ["sk-ant-secret", "ak_secret", stored.apiKeyEnc!, stored.jsearchKeyEnc!, "connectorEnabledAt"]) expect(text).not.toContain(secret);
+    for (const secret of ["sk-ant-secret", "ak_secret", stored.apiKeyEnc!, stored.portalKeysEnc.JSEARCH.key, "connectorEnabledAt"]) expect(text).not.toContain(secret);
   });
 
   it("answers a big export with its size only, for Export in Settings to download", async () => {
@@ -496,7 +532,7 @@ describe("your data", () => {
       bytes: expect.any(Number),
       applications: await prisma().application.count(),
       link: "https://dossier.example/settings?section=data",
-      next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Your data.",
+      next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Data and backups.",
     });
     expect(exported.json.bytes).toBeGreaterThan(600_000);
     expect(exported.text).not.toContain("/9j/");

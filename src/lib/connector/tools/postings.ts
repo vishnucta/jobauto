@@ -5,60 +5,77 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { isAiUsable } from "@/lib/ai/config";
-import { scoringProblem } from "@/lib/scoring";
-import { loadScoringConfig } from "@/lib/scoring/config";
+import { moveBack } from "@/lib/archive";
 import { countryName } from "@/lib/job-search/countries";
 import {
+  DEFAULT_FILTERS,
   DEFAULT_RADIUS_KM,
   describeSearch,
+  libraryHref,
   linkKey,
   postingKey,
   safeLink,
-  searchRunHref,
-  viewHref,
+  sourceIdSchema,
   type FoundPosting,
-  type PostingOrigin,
+  type LibraryFilters,
   type ShownPosting,
 } from "@/lib/job-search/search";
-import { describeSourceProblem, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
+import { CLIENT_SOURCE, searchSourcesName, sourceInfo } from "@/lib/job-search/sources";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
-import { startScoring } from "@/lib/jobs/score-posting";
+import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
+import { scoreJobKey, scorePostingJob } from "@/lib/jobs/score-posting";
+import { listLibrary } from "@/lib/library";
+import { COVERS } from "@/lib/posting-coverage";
 import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
-import { dismissPosting, foundFromPosting, listPostings, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
+import { dismissPosting, foundFromPosting, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
+import { profileNamed, scoreLevelsProblem } from "@/lib/profiles";
+import { scoringProblem } from "@/lib/scoring";
+import { loadScoringConfig } from "@/lib/scoring/config";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
-import { failure, postingLine, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, hasMore, portalProblems, postingLine, profileInput, started, text, type ToolContext } from "../kit";
 
-// Find jobs: saved and dismissed postings, past searches and Dossier's own scoring (jobauto fork).
-// What the Saved, Dismissed and Past searches views show, and what their
-// buttons do. Start application has no tool of its own: draft_application
-// and save_application start one from the same postings, by search_id and
-// number or posting_id, and keep the posting with it as the button does.
+// Positions (E22-5): the library of postings every search keeps, its tabs
+// and filters, the searches that found them, and Dossier's own scoring
+// (jobauto fork, rebuilt on 1.15's Positions). What the Positions screen
+// shows, and what its buttons do. Start application has no tool of its own:
+// draft_application and save_application start one from the same postings,
+// by search_id and number or posting_id, and keep the posting with it as the
+// button does. The fork's Saved, Dismissed and Past searches tabs and its
+// From filter are Positions' Show and Portal filters now.
 
-const LISTS = ["saved", "dismissed", "searches"] as const;
-/** The From filter's sources, as the URL spells them (?from=client). */
-const FROM = ["jsearch", "serpapi", "adzuna", "jooble", "freehire", "arbeitsagentur", "client", "careers"] as const satisfies readonly Lowercase<PostingOrigin>[];
-const CHANGES = ["save", "unsave", "dismiss", "restore"] as const;
+/** What list_postings lists: Positions' Show tabs, the Archive, and the searches that found them ("Found by"). */
+const LISTS = ["open", "new", "saved", "applied", "dismissed", "archive", "searches"] as const;
+type List = (typeof LISTS)[number];
+/** Listed without a view: as Find jobs' three lists were. */
+const DEFAULT_LISTS: readonly List[] = ["saved", "dismissed", "searches"];
+const CHANGES = ["save", "unsave", "dismiss", "restore", "move_back"] as const;
 
 /** What each change does, as the button on a posting does it. */
-const CHANGE: Record<(typeof CHANGES)[number], (posting: FoundPosting) => Promise<unknown>> = {
+const CHANGE: Record<Exclude<(typeof CHANGES)[number], "move_back">, (posting: FoundPosting) => Promise<unknown>> = {
   save: savePosting,
   unsave: (posting) => unmarkPosting(posting, "saved"),
   dismiss: dismissPosting,
-  // Bring back, as on Dismissed: in searches again, not in Saved.
+  // Bring back, as on Dismissed: open again, not in Saved.
   restore: (posting) => unmarkPosting(posting, "dismissed"),
 };
 
 const SEARCH_GONE = "That search is no longer kept. Search again.";
 
-/** A saved or dismissed posting as Claude sees it in a list: by its posting_id, with the application made from it. */
+/** A posting from a list as Claude sees it: by its posting_id, with the application made from it. */
 function keptLine(posting: ShownPosting) {
   const { number, applied, ...line } = postingLine(posting, 0);
   void number;
   void applied;
-  return { posting_id: posting.state.postingId ?? undefined, ...line, application_id: posting.state.applicationId ?? undefined };
+  return {
+    posting_id: posting.state.postingId ?? undefined,
+    ...line,
+    dismissed: posting.state.dismissed || undefined,
+    archived: posting.state.archived || undefined,
+    application_id: posting.state.applicationId ?? undefined,
+  };
 }
 
 /** The posting a change names: from the search by its number, or kept in Dossier by its posting_id; null when it isn't there. */
@@ -72,6 +89,18 @@ async function postingFor(ref: { number?: number; posting_id?: string }, searche
   const { state, ...posting } = shown;
   void state;
   return posting;
+}
+
+/** Every posting the filters show from `start`, at most `take` of them, and how many there are in all. */
+async function libraryPage(filters: LibraryFilters, start: number, take: number): Promise<{ postings: ShownPosting[]; total: number }> {
+  const postings: ShownPosting[] = [];
+  let page = await listLibrary(filters, { offset: start });
+  postings.push(...page.postings);
+  while (postings.length < take && page.more) {
+    page = await listLibrary(filters, { offset: start + postings.length });
+    postings.push(...page.postings);
+  }
+  return { postings: postings.slice(0, take), total: page.total };
 }
 
 /** One job an AI client found, as add_found_jobs takes it. */
@@ -89,12 +118,12 @@ const foundJob = z.object({
 
 /**
  * A job an AI client found, in the shape every posting has. Its id comes from
- * its link, so the same job added twice is the same posting in Saved.
+ * its link, so the same job added twice is the same posting in Positions.
  */
 function postingFromClient(job: z.output<typeof foundJob>): FoundPosting {
   const url = safeLink(job.url);
   return {
-    source: "CLIENT",
+    source: CLIENT_SOURCE,
     externalId: createHash("sha256").update(linkKey(url) || url).digest("hex").slice(0, 32),
     title: job.title,
     company: job.company,
@@ -125,7 +154,7 @@ function skippedWhere(known: KnownJob) {
             ? `already added by ${known.addedBy || "an AI client"}`
             : known.source === "CAREERS"
               ? `already found on ${known.addedBy ? `${known.addedBy}'s careers page` : "a careers page"}`
-              : `already found by ${SOURCE_INFO[known.source].name}`,
+              : `already found by ${sourceInfo(known.source).name}`,
         search_id: known.searchId,
         number: known.number,
       };
@@ -141,60 +170,81 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
   server.registerTool(
     "list_postings",
     {
-      title: "List saved postings and past searches",
+      title: "List postings in Positions and the searches that found them",
       description:
-        "What Find jobs keeps: saved postings, dismissed ones and past searches, with the posting_id and search_id values the other tools take. " +
-        "With a search_id: the postings that search found, numbered, without asking the job source again.",
+        "What Positions keeps, as its tabs show it: open postings (not dismissed), new ones, saved, applied for, dismissed, the Archive of postings left untouched, and the searches that found them, " +
+        "with the posting_id and search_id values the other tools take. Without a view: saved, dismissed and searches. " +
+        "With a search_id: the postings that search found, numbered, without asking the portals again.",
       inputSchema: z.object({
-        view: z.enum(LISTS).optional().describe("Only this list: saved, dismissed or searches. Without it, all three."),
-        source: z.enum(FROM).optional().describe("Only from this source, as the From filter on Find jobs: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur, client for what AI clients added, or careers for new jobs on the careers pages followed"),
-        search_id: z.string().min(1).max(100).optional().describe("A past search, to list the postings it found instead"),
+        view: z.enum(LISTS).optional().describe("Only this list: open, new, saved, applied, dismissed, archive or searches"),
+        portal: sourceIdSchema
+          .optional()
+          .describe(
+            "Only postings found on this portal, as Positions' Portal filter, by its id: e.g. JSEARCH, SERPAPI, ADZUNA, JOOBLE, FREEHIRE, ARBEITSAGENTUR, CLIENT for what AI clients added, or CAREERS for new jobs on the careers pages followed",
+          ),
+        covers: z.enum(COVERS).optional().describe("Only postings whose requirements the profile covers this much: any, half, two-thirds or all"),
+        sort: z.enum(["fit", "new"]).optional().describe("fit: Best fit, the most requirements covered first (the default); new: the newest found first"),
+        profile: profileInput.describe("The profile whose coverage covers and Best fit go by; each posting's best without one"),
+        search_id: z.string().min(1).max(100).optional().describe("A search, to list the postings it found instead"),
         from: z.number().int().min(1).optional().describe("Where each list (or the search) starts. Defaults to 1."),
         limit: z.number().int().min(1).max(100).optional().describe("At most this many per list. Defaults to 20."),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ view, search_id, from, limit, source }) => {
+    async ({ view, search_id, from, limit, portal: asked, covers, sort, profile }) => {
       const take = limit ?? 20;
       const start = (from ?? 1) - 1;
-      const origin = source ? (source.toUpperCase() as PostingOrigin) : null;
-      const fromSource = (candidate: PostingOrigin) => origin === null || candidate === origin;
+      const portal = asked?.toUpperCase() ?? null;
       const timeZone = await lastKnownTimeZone();
       if (search_id) {
         const search = await loadSearch(search_id, { timeZone });
         if (!search) return failure(SEARCH_GONE);
         return text({
           search_id: search.id,
-          searched: describeSearch(search.query, countryName(search.query.country)),
-          source: searchSourcesName(search.sources, search.addedBy),
-          problems: search.problems.length > 0 ? search.problems.map(describeSourceProblem) : undefined,
+          searched: describeSearch(search.query, countryName(search.query.country), search.source),
+          source: searchSourcesName(
+            search.portals.map((entry) => entry.id),
+            search.addedBy,
+          ),
+          problems: portalProblems(search.portals),
           ran: search.ranAt,
           found: search.postings.length,
-          more_available: search.more,
+          more_available: hasMore(search.portals),
           postings: search.postings
             .slice(start, start + take)
             .map((posting, index) => ({ ...postingLine(posting, start + index + 1), dismissed: posting.state.dismissed || undefined })),
-          link: linkTo(searchRunHref(search.id)),
+          link: linkTo(libraryHref({ found: search.id })),
         });
       }
+      const fits = profile ? await profileNamed(profile) : null;
+      if (fits && "error" in fits) return failure(fits.error);
       const answer: Record<string, unknown> = {};
-      for (const list of view ? [view] : LISTS) {
+      for (const list of view ? [view] : DEFAULT_LISTS) {
         if (list === "searches") {
           const searches = (await listSearches({ timeZone })).flatMap(({ day, searches }) =>
             searches
-              .filter((search) => search.sources.some(fromSource))
+              .filter((search) => portal === null || search.source === portal)
               .map((search) => ({
                 search_id: search.id,
-                searched: describeSearch(search.query, countryName(search.query.country)),
+                searched: describeSearch(search.query, countryName(search.query.country), search.source),
                 ran: `${day} at ${search.time}`,
                 found: search.found,
-                source: searchSourcesName(search.sources, search.addedBy),
+                source: searchSourcesName([search.source], search.addedBy),
               })),
           );
-          answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(viewHref("history", origin)) };
+          answer.searches = { total: searches.length, searches: searches.slice(start, start + take), link: linkTo(libraryHref({ portal })) };
         } else {
-          const postings = (await listPostings(list)).filter((posting) => fromSource(posting.source));
-          answer[list] = { total: postings.length, postings: postings.slice(start, start + take).map(keptLine), link: linkTo(viewHref(list, origin)) };
+          const filters: LibraryFilters = {
+            ...DEFAULT_FILTERS,
+            tab: list === "archive" ? "archive" : "positions",
+            show: list === "archive" ? "open" : list,
+            portal,
+            covers: covers ?? "any",
+            fits: fits?.id ?? null,
+            sort: sort ?? "fit",
+          };
+          const { postings, total } = await libraryPage(filters, start, take);
+          answer[list] = { total, postings: postings.map(keptLine), link: linkTo(libraryHref(filters)) };
         }
       }
       return text(answer);
@@ -206,9 +256,9 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
     {
       title: "Add jobs you found",
       description:
-        "Adds jobs you found yourself (by searching the web, not with search_jobs) to Find jobs, as a search of their own marked as found by an AI client and named by you, " +
-        "kept apart from what the job source found. Give what you searched for and each job's title, company, place and link; add its text when you have it. " +
-        "Only add real postings you saw, with their own links: never make one up. Nothing is added twice: jobs Dossier already has (in any kept search, by link or as the same opening on another site; saved; dismissed; applied to; " +
+        "Adds jobs you found yourself (by searching the web, not with search_jobs) to Positions, as a search of their own marked as found by an AI client and named by you, " +
+        "apart from what the portals found. Give what you searched for and each job's title, company, place and link; add its text when you have it. " +
+        "Only add real postings you saw, with their own links: never make one up. Nothing is added twice: jobs Dossier already has (in Positions, by link or as the same opening on another site; saved; dismissed; applied to; " +
         "or found by the job agent) are left out and listed as skipped with where each one is, so tell the user. Answers with a search_id and numbers, which list_postings, get_posting, update_postings, " +
         "save_job_scores, score_with_dossier and save_application take like any other search's.",
       inputSchema: z.object({
@@ -242,21 +292,21 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
           added: 0,
           skipped: leftOut,
           message: "Dossier already has every one of those jobs, so nothing was added: tell the user where each one is. Pass add_known only when the user says one is a different opening.",
-          link: linkTo(viewHref("history")),
+          link: linkTo(libraryHref({ portal: CLIENT_SOURCE })),
         });
       }
       const search = await loadSearch(id, { timeZone: await lastKnownTimeZone() });
       if (!search) return failure("Dossier couldn't keep those jobs. Try again in a moment.");
-      const kept = "Added to Find jobs as a search of its own, marked as found by an AI client.";
+      const kept = "Added to Positions as a search of its own, marked as found by an AI client.";
       return text({
         search_id: search.id,
-        searched: describeSearch(search.query, countryName(search.query.country)),
-        source: searchSourcesName(search.sources, search.addedBy),
+        searched: describeSearch(search.query, countryName(search.query.country), search.source),
+        source: searchSourcesName([CLIENT_SOURCE], search.addedBy),
         added: search.postings.length,
         postings: search.postings.map((posting, index) => ({ ...postingLine(posting, index + 1), dismissed: posting.state.dismissed || undefined })),
         skipped: leftOut.length > 0 ? leftOut : undefined,
         message: leftOut.length > 0 ? `${kept} ${leftOut.length === 1 ? "One job" : `${leftOut.length} jobs`} Dossier already had ${leftOut.length === 1 ? "was" : "were"} left out: see skipped for where each one is.` : kept,
-        link: linkTo(searchRunHref(search.id)),
+        link: linkTo(libraryHref({ found: search.id })),
       });
     },
   );
@@ -266,14 +316,14 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
     {
       title: "Save or dismiss postings",
       description:
-        "Saves, unsaves, dismisses or brings back postings as the buttons in Find jobs do, from a search by number or by posting_id, and returns where each one stands. " +
-        "Dismissed postings stay out of later searches. One unsaved or brought back is no longer kept unless an application uses it, and its posting_id stops working.",
+        "Saves, unsaves, dismisses or brings back postings as the buttons in Positions do, or moves them back from the Archive, from a search by number or by posting_id, and returns where each one stands. " +
+        "A dismissed posting stays out of later searches, and is trimmed to what Dossier needs to know it again: bringing it back gets its text from the portal when it's read again. Postings stay in Positions either way.",
       inputSchema: z.object({
         search_id: z.string().min(1).max(100).optional().describe("The search the numbered postings are from"),
         changes: z
           .array(
             z.object({
-              action: z.enum(CHANGES).describe("save, unsave, dismiss, or restore to bring a dismissed posting back"),
+              action: z.enum(CHANGES).describe("save, unsave, dismiss, restore to bring a dismissed posting back, or move_back to take one out of the Archive"),
               number: z.number().int().min(1).optional().describe("The posting's number in the search"),
               posting_id: z.string().min(1).max(100).optional().describe("Instead of a number: a posting from list_postings"),
             }),
@@ -281,37 +331,44 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
           .min(1)
           .max(50),
       }),
-      // Unsave and restore delete a posting nothing else keeps, whole text and all: no Undo from here.
+      // Dismiss trims a posting's text, which only the portal can give back: no Undo from here.
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ search_id, changes }) => {
       const search = search_id ? await loadSearch(search_id) : null;
       if (search_id && !search) return failure(SEARCH_GONE);
-      // All found first: a posting one change takes out of Dossier can still be saved again by a later one.
+      // All found first, as each change refers to the posting as it was.
       const postings = await Promise.all(changes.map((change) => postingFor(change, search?.postings ?? [])));
       const missing = changes.flatMap((change, index) => (postings[index] ? [] : [change.posting_id ?? change.number ?? "?"]));
       if (missing.length === changes.length) return failure("None of those postings could be found. Use numbers from the search, or posting_id values from list_postings.");
       for (const [index, change] of changes.entries()) {
         const posting = postings[index];
-        if (posting) await CHANGE[change.action](posting);
+        if (!posting) continue;
+        if (change.action !== "move_back") {
+          await CHANGE[change.action](posting);
+          continue;
+        }
+        // "Move back" (E22-7): out of the Archive, into Positions again.
+        const row = await prisma.posting.findUnique({ where: { source_externalId: { source: posting.source, externalId: posting.externalId } }, select: { id: true } });
+        if (row) await moveBack([row.id]);
       }
       const states = await postingStates(postings.filter((posting) => posting !== null));
       const updated = changes.flatMap((change, index) => {
         const posting = postings[index];
         const state = posting && states.get(postingKey(posting));
         if (!posting || !state) return [];
-        return [{ number: change.number, posting_id: state.postingId ?? undefined, title: posting.title, saved: state.saved, dismissed: state.dismissed }];
+        return [{ number: change.number, posting_id: state.postingId ?? undefined, title: posting.title, saved: state.saved, dismissed: state.dismissed, archived: state.archived }];
       });
-      const view = changes.every((change) => change.action === "dismiss") ? "dismissed" : "saved";
-      return text({ updated, not_found: missing.length > 0 ? missing : undefined, link: linkTo(search_id ? searchRunHref(search_id) : viewHref(view)) });
+      const show = changes.every((change) => change.action === "dismiss") ? "dismissed" : changes.every((change) => change.action === "save") ? "saved" : "open";
+      return text({ updated, not_found: missing.length > 0 ? missing : undefined, link: linkTo(search_id ? libraryHref({ found: search_id }) : libraryHref({ show })) });
     },
   );
 
   server.registerTool(
     "remove_search",
     {
-      title: "Remove a past search",
-      description: "Removes a past search and the postings it found from Find jobs, as Remove in Past searches does. Saved and dismissed postings from it stay.",
+      title: "Remove a search",
+      description: "Removes a search from Positions' Found by list, as Remove there does. What it found stays in Positions.",
       inputSchema: z.object({ search_id: z.string().min(1).max(100) }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
@@ -319,7 +376,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       const search = await prisma.postingSearch.findUnique({ where: { id: search_id }, select: { id: true } });
       if (!search) return failure("That search is no longer kept.");
       await removeSearch(search_id);
-      return text({ search_id, removed: true, message: "Search removed. Saved postings from it stay in Saved.", link: linkTo(viewHref("history")) });
+      return text({ search_id, removed: true, message: "Search removed. What it found stays in Positions.", link: linkTo(libraryHref({})) });
     },
   );
 
@@ -328,17 +385,19 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
     {
       title: "Have Dossier score a posting",
       description:
-        "Has Dossier's own AI model score how well one posting fits the profile, as the Score button in Find jobs does, with the scorer chosen in Settings → Scoring (Dossier's AI model, or Jev). " +
-        "Without one, score it yourself and save it with save_job_scores. Follow it with check_task.",
+        "Has Dossier score how well one posting fits a profile, or every profile, as Score in Positions does: how many of its requirements the profile covers, with the scoring model chosen in Settings → Scoring. " +
+        "A profile is scored only once the user has chosen the levels it's for. Without a scoring model, score it yourself and save it with save_job_scores. Follow it with check_task.",
       inputSchema: z.object({
         search_id: z.string().min(1).max(100).optional().describe("The search the posting is from"),
         number: z.number().int().min(1).optional().describe("The posting's number in that search"),
         posting_id: z.string().min(1).max(100).optional().describe("Instead: a posting from list_postings, or one Dossier handed over"),
+        profile: profileInput.describe("The profile to score it against, as get_profile lists them; the first when left out"),
+        all_profiles: z.boolean().optional().describe("Score it against every profile whose levels are chosen, and keep the best"),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ search_id, number, posting_id }) => {
-      // Settings → Scoring decides: the AI model, or Jev with its own key (#274).
+    async ({ search_id, number, posting_id, profile, all_profiles }) => {
+      // Settings → Scoring decides: the AI model, Jev, OpenAI Decisions or OpenRouter, each with its own key (#274).
       const scoring = await loadScoringConfig();
       if (scoring.scorer === "AI" && !(await isAiUsable())) {
         return failure("Dossier has no AI model of its own set up. Score it yourself: get_profile and get_posting, then save_job_scores.");
@@ -346,12 +405,21 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       const problem = await scoringProblem(scoring);
       if (problem) return failure(problem);
       if (!posting_id && !(search_id && number)) return failure("Give search_id and number, or posting_id.");
+      const chosen = all_profiles ? null : await chooseProfile(profile);
+      if (chosen && "failure" in chosen) return chosen.failure;
+      const profiles = chosen ? chosen.id : "all";
+      // As in Positions, scoring waits until a profile's levels are chosen (E24-3).
+      const waiting = await scoreLevelsProblem(profiles);
+      if (waiting) return failure(`${waiting.message} Ask the user to choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
       const search = search_id && !posting_id ? await loadSearch(search_id) : null;
       if (search_id && !posting_id && !search) return failure(SEARCH_GONE);
       const posting = await postingFor({ number, posting_id }, search?.postings ?? []);
       if (!posting) return failure(posting_id ? "That posting is no longer in Dossier." : "There's no such posting in that search. Use a number from search_jobs or list_postings.");
-      const taskId = await startScoring(posting);
-      return started(taskId, { title: posting.title, company: posting.company, link: search ? linkTo(searchRunHref(search.id)) : undefined });
+      // A second ask follows the scoring under way, as Score does.
+      const key = scoreJobKey(posting);
+      const [unfinished] = await findUnfinishedJobs(key);
+      const taskId = unfinished?.id ?? (await startJob(scorePostingJob, { posting, profiles }, { key }));
+      return started(taskId, { title: posting.title, company: posting.company, profile: chosen?.name ?? "all", link: search ? linkTo(libraryHref({ found: search.id })) : undefined });
     },
   );
 
@@ -360,25 +428,35 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
     {
       title: "Suggested search words",
       description:
-        "The search words Find jobs and the profile editor suggest, worked out from the profile: job titles from the roles, specialties from the headline, and skills, with German words for a profile in Germany, Austria or Switzerland. " +
-        "Use one as search_jobs keywords: a source treats every word as a requirement, so a whole headline finds nothing where \"Financial Analyst\" finds hundreds. " +
+        "The search words Positions and the profile editor suggest, worked out from a profile: job titles from the roles, specialties from the headline, and skills, with German words for a profile in Germany, Austria or Switzerland. " +
+        "Use one as search_jobs keywords: a portal treats every word as a requirement, so a whole headline finds nothing where \"Financial Analyst\" finds hundreds. " +
         "\"Senior\" is only a guess from about eight years of experience: leave it out when the user doesn't want it.",
       inputSchema: z.object({
+        profile: profileInput,
         senior: z.boolean().optional().describe("Offer \"Senior\" with the latest title when the experience adds up to enough (default true)"),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ senior }) => {
-      const suggested = searchWords(await loadProfile(), new Date(), { senior: senior ?? true });
+    async ({ profile, senior }) => {
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
+      const suggested = searchWords(await loadProfile(chosen.id), new Date(), { senior: senior ?? true });
+      const link = linkTo(`/profile?profile=${chosen.id}`);
       if (suggested.groups.length === 0) {
-        return text({ groups: [], message: "The profile has no roles, headline or skills to suggest words from yet. Fill them in on Profile, or search with the words the user gives.", link: linkTo("/profile") });
+        return text({
+          profile: chosen.name,
+          groups: [],
+          message: "The profile has no roles, headline or skills to suggest words from yet. Fill them in on Profile, or search with the words the user gives.",
+          link,
+        });
       }
       return text({
+        profile: chosen.name,
         german: suggested.german,
         senior_years: suggested.seniorYears ?? undefined,
         best: searchChips(suggested),
         groups: suggested.groups.map((group) => ({ title: group.title, words: group.words.map((word) => ({ text: word.text, language: word.language, why: word.why })) })),
-        link: linkTo("/profile"),
+        link,
       });
     },
   );

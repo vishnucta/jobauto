@@ -6,6 +6,7 @@ import { jobSearchError } from "./errors";
 import {
   defaultSearch,
   describeSearch,
+  experienceRangeAskedFor,
   EMPTY_QUERY,
   foundPostingSchema,
   latestRole,
@@ -18,13 +19,10 @@ import {
   searchHref,
   searchQuerySchema,
   jobKeys,
-  sourceFilterFromParams,
-  uniquePostings,
   viewFromParams,
   viewHref,
-  type FoundPosting,
 } from "./search";
-import { describeSourceProblem, searchSourcesName } from "./sources";
+import { searchSourcesName } from "./sources";
 
 describe("search in the URL", () => {
   it("round-trips a search", () => {
@@ -44,20 +42,25 @@ describe("search in the URL", () => {
     expect(describeSearch({ ...EMPTY_QUERY, keywords: "nurse", experience: "intern" }, "Germany")).toBe("nurse · Germany · Internship");
   });
 
+  it("keeps a range of levels in the URL and the line (E24-6)", () => {
+    const range = { ...EMPTY_QUERY, keywords: "nurse", experience: "senior" as const, experienceTo: "lead" as const };
+    expect(searchHref(range)).toBe("/jobs?q=nurse&level=senior&levelTo=lead");
+    expect(queryFromParams({ q: "nurse", level: "senior", levelTo: "lead" })).toMatchObject({ experience: "senior", experienceTo: "lead" });
+    // "Up to" the same level, or without a level, is no range.
+    expect(queryFromParams({ q: "nurse", level: "senior", levelTo: "senior" })).not.toHaveProperty("experienceTo");
+    expect(queryFromParams({ q: "nurse", levelTo: "lead" })).not.toHaveProperty("experienceTo");
+    expect(describeSearch(range, "Germany")).toMatch(/^nurse · Germany · Senior to Lead/);
+    // Either way round.
+    expect(experienceRangeAskedFor({ experience: "lead", experienceTo: "mid" })).toEqual(["mid", "senior", "lead"]);
+    expect(experienceRangeAskedFor({ experience: "any", experienceTo: "lead" })).toBeNull();
+  });
+
   it("reads the view from the URL (E14-7)", () => {
     expect(viewFromParams({ view: "saved" })).toBe("saved");
     expect(viewFromParams({ view: "dismissed" })).toBe("dismissed");
     expect(viewFromParams({ view: "other" })).toBe("search");
     expect(viewFromParams({})).toBe("search");
     expect(viewHref("saved")).toBe("/jobs?view=saved");
-    expect(viewHref("saved", "CLIENT")).toBe("/jobs?view=saved&from=client");
-    expect(sourceFilterFromParams({ from: "client" })).toBe("CLIENT");
-    expect(sourceFilterFromParams({ from: "JSearch" })).toBe("JSEARCH");
-    expect(sourceFilterFromParams({ from: "serpapi" })).toBe("SERPAPI");
-    expect(sourceFilterFromParams({ from: "jooble" })).toBe("JOOBLE");
-    expect(sourceFilterFromParams({ from: "freehire" })).toBe("FREEHIRE");
-    expect(sourceFilterFromParams({ from: "other" })).toBeNull();
-    expect(sourceFilterFromParams({})).toBeNull();
   });
 
   it("has no search without keywords", () => {
@@ -97,12 +100,10 @@ describe("a search in a line", () => {
   it("names the radius only for a source that has one", () => {
     const query = { ...EMPTY_QUERY, keywords: "product designer", place: "Hamburg", country: "de", remoteOnly: true, postedWithin: "week" as const };
     expect(describeSearch(query, "Germany")).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
-    expect(describeSearch(query, "Germany", ["ADZUNA"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
-    expect(describeSearch(query, "Germany", ["FREEHIRE"])).toBe("product designer · Hamburg · Remote only · Past week");
-    expect(describeSearch({ ...query, place: "" }, "Germany", ["FREEHIRE"])).toBe("product designer · Germany · Remote only · Past week");
-    // A search of several sources keeps the km when one of them has a radius; an AI client's search reads as before.
-    expect(describeSearch(query, "Germany", ["JSEARCH", "FREEHIRE"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
-    expect(describeSearch(query, "Germany", ["CLIENT"])).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
+    expect(describeSearch(query, "Germany", "ADZUNA")).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
+    expect(describeSearch(query, "Germany", "FREEHIRE")).toBe("product designer · Hamburg · Remote only · Past week");
+    expect(describeSearch({ ...query, place: "" }, "Germany", "FREEHIRE")).toBe("product designer · Germany · Remote only · Past week");
+    expect(describeSearch(query, "Germany", "SERPAPI")).toBe("product designer · Hamburg, 25 km · Remote only · Past week");
   });
 });
 
@@ -134,7 +135,9 @@ describe("postings", () => {
   it("checks postings sent back from the screen", () => {
     expect(foundPostingSchema.parse(posting)).toEqual(posting);
     expect(foundPostingSchema.parse({ ...posting, url: "" }).url).toBe("");
-    expect(foundPostingSchema.safeParse({ ...posting, source: "MONSTER" }).success).toBe(false);
+    // A stored id from a source that's no longer listed still reads back (#269); one that isn't an id doesn't.
+    expect(foundPostingSchema.safeParse({ ...posting, source: "MONSTER" }).success).toBe(true);
+    expect(foundPostingSchema.safeParse({ ...posting, source: "monster board" }).success).toBe(false);
     expect(foundPostingSchema.safeParse({ ...posting, url: "javascript:alert(1)" }).success).toBe(false);
   });
 
@@ -251,62 +254,13 @@ describe("cache", () => {
   });
 });
 
-describe("uniquePostings: one posting per job across sources", () => {
-  const found = (source: "JSEARCH" | "SERPAPI" | "ADZUNA", externalId: string, extra: Partial<FoundPosting> = {}): FoundPosting => ({
-    source,
-    externalId,
-    title: "Financial Analyst (m/w/d)",
-    company: "Ledgerly",
-    place: "Hamburg, Germany",
-    remote: null,
-    salary: "",
-    postedAt: null,
-    url: "",
-    via: "",
-    description: "The whole posting.",
-    complete: true,
-    ...extra,
-  });
-
-  it("keeps the same opening once, preferring the one with its whole text, and notes the other sources on it", () => {
-    const merged = uniquePostings([
-      found("ADZUNA", "a1", { description: "The start…", complete: false, url: "https://www.adzuna.de/land/ad/1" }),
-      // The same job by company, title (gender marks aside) and city…
-      found("JSEARCH", "j1", { title: "Financial Analyst (w/m/d)", url: "https://careers.ledgerly.example/jobs/42" }),
-      // …and by its link, tracking aside.
-      found("SERPAPI", "s1", { url: "https://careers.ledgerly.example/jobs/42?utm_source=google_jobs_apply" }),
-      found("SERPAPI", "s2", { title: "Controller", company: "Other GmbH", url: "https://other.example/2" }),
-    ]);
-    expect(merged.map((posting) => [posting.source, posting.externalId, posting.alsoOn])).toEqual([
-      ["JSEARCH", "j1", ["ADZUNA", "SERPAPI"]],
-      ["SERPAPI", "s2", undefined],
-    ]);
-    expect(merged[0].complete).toBe(true);
-  });
-
-  it("leaves out jobs a kept search already holds, by any key", () => {
-    expect(uniquePostings([found("JSEARCH", "j1")], ["JSEARCH:j1"])).toEqual([]);
-    expect(uniquePostings([found("SERPAPI", "s9", { url: "https://x.example/9" })], ["job:ledgerly|financial analyst|hamburg"])).toEqual([]);
-    expect(uniquePostings([found("SERPAPI", "s9", { url: "https://x.example/9" })], ["link:x.example/9"])).toEqual([]);
-    expect(uniquePostings([found("SERPAPI", "s9", { title: "Other", url: "https://x.example/10" })], ["link:x.example/9"])).toHaveLength(1);
-  });
-});
-
 describe("naming a search's sources", () => {
-  it("joins job sources, and names the AI client that added a search", () => {
+  it("joins portals, and names the AI client or the careers pages that added a search", () => {
     expect(searchSourcesName(["JSEARCH"])).toBe("JSearch");
     expect(searchSourcesName(["JSEARCH", "SERPAPI"])).toBe("JSearch and SerpApi");
     expect(searchSourcesName(["JSEARCH", "SERPAPI", "ADZUNA"])).toBe("JSearch, SerpApi and Adzuna");
     expect(searchSourcesName(["CLIENT"], "Gemini CLI")).toBe("AI client · Gemini CLI");
     expect(searchSourcesName(["CLIENT"])).toBe("AI client");
-  });
-
-  it("says who stood in for a source that didn't answer", () => {
-    expect(describeSourceProblem({ source: "JSEARCH", problem: "quota", message: "You've used up your JSearch searches for this month.", fallback: "SERPAPI" })).toBe(
-      "You've used up your JSearch searches for this month. Searched SerpApi instead.",
-    );
-    expect(describeSourceProblem({ source: "ADZUNA", problem: "no-key", message: "Add your Adzuna app ID and key in Settings → Job search first." })).toBe(
-      "Add your Adzuna app ID and key in Settings → Job search first.",
-    );
+    expect(searchSourcesName(["CAREERS"], "Acme")).toBe("Careers pages · Acme");
   });
 });

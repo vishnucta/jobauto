@@ -12,7 +12,9 @@ import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
+import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import type { PaperSize } from "@/generated/prisma/enums";
 import type { ProfileData } from "@/lib/profile";
 import type { ResumeCheck } from "@/lib/resume-check";
@@ -21,12 +23,17 @@ import type { SectionLayout } from "@/lib/resume-sections";
 import { parseThemeFile, themeFile, themeFileName } from "@/lib/theme-file";
 import { FIT_LEVELS, hasSidebar, PAPER_SIZES, type ThemeData } from "@/lib/themes";
 
-import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveResumeSections, saveTheme, setBaseTheme, setFitBaseResume } from "./actions";
+import { ProfileIdProvider } from "../profile/profile-id";
+import { ProfileSwitcher, type ProfileChoice } from "../profile/profile-switcher";
+import { checkBaseResumeAts, deleteTheme, duplicateTheme, importTheme, saveResumeSections, saveTheme, setBaseResumeLanguage, setBaseTheme, setFitBaseResume } from "./actions";
 import { SectionsPanel } from "./sections-panel";
 import { draftFrom, ThemeBuilder, type ThemeDraft } from "./theme-builder";
 import { ThemePicker } from "./theme-picker";
 
 export type ResumeWorkspaceProps = {
+  /** The profile whose Base resume this is (E24-1), and every profile, for the switcher (E24-2). */
+  profileId: string;
+  profiles: ProfileChoice[];
   profile: ProfileData;
   themes: ThemeData[];
   /** How many applications' documents use each theme, by id (E5-7). */
@@ -34,7 +41,7 @@ export type ResumeWorkspaceProps = {
   baseThemeId: string;
   paper: PaperSize;
   includeReferences: boolean;
-  /** Settings → "Base resume language", for its headings and dates; null for English. */
+  /** The profile's "Base resume language", for its headings and dates; null for English. */
   language: string | null;
   /** The sections' order and which are off (#297). */
   sections: SectionLayout;
@@ -53,19 +60,22 @@ export type Panel = "themes" | "customize" | "sections";
  * one, the preview shows the draft.
  */
 export function ResumeWorkspace({
+  profileId,
+  profiles,
   profile,
   themes: initialThemes,
   usage,
   baseThemeId,
   paper,
   includeReferences,
-  language,
+  language: initialLanguage,
   sections: initialSections,
   fitToPage: initialFit,
   initialPanel = "themes",
 }: ResumeWorkspaceProps) {
   const [themes, setThemes] = useState(initialThemes);
   const [fitToPage, setFitToPage] = useState(initialFit);
+  const [language, setLanguage] = useState(initialLanguage);
   // How far the resume is squeezed to fit one page (public issue 69): the
   // preview measures itself, and goes a step tighter while it runs over.
   const [fit, setFit] = useState(0);
@@ -100,9 +110,15 @@ export function ResumeWorkspace({
     setPages(counted);
     if (fitToPage && counted > 1 && fit < FIT_LEVELS) setFit(fit + 1);
   };
+  const changeLanguage = async (next: string | null) => {
+    const before = language;
+    setLanguage(next);
+    if (!toastResult(await setBaseResumeLanguage({ profileId, language: next })).ok) setLanguage(before);
+  };
+
   const toggleFit = async (next: boolean) => {
     setFitToPage(next);
-    if (!toastResult(await setFitBaseResume({ fit: next })).ok) setFitToPage(!next);
+    if (!toastResult(await setFitBaseResume({ profileId, fit: next })).ok) setFitToPage(!next);
   };
   const empty =
     !profile.basics.name.trim() &&
@@ -137,7 +153,7 @@ export function ResumeWorkspace({
     if (id === baseId) return;
     setBaseId(id);
     pickedId.current = id;
-    const result = toastResult(await setBaseTheme({ id }));
+    const result = toastResult(await setBaseTheme({ profileId, id }));
     if (result.ok) savedId.current = id;
     else if (pickedId.current === id) setBaseId(savedId.current);
   };
@@ -145,7 +161,7 @@ export function ResumeWorkspace({
   const changeSections = async (next: SectionLayout) => {
     setSections(next);
     latestSections.current = next;
-    const result = toastResult(await saveResumeSections(next));
+    const result = toastResult(await saveResumeSections({ ...next, profileId }));
     if (result.ok) savedSections.current = next;
     else if (latestSections.current === next) setSections(savedSections.current);
   };
@@ -159,7 +175,7 @@ export function ResumeWorkspace({
 
   // E5-7: what can be done with the theme in use.
   const duplicate = async () => {
-    const result = toastResult(await duplicateTheme({ id: base.id }));
+    const result = toastResult(await duplicateTheme({ profileId, id: base.id }));
     if (result.ok) addTheme(result.data);
   };
 
@@ -177,12 +193,12 @@ export function ResumeWorkspace({
     // Checked here for a quick answer, and again on the server.
     const read = parseThemeFile(json);
     if (!read.ok) return toast(read.error);
-    const result = toastResult(await importTheme({ file: json }));
+    const result = toastResult(await importTheme({ profileId, file: json }));
     if (result.ok) addTheme(result.data);
   };
 
   const remove = async (theme: ThemeData) => {
-    const result = toastResult(await deleteTheme({ id: theme.id }));
+    const result = toastResult(await deleteTheme({ profileId, id: theme.id }));
     if (!result.ok) return;
     setThemes((current) => current.filter((entry) => entry.id !== theme.id));
     setBaseId(result.data.baseThemeId);
@@ -194,7 +210,7 @@ export function ResumeWorkspace({
   const saveDraft = async () => {
     if (!draft) return;
     setSaving(true);
-    const result = toastResult(await saveTheme(draft));
+    const result = toastResult(await saveTheme({ ...draft, profileId }));
     setSaving(false);
     if (!result.ok) return;
     const saved = result.data;
@@ -208,8 +224,8 @@ export function ResumeWorkspace({
     openPanel("themes", true);
   };
 
-  /** What the ATS check prints: the saved base theme, sections and Fit to one page, so a change to any of them makes the report stale. */
-  const checkedState = JSON.stringify({ base, sections, fitToPage });
+  /** What the ATS check prints: the saved base theme, sections, language and Fit to one page, so a change to any of them makes the report stale. */
+  const checkedState = JSON.stringify({ base, sections, language, fitToPage });
 
   /** "Check for ATS": prints the base resume and reads it back as a parser would. A draft isn't printed, so it waits. */
   const runCheck = async () => {
@@ -217,25 +233,27 @@ export function ResumeWorkspace({
     if (draft) return toast("Save or cancel the theme you're customising first: the check prints your saved base theme.");
     setChecking(true);
     const of = checkedState;
-    const result = toastResult(await checkBaseResumeAts({}));
+    const result = toastResult(await checkBaseResumeAts({ profileId }));
     setChecking(false);
     if (result.ok) setCheck({ report: result.data, of });
   };
 
   return (
-    <>
+    <ProfileIdProvider value={profileId}>
       <PageHeader
+        breadcrumb={[{ label: "Profile", href: `/profile?profile=${profileId}` }, { label: "Base resume" }]}
         title="Base resume"
         description="Built straight from your profile. Every new application starts from this one, then gets tailored to the job."
         actions={
           <>
-            <Link href="/profile" className={buttonClassName("secondary")}>
+            <ProfileSwitcher profiles={profiles} current={profiles.find((entry) => entry.id === profileId) ?? { id: profileId, name: "" }} path="/resume" />
+            <Link href={`/profile?profile=${profileId}`} className={buttonClassName("secondary")}>
               Edit profile
             </Link>
             <Button variant="secondary" aria-disabled={draft !== null || checking || undefined} onClick={() => void runCheck()}>
               Check for ATS
             </Button>
-            <DownloadPdfButton href="/api/pdf?doc=base">Download PDF</DownloadPdfButton>
+            <DownloadPdfButton href={`/api/pdf?doc=base&profile=${profileId}`}>Download PDF</DownloadPdfButton>
           </>
         }
       />
@@ -297,6 +315,18 @@ export function ResumeWorkspace({
             checked={fitToPage}
             onCheckedChange={(next) => void toggleFit(next)}
           />
+          <Select
+            label="Language"
+            hint="For its headings and dates. Tailored documents use their application's language."
+            value={language ?? "English"}
+            onChange={(event) => void changeLanguage(event.target.value === "English" ? null : event.target.value)}
+          >
+            {DOCUMENT_LANGUAGES.map(({ name }) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </Select>
           <Tabs value={panel} onValueChange={(value) => openPanel(value as Panel)} className="flex flex-col gap-6">
             <TabsList variant="segmented">
               <TabsTrigger value="themes">Themes</TabsTrigger>
@@ -349,7 +379,7 @@ export function ResumeWorkspace({
         confirmLabel="Delete theme"
         onConfirm={() => deleting && void remove(deleting)}
       />
-    </>
+    </ProfileIdProvider>
   );
 }
 

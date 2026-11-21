@@ -4,10 +4,16 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { toast } from "@/components/toast";
-import { EMPTY_QUERY, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
+import { DEFAULT_FILTERS, EMPTY_QUERY, type LibraryFilters, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 
 import {
   acceptArbeitsagenturNote,
+  loadLibraryPage,
+  markAllPostingsSeen,
+  markPostingsSeen,
+  moveBackPostings,
+  removeAllArchived,
+  removeArchivedPostings,
   dismissFoundPosting,
   loadFullText,
   removeJobSearch,
@@ -15,17 +21,26 @@ import {
   runJobSearch,
   savePostingForLater,
   showMorePostings,
+  splitSameJob,
   startApplicationFrom,
   unsavePosting,
 } from "./actions";
+import { prepareAgentDraft } from "../agent/actions";
 import { JobsScreen } from "./jobs-screen";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null }));
+const url = vi.hoisted(() => ({ search: "" }));
+vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null, useSearchParams: () => new URLSearchParams(url.search) }));
+vi.mock("../agent/actions", () => ({ prepareAgentDraft: vi.fn() }));
 vi.mock("next/link", () => ({ default: ({ href, ...props }: ComponentProps<"a">) => <a href={href} {...props} /> }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
+vi.mock("@/hooks/use-job", () => ({ useJob: vi.fn() }));
 vi.mock("./actions", () => ({
   acceptArbeitsagenturNote: vi.fn(),
+  retryPortalSearch: vi.fn(),
+  loadLibraryPage: vi.fn(),
+  markPostingsSeen: vi.fn(),
+  markAllPostingsSeen: vi.fn(),
   startApplicationFrom: vi.fn(),
   runJobSearch: vi.fn(),
   removeJobSearch: vi.fn(),
@@ -35,6 +50,10 @@ vi.mock("./actions", () => ({
   unsavePosting: vi.fn(),
   dismissFoundPosting: vi.fn(),
   restorePosting: vi.fn(),
+  splitSameJob: vi.fn(),
+  moveBackPostings: vi.fn(),
+  removeArchivedPostings: vi.fn(),
+  removeAllArchived: vi.fn(),
 }));
 
 const countries = [
@@ -42,7 +61,21 @@ const countries = [
   { code: "fr", name: "France" },
 ];
 const query = { ...EMPTY_QUERY, keywords: "product designer", place: "Hamburg", country: "de" };
-const state: PostingState = { postingId: null, saved: false, dismissed: false, applicationId: null, score: null };
+const state: PostingState = {
+  postingId: null,
+  new: false,
+  saved: false,
+  dismissed: false,
+  applicationId: null,
+  score: null,
+  scores: [],
+  foundOn: [{ portal: "JSEARCH", url: "" }],
+  archived: false,
+  stillListedAt: null,
+  agentSearches: [],
+  addedBy: [],
+  agent: null,
+};
 
 const posting = (id: string, extra: Partial<ShownPosting> = {}): ShownPosting => ({
   source: "JSEARCH",
@@ -61,33 +94,49 @@ const posting = (id: string, extra: Partial<ShownPosting> = {}): ShownPosting =>
   ...extra,
 });
 
-const stored = (postings: ShownPosting[], more = false, extra: Partial<StoredSearch> = {}): StoredSearch => ({
+const stored = (postings: ShownPosting[], next: string | null = null): StoredSearch => ({
   id: "run-1",
-  sources: ["JSEARCH"],
+  source: "JSEARCH",
   addedBy: "",
   query,
   ranAt: "today at 14:32",
   postings,
-  more,
-  problems: [],
-  ...extra,
+  next,
+  portals: [{ id: "JSEARCH", status: "done", found: postings.length, next, message: null }],
+  jobId: null,
 });
 
 const screenProps: ComponentProps<typeof JobsScreen> = {
-  source: "JSEARCH",
-  sources: [
-    { source: "JSEARCH", problem: null },
-    { source: "SERPAPI", problem: null },
-    { source: "ADZUNA", problem: "Add your Adzuna app ID and key in Settings → Job search first." },
-    { source: "ARBEITSAGENTUR", problem: null },
-  ],
+  sources: ["JSEARCH"],
   countries,
-  view: "search",
   query,
-  search: null,
-  counts: { searches: 0, saved: 0, dismissed: 0, recruiters: 0 },
+  filters: DEFAULT_FILTERS,
+  library: { postings: [], total: 0, more: false },
+  searches: [],
+  foundSearch: null,
+  counts: { open: 0, new: 0, saved: 0, applied: 0, dismissed: 0, archived: 0 },
   today: "2026-10-03T12:00:00.000Z",
 };
+
+/** What a search found: the library filtered to it (E22-5). */
+const found = (postings: ShownPosting[], next: string | null = null) => ({
+  library: { postings, total: postings.length, more: false },
+  foundSearch: stored(postings, next),
+  filters: { ...DEFAULT_FILTERS, found: "run-1" } satisfies LibraryFilters,
+  counts: { open: postings.length, new: 0, saved: 0, applied: 0, dismissed: 0, archived: 0 },
+});
+/** The library showing one kind of posting. */
+const showing = (show: LibraryFilters["show"], postings: ShownPosting[], counts: Partial<ComponentProps<typeof JobsScreen>["counts"]> = {}) => ({
+  library: { postings, total: postings.length, more: false },
+  filters: { ...DEFAULT_FILTERS, show },
+  counts: { open: 0, new: 0, saved: 0, applied: 0, dismissed: 0, archived: 0, ...counts },
+});
+
+/** Opens a filter chip's menu and picks one of its choices (#519). */
+async function choose(chip: string, option: string) {
+  await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${chip}: `) }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: option }));
+}
 
 function renderScreen(props: Partial<ComponentProps<typeof JobsScreen>> = {}) {
   return render(<JobsScreen {...screenProps} {...props} />);
@@ -95,7 +144,8 @@ function renderScreen(props: Partial<ComponentProps<typeof JobsScreen>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-2", problems: [] } });
+  url.search = "";
+  vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-2" } });
   vi.mocked(removeJobSearch).mockResolvedValue({ ok: true, data: null, toast: "Search removed." });
   vi.mocked(savePostingForLater).mockResolvedValue({ ok: true, data: { postingId: "p1" } });
   vi.mocked(unsavePosting).mockResolvedValue({ ok: true, data: null });
@@ -105,7 +155,7 @@ beforeEach(() => {
 
 describe("the search form", () => {
   it("points to Settings while job search is off", () => {
-    renderScreen({ source: null });
+    renderScreen({ sources: [] });
     expect(screen.getByRole("heading", { name: "Choose where to search" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set up job search" })).toHaveAttribute("href", "/settings?section=jobs");
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
@@ -113,7 +163,7 @@ describe("the search form", () => {
 
   it("starts from the search it's given, and says which source it searches", () => {
     renderScreen();
-    expect(screen.getByText("Search JSearch for postings near you, then start an application from the one you like.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Positions" })).toBeInTheDocument();
     const form = screen.getByRole("search", { name: "Search postings" });
     expect(within(form).getByLabelText("What")).toHaveValue("product designer");
     expect(within(form).getByLabelText("Where")).toHaveValue("Hamburg");
@@ -127,8 +177,8 @@ describe("the search form", () => {
     await userEvent.selectOptions(screen.getByLabelText("Within"), "50");
     await userEvent.click(screen.getByLabelText("Remote only"));
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, radiusKm: 50, remoteOnly: true }, sources: ["JSEARCH"] });
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-2", { scroll: false }));
+    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, radiusKm: 50, remoteOnly: true } });
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?found=run-2", { scroll: false }));
   });
 
   it("shows what went wrong, with Try again when the source isn't answering", async () => {
@@ -138,9 +188,9 @@ describe("the search form", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("JSearch isn't answering right now.");
     expect(router.push).not.toHaveBeenCalled();
 
-    vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-3", problems: [] } });
+    vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: true, id: "run-3" } });
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-3", { scroll: false }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?found=run-3", { scroll: false }));
     expect(runJobSearch).toHaveBeenCalledTimes(2);
   });
 
@@ -153,7 +203,7 @@ describe("the search form", () => {
 
   it("says when the search in the URL is no longer kept", () => {
     renderScreen({ missingSearch: true });
-    expect(screen.getByText("That search is no longer kept. Search again, or open one from Past searches.")).toBeInTheDocument();
+    expect(screen.getByText("That search is no longer kept. Search again, or choose another under Found by.")).toBeInTheDocument();
   });
 
   it("asks for keywords and a country first", async () => {
@@ -167,21 +217,36 @@ describe("the search form", () => {
   });
 
   it("has no radius for a source without one", () => {
-    renderScreen({ source: "FREEHIRE" });
+    renderScreen({ sources: ["FREEHIRE"] });
     expect(screen.getByLabelText("Within")).toBeDisabled();
     expect(screen.getByText("FreeHire has no distance filter")).toBeInTheDocument();
   });
 
+  it("keeps the distance while one portal switched on takes it, naming those that ignore it (#517)", () => {
+    renderScreen({ sources: ["FREEHIRE", "ARBEITSAGENTUR"] });
+    expect(screen.getByLabelText("Within")).toBeEnabled();
+    expect(screen.getByText("FreeHire ignores the distance")).toBeInTheDocument();
+  });
+
   it("says when the source doesn't cover the country", async () => {
-    renderScreen({ source: "ARBEITSAGENTUR" });
+    renderScreen({ sources: ["ARBEITSAGENTUR"] });
     await userEvent.selectOptions(screen.getByLabelText("Country"), "fr");
     expect(screen.getByText("Bundesagentur für Arbeit doesn't list jobs in France.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(runJobSearch).not.toHaveBeenCalled();
   });
 
+  it("searches a country one portal switched on covers, naming those that don't (#517)", async () => {
+    renderScreen({ sources: ["ARBEITSAGENTUR", "JSEARCH"] });
+    await userEvent.selectOptions(screen.getByLabelText("Country"), "fr");
+    expect(screen.getByText("Bundesagentur für Arbeit doesn't list jobs in France.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Country")).not.toHaveAttribute("aria-invalid", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(runJobSearch).toHaveBeenCalled();
+  });
+
   it("warns that Adzuna can only add 'remote' to the words", async () => {
-    renderScreen({ source: "ADZUNA" });
+    renderScreen({ sources: ["JSEARCH", "ADZUNA"] });
     await userEvent.click(screen.getByLabelText("Remote only"));
     expect(screen.getByText("Adzuna has no remote filter, so this adds “remote” to your search.")).toBeInTheDocument();
   });
@@ -195,35 +260,26 @@ describe("the search form", () => {
 
 describe("the results", () => {
   it("lists the postings and shows the first one's whole text", () => {
-    renderScreen({ search: stored([posting("a", { salary: "EUR 70,000 a year", remote: true }), posting("b")], true) });
-    expect(screen.getByText("2 postings from JSearch, more to come · searched today at 14:32")).toBeInTheDocument();
+    renderScreen({ ...found([posting("a", { salary: "EUR 70,000 a year", remote: true }), posting("b")], "cursor:2") });
+    // The source bar says what was asked and when (E32-3), above the library filtered to what it found.
+    const bar = within(screen.getByRole("region", { name: "Search" }));
+    expect(bar.getAllByRole("listitem").map((chip) => chip.textContent)).toEqual(["product designer", "Hamburg + 25 km", "Germany", "Any time"]);
+    expect(bar.getByText("Searched today at 14:32 · 2 found")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More from JSearch" })).toBeInTheDocument();
+    expect(screen.getByText("2 postings")).toBeInTheDocument();
     const list = screen.getByRole("list", { name: "Postings" });
     const items = within(list).getAllByRole("button", { name: /^Designer/ });
     expect(items.map((item) => item.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
     expect(items[0]).toHaveTextContent("Company a · Hamburg · Remote");
-    expect(items[0]).toHaveTextContent("3 days ago · via LinkedIn · EUR 70,000 a year");
+    expect(items[0]).toHaveTextContent("3 days ago · LinkedIn · EUR 70,000 a year · not scored yet");
     expect(screen.getByRole("heading", { level: 2, name: "Designer a" })).toBeInTheDocument();
     expect(screen.getByText("The whole posting a.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open posting/ })).toHaveAttribute("href", "https://jobs.example/a");
     expect(screen.getByRole("link", { name: /Open posting/ })).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("hides postings that need far more German than the profile has, until shown, and badges the rest", async () => {
-    const fluent = posting("a", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." });
-    const english = posting("b", { description: "Our working language is English." });
-    renderScreen({ german: "A2", search: stored([fluent, english]) });
-    const list = screen.getByRole("list", { name: "Postings" });
-    expect(within(list).getAllByRole("button", { name: /^Designer/ })).toHaveLength(1);
-    expect(within(list).getByRole("button", { name: /^Designer b/ })).toHaveTextContent("English team");
-    await userEvent.click(screen.getByRole("button", { name: "1 needs more German than you have · Show" }));
-    const shown = within(list).getByRole("button", { name: /^Designer a/ });
-    expect(shown).toHaveTextContent("German C1");
-    await userEvent.click(shown);
-    expect(screen.getByText("Needs more German than your profile has: “Verhandlungssichere Deutschkenntnisse in Wort und Schrift.”")).toBeInTheDocument();
-  });
-
   it("shows another posting when it's picked, and moves with the arrow keys", async () => {
-    renderScreen({ search: stored([posting("a"), posting("b"), posting("c")]) });
+    renderScreen({ ...found([posting("a"), posting("b"), posting("c")]) });
     await userEvent.click(screen.getByRole("button", { name: /^Designer b/ }));
     expect(screen.getByRole("heading", { level: 2, name: "Designer b" })).toBeInTheDocument();
     await userEvent.keyboard("{ArrowDown}");
@@ -234,7 +290,7 @@ describe("the results", () => {
   });
 
   it("saves a posting and takes it out of Saved again", async () => {
-    renderScreen({ search: stored([posting("a")]) });
+    renderScreen({ ...found([posting("a")]) });
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     const { state: _ignored, ...sent } = posting("a");
     void _ignored;
@@ -249,76 +305,79 @@ describe("the results", () => {
 
   it("dismisses a posting, with Undo, and can show the dismissed ones", async () => {
     vi.mocked(dismissFoundPosting).mockResolvedValue({ ok: true, data: { wasSaved: true } });
-    renderScreen({ search: stored([posting("a", { state: { ...state, saved: true } }), posting("b")]) });
+    renderScreen({ ...found([posting("a", { state: { ...state, saved: true } }), posting("b")]) });
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Designer b" })).toBeInTheDocument();
-    expect(toast).toHaveBeenCalledWith("Dismissed. It won't show in your searches.", { action: { label: "Undo", onClick: expect.any(Function) } });
-
-    await userEvent.click(screen.getByRole("button", { name: "1 dismissed posting hidden · Show" }));
-    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveTextContent("Dismissed");
+    expect(toast).toHaveBeenCalledWith("Dismissed. It won't come back, from any search.", { action: { label: "Undo", onClick: expect.any(Function) } });
 
     vi.mocked(toast).mock.calls[0][1]!.action!.onClick();
     await waitFor(() => expect(restorePosting).toHaveBeenCalledWith({ source: "JSEARCH", externalId: "a", saved: true }));
     expect(await screen.findByRole("heading", { level: 2, name: "Designer a" })).toBeInTheDocument();
   });
 
-  it("brings back a dismissed posting from the list", async () => {
-    renderScreen({ search: stored([posting("a", { state: { ...state, dismissed: true } })]) });
-    expect(screen.getByText("You've dismissed every posting here.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "1 dismissed posting hidden · Show" }));
+  it("brings back a dismissed posting from Dismissed", async () => {
+    renderScreen({ ...showing("dismissed", [posting("a", { state: { ...state, dismissed: true } })], { dismissed: 1 }) });
     await userEvent.click(screen.getByRole("button", { name: "Bring back" }));
     expect(restorePosting).toHaveBeenCalledWith({ source: "JSEARCH", externalId: "a", saved: false });
+    expect(await screen.findByText("Nothing dismissed. Postings you dismiss never come back, from any search, and wait here.")).toBeInTheDocument();
   });
 
   it("says when a dismiss didn't work", async () => {
     vi.mocked(dismissFoundPosting).mockResolvedValue({ ok: false, error: "Something went wrong on the server. Please try again." });
-    renderScreen({ search: stored([posting("a")]) });
+    renderScreen({ ...found([posting("a")]) });
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast).toHaveBeenCalledWith("Something went wrong on the server. Please try again.");
     expect(screen.getByRole("button", { name: /^Designer a/ })).toBeInTheDocument();
   });
 
-  it("loads the next page into the kept search, once each", async () => {
-    vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: true, postings: [posting("b"), posting("c")], more: false, problems: [] } });
-    renderScreen({ search: stored([posting("a"), posting("b")], true) });
-    await userEvent.click(screen.getByRole("button", { name: "Show more" }));
+  it("asks the search's portal for more, into the library", async () => {
+    vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: true, postings: [posting("c")], next: null } });
+    renderScreen({ ...found([posting("a"), posting("b")], "cursor:2") });
+    await userEvent.click(screen.getByRole("button", { name: "More from JSearch" }));
     expect(showMorePostings).toHaveBeenCalledWith({ searchId: "run-1" });
-    expect(within(screen.getByRole("list", { name: "Postings" })).getAllByRole("listitem")).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
   });
 
   it("runs the same search again, as a new one", async () => {
-    renderScreen({ search: stored([posting("a")]) });
+    renderScreen({ ...found([posting("a")]) });
     await userEvent.click(screen.getByRole("button", { name: "Search again" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query, sources: ["JSEARCH"] });
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?search=run-2", { scroll: false }));
+    expect(runJobSearch).toHaveBeenCalledWith({ query });
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs?found=run-2", { scroll: false }));
   });
 
   it("says when the next page didn't come", async () => {
     vi.mocked(showMorePostings).mockResolvedValue({ ok: true, data: { ok: false, problem: "quota", message: "No searches left." } });
-    renderScreen({ search: stored([posting("a")], true) });
-    await userEvent.click(screen.getByRole("button", { name: "Show more" }));
+    renderScreen({ ...found([posting("a")], "cursor:2") });
+    await userEvent.click(screen.getByRole("button", { name: "More from JSearch" }));
     expect(toast).toHaveBeenCalledWith("No searches left.");
   });
 
   it("gets the whole text when the source only sent the start", async () => {
     vi.mocked(loadFullText).mockResolvedValue({ ok: true, data: { text: "Everything about the role." } });
-    renderScreen({ search: stored([posting("a", { complete: false, description: "The start…" })]) });
+    renderScreen({ ...found([posting("a", { complete: false, description: "The start…" })]) });
     expect(screen.getByText("Getting the whole posting…")).toBeInTheDocument();
     expect(await screen.findByText("Everything about the role.")).toBeInTheDocument();
   });
 
   it("shows the start, and says so, when the rest can't be had", async () => {
     vi.mocked(loadFullText).mockResolvedValue({ ok: true, data: { text: null } });
-    renderScreen({ search: stored([posting("a", { complete: false, description: "The start…" })]) });
+    renderScreen({ ...found([posting("a", { complete: false, description: "The start…" })]) });
     expect(await screen.findByText(/This is only the start of the posting/)).toBeInTheDocument();
     expect(screen.getByText("The start…")).toBeInTheDocument();
   });
 
+  it("opens on the posting Jump to asked for (E27-6)", () => {
+    url.search = "show=saved&focus=JSEARCH%3Ab";
+    const saved = { ...state, saved: true };
+    renderScreen({ ...showing("saved", [posting("a", { state: saved }), posting("b", { state: saved })]) });
+    expect(screen.getByRole("button", { name: /^Designer b/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("starts an application from the selected posting (E14-8)", async () => {
     vi.mocked(startApplicationFrom).mockResolvedValue({ ok: true, data: { postingId: "p 1" } });
-    renderScreen({ search: stored([posting("a"), posting("b")]) });
+    renderScreen({ ...found([posting("a"), posting("b")]) });
     await userEvent.click(screen.getByRole("button", { name: /^Designer b/ }));
     await userEvent.click(screen.getByRole("button", { name: "Start application →" }));
     const { state: _ignored, ...sent } = posting("b");
@@ -330,31 +389,31 @@ describe("the results", () => {
 
   it("stays put when starting doesn't work", async () => {
     vi.mocked(startApplicationFrom).mockResolvedValue({ ok: false, error: "Something went wrong on the server. Please try again." });
-    renderScreen({ search: stored([posting("a")]) });
+    renderScreen({ ...found([posting("a")]) });
     await userEvent.click(screen.getByRole("button", { name: "Start application →" }));
     expect(router.push).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Start application →" })).toBeInTheDocument();
   });
 
   it("links a posting you've applied for to its application", () => {
-    renderScreen({ search: stored([posting("a", { state: { ...state, applicationId: "app-1" } })]) });
+    renderScreen({ ...found([posting("a", { state: { ...state, applicationId: "app-1" } })]) });
     expect(within(screen.getByRole("list", { name: "Postings" })).getByText("Applied")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the application" })).toHaveAttribute("href", "/applications/app-1");
   });
 
   it("says when nothing was found", () => {
-    renderScreen({ search: stored([]) });
+    renderScreen({ ...found([]) });
     expect(screen.getByText("No postings for “product designer” within 25 km of Hamburg. Try a bigger radius or fewer words.")).toBeInTheDocument();
   });
 
   it("says when nothing was found on a source without a radius", () => {
-    renderScreen({ source: "FREEHIRE", search: stored([], false, { sources: ["FREEHIRE"] }) });
+    renderScreen({ sources: ["FREEHIRE"], ...found([]), foundSearch: { ...stored([]), source: "FREEHIRE" } });
     expect(screen.getByText("No postings for “product designer” in Hamburg. Try fewer words.")).toBeInTheDocument();
   });
 
   it("labels each of Adzuna's postings with a link to its site for the posting's country, as its terms ask", () => {
     const url = "https://www.adzuna.de/land/ad/4721394012?se=abc&utm_medium=api&utm_source=dossier&v=1";
-    renderScreen({ source: "ADZUNA", search: stored([posting("a", { source: "ADZUNA", url }), posting("b", { source: "ADZUNA", url })]) });
+    renderScreen({ sources: ["ADZUNA"], ...found([posting("a", { source: "ADZUNA", url }), posting("b", { source: "ADZUNA", url })]) });
     const labels = screen.getAllByRole("link", { name: "Jobs by Adzuna (opens in a new tab)" });
     // One on each card and one on the posting shown.
     expect(labels).toHaveLength(3);
@@ -365,7 +424,7 @@ describe("the results", () => {
   });
 
   it("names the Bundesagentur für Arbeit in plain text, on the posting only", () => {
-    renderScreen({ source: "ARBEITSAGENTUR", search: stored([posting("a", { source: "ARBEITSAGENTUR" })]) });
+    renderScreen({ sources: ["ARBEITSAGENTUR"], ...found([posting("a", { source: "ARBEITSAGENTUR" })]) });
     expect(screen.getAllByText("Source: Bundesagentur für Arbeit")).toHaveLength(1);
     expect(screen.queryByRole("link", { name: /Source: Bundesagentur/ })).not.toBeInTheDocument();
   });
@@ -374,15 +433,15 @@ describe("the results", () => {
 describe("problems", () => {
   const failWith = async (problem: "key" | "quota", message: string) => {
     vi.mocked(runJobSearch).mockResolvedValue({ ok: true, data: { ok: false, problem, message } });
-    renderScreen({ search: stored([posting("a")]) });
-    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    renderScreen({ ...found([posting("a")]) });
+    await userEvent.click(screen.getByRole("button", { name: "Search again" }));
     return screen.findByRole("alert");
   };
 
-  it("sends key problems to Settings, in place of the results", async () => {
+  it("sends key problems to Settings, above what earlier searches found", async () => {
     expect(await failWith("key", "JSearch didn't accept your key.")).toHaveTextContent("JSearch didn't accept your key.");
     expect(screen.getByRole("link", { name: "Open Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
-    expect(screen.queryByRole("list", { name: "Postings" })).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Postings" })).toBeInTheDocument();
   });
 
   it("just says so when the quota is used up", async () => {
@@ -396,7 +455,7 @@ describe("problems", () => {
 describe("the Bundesagentur für Arbeit (#223)", () => {
   it("shows its note above the search until it's ticked", async () => {
     vi.mocked(acceptArbeitsagenturNote).mockResolvedValue({ ok: true, data: null });
-    renderScreen({ source: "ARBEITSAGENTUR", arbeitsagenturNote: true });
+    renderScreen({ sources: ["ARBEITSAGENTUR"], arbeitsagenturNote: true });
     expect(screen.getByRole("note")).toHaveTextContent(/has no official API.*on your own responsibility/);
     await userEvent.click(screen.getByRole("checkbox", { name: "I understand, and choose this source myself" }));
     expect(acceptArbeitsagenturNote).toHaveBeenCalledWith({});
@@ -404,310 +463,131 @@ describe("the Bundesagentur für Arbeit (#223)", () => {
   });
 
   it("leaves the note out once it's accepted, and for other sources", () => {
-    renderScreen({ source: "ARBEITSAGENTUR" });
+    renderScreen({ sources: ["ARBEITSAGENTUR"] });
     expect(screen.queryByRole("checkbox", { name: /I understand/ })).not.toBeInTheDocument();
   });
 
   it("links each posting to its ad on arbeitsagentur.de, next to the employer's own link", () => {
     const ba = posting("10000-1234-S", { source: "ARBEITSAGENTUR", url: "https://careers.example/1" });
-    renderScreen({ source: "ARBEITSAGENTUR", search: stored([ba]) });
+    renderScreen({ sources: ["ARBEITSAGENTUR"], ...found([ba]) });
     expect(screen.getByRole("link", { name: /Open posting/ })).toHaveAttribute("href", "https://careers.example/1");
     expect(screen.getByRole("link", { name: /On arbeitsagentur\.de/ })).toHaveAttribute("href", "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-1234-S");
   });
 
   it("has one link when the posting's own link is its ad", () => {
     const ba = posting("10000-1234-S", { source: "ARBEITSAGENTUR", url: "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-1234-S" });
-    renderScreen({ source: "ARBEITSAGENTUR", search: stored([ba]) });
+    renderScreen({ sources: ["ARBEITSAGENTUR"], ...found([ba]) });
     expect(screen.queryByRole("link", { name: /On arbeitsagentur\.de/ })).not.toBeInTheDocument();
   });
 });
 
-describe("past searches (E14-10)", () => {
-  const history = [
-    {
-      day: "Today",
-      searches: [
-        { id: "s1", sources: ["JSEARCH" as const], addedBy: "", query: { ...query, radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const }, found: 16, time: "14:32" },
-        { id: "s2", sources: ["JSEARCH" as const], addedBy: "", query: { ...query, keywords: "researcher", place: "" }, found: 1, time: "09:05" },
-      ],
-    },
-    { day: "Mon 28 Sep", searches: [{ id: "s3", sources: ["ADZUNA" as const], addedBy: "", query: { ...query, keywords: "writer" }, found: 0, time: "10:00" }] },
-    { day: "Sun 27 Sep", searches: [{ id: "s4", sources: ["CLIENT" as const], addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
-  ];
-
-  it("lists them by day, each opening without asking the source again", () => {
-    renderScreen({ view: "history", history, counts: { searches: 3, saved: 0, dismissed: 0, recruiters: 0 } });
-    expect(screen.queryByRole("search")).not.toBeInTheDocument();
-    const today = screen.getByRole("region", { name: "Today" });
-    expect(within(today).getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["product designer · Hamburg, 50 km · Remote only · Past week14:32 · 16 postings · JSearch", "/jobs?search=s1"],
-      ["researcher · Germany09:05 · 1 posting · JSearch", "/jobs?search=s2"],
-    ]);
-    expect(within(screen.getByRole("region", { name: "Mon 28 Sep" })).getByRole("link")).toHaveTextContent("writer · Hamburg, 25 km10:00 · 0 postings · Adzuna");
+describe("the positions library (E22-5)", () => {
+  it("has tabs with how many each holds, the Archive last, and the filters as chips (E32-3)", () => {
+    renderScreen({ counts: { open: 12, new: 3, saved: 2, applied: 1, dismissed: 1, archived: 4 } });
+    const tabs = within(screen.getByRole("navigation", { name: "Where they stand" })).getAllByRole("link");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["All open 12", "New 3", "Saved 2", "Applied for 1", "Dismissed 1", "Archive 4"]);
+    expect(tabs[0]).toHaveAttribute("aria-current", "page");
+    expect(tabs[2]).toHaveAttribute("href", "/jobs?show=saved");
+    expect(tabs[5]).toHaveAttribute("href", "/jobs?tab=archive");
+    for (const label of ["Found by", "Portal", "Posted within", "Covers", "Sort"]) expect(screen.getByRole("button", { name: new RegExp(`^${label}: `) })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Covers: any" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sort: Best fit" })).toBeInTheDocument();
   });
 
-  it("names the AI client that added a search, apart from the job sources", () => {
-    renderScreen({ view: "history", history });
-    expect(within(screen.getByRole("region", { name: "Sun 27 Sep" })).getByRole("link")).toHaveTextContent("analyst · Hamburg, 25 km18:20 · 4 postings · AI client · Gemini CLI");
+  it("filters by search, portal, age and score, each a new address", async () => {
+    const days = [{ day: "Today", searches: [{ id: "run-1", source: "JSEARCH", addedBy: "", query, found: 4, time: "14:32" }] }];
+    renderScreen({ searches: days });
+    await userEvent.click(screen.getByRole("button", { name: /^Found by: / }));
+    expect(screen.getByRole("menuitemradio", { name: /product designer · Hamburg, 25 km · Today 14:32/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /Today 14:32/ }));
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?found=run-1", { scroll: false });
+    await choose("Portal", "Adzuna");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?portal=ADZUNA", { scroll: false });
+    await choose("Posted within", "past week");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?age=week", { scroll: false });
+    await choose("Covers", "at least half");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?covers=half", { scroll: false });
+    await choose("Sort", "Newest");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?sort=new", { scroll: false });
   });
 
-  it("removes a search", async () => {
-    renderScreen({ view: "history", history });
-    await userEvent.click(screen.getByRole("button", { name: "Remove the search “researcher · Germany” from 09:05" }));
-    expect(removeJobSearch).toHaveBeenCalledWith({ id: "s2" });
-    expect(screen.queryByRole("link", { name: /researcher/ })).not.toBeInTheDocument();
-    expect(router.refresh).toHaveBeenCalled();
+  it("marks a new posting, which stops being new once it's opened", async () => {
+    const fresh = (id: string, postingId: string) => posting(id, { state: { ...state, new: true, postingId } });
+    renderScreen({ library: { postings: [fresh("a", "p-a"), fresh("b", "p-b")], total: 2, more: false }, counts: { open: 2, new: 2, saved: 0, applied: 0, dismissed: 0, archived: 0 } });
+    const second = screen.getByRole("button", { name: /^Designer b/ });
+    expect(second).toHaveTextContent("New");
+    // Shown first on its own, a posting isn't opened yet.
+    expect(markPostingsSeen).not.toHaveBeenCalled();
+    await userEvent.click(second);
+    expect(markPostingsSeen).toHaveBeenCalledWith({ postingIds: ["p-b"] });
+    expect(screen.getByRole("button", { name: /^Designer b/ })).not.toHaveTextContent("New");
   });
 
-  it("puts a search back when removing it didn't work", async () => {
-    vi.mocked(removeJobSearch).mockResolvedValue({ ok: false, error: "Something went wrong on the server. Please try again." });
-    renderScreen({ view: "history", history });
-    await userEvent.click(screen.getByRole("button", { name: /Remove the search “researcher/ }));
-    expect(await screen.findByRole("link", { name: /researcher/ })).toBeInTheDocument();
+  it("marks all as seen", async () => {
+    vi.mocked(markAllPostingsSeen).mockResolvedValue({ ok: true, data: { count: 3 } });
+    renderScreen({ counts: { open: 3, new: 3, saved: 0, applied: 0, dismissed: 0, archived: 0 } });
+    await userEvent.click(screen.getByRole("button", { name: "Mark all as seen" }));
+    expect(markAllPostingsSeen).toHaveBeenCalledWith({ filters: DEFAULT_FILTERS });
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
   });
 
-  it("says when there are none", () => {
-    renderScreen({ view: "history", history: [] });
-    expect(screen.getByText(/No searches yet\. Each search you run is kept here/)).toBeInTheDocument();
-  });
-});
-
-describe("the Saved and Dismissed views (E14-7)", () => {
-  it("has tabs for the search, past searches, the kept postings and the recruiters, with how many each holds", () => {
-    renderScreen({ counts: { searches: 4, saved: 3, dismissed: 1, recruiters: 5, employers: 2 } });
-    const tabs = within(screen.getByRole("navigation", { name: "Find jobs views" })).getAllByRole("link");
-    expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("href"), tab.getAttribute("aria-current")])).toEqual([
-      ["Search", "/jobs", "page"],
-      ["Past searches4", "/jobs?view=history", null],
-      ["Saved3", "/jobs?view=saved", null],
-      ["Dismissed1", "/jobs?view=dismissed", null],
-      ["Recruiters5", "/recruiters", null],
-      ["Careers pages2", "/careers", null],
-    ]);
+  it("loads the library's next page through the same filters", async () => {
+    vi.mocked(loadLibraryPage).mockResolvedValue({ ok: true, data: { postings: [posting("c")], more: false } });
+    renderScreen({ library: { postings: [posting("a"), posting("b")], total: 3, more: true } });
+    expect(screen.getByText("3 postings, showing 2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(loadLibraryPage).toHaveBeenCalledWith({ filters: DEFAULT_FILTERS, offset: 2 });
+    expect(await screen.findByRole("button", { name: /^Designer c/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
-  it("lists the saved postings, without the search form, even with job search off", () => {
-    renderScreen({ source: null, view: "saved", kept: [posting("a", { state: { ...state, saved: true } })], counts: { searches: 0, saved: 1, dismissed: 0, recruiters: 0 } });
-    expect(screen.queryByRole("search")).not.toBeInTheDocument();
-    expect(screen.queryByText("Choose where to search")).not.toBeInTheDocument();
+  it("removes a search; what it found stays", async () => {
+    renderScreen({ ...found([posting("a")]) });
+    await userEvent.click(screen.getByRole("button", { name: "Remove this search" }));
+    expect(removeJobSearch).toHaveBeenCalledWith({ id: "run-1" });
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/jobs", { scroll: false }));
+  });
+
+  it("lists saved postings even with every portal off", () => {
+    renderScreen({ sources: [], ...showing("saved", [posting("a", { state: { ...state, saved: true } })], { saved: 1 }) });
+    expect(screen.getByRole("heading", { name: "Choose where to search" })).toBeInTheDocument();
     expect(screen.getByText("1 saved posting")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Designer a" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start application →" })).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Find jobs views" })).getByRole("link", { name: /Saved/ })).toHaveAttribute("aria-current", "page");
   });
 
   it("takes an unsaved posting out of Saved, with Undo", async () => {
-    renderScreen({ view: "saved", kept: [posting("a", { state: { ...state, saved: true } }), posting("b", { state: { ...state, saved: true } })] });
+    renderScreen({ ...showing("saved", [posting("a", { state: { ...state, saved: true } }), posting("b", { state: { ...state, saved: true } })], { saved: 2 }) });
     await userEvent.click(screen.getByRole("button", { name: "Saved" }));
     expect(unsavePosting).toHaveBeenCalledWith({ source: "JSEARCH", externalId: "a" });
     expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Designer b" })).toBeInTheDocument();
     expect(toast).toHaveBeenCalledWith("Removed from Saved.", { action: { label: "Undo", onClick: expect.any(Function) } });
-
-    vi.mocked(toast).mock.calls[0][1]!.action!.onClick();
-    expect(await screen.findByRole("button", { name: /^Designer a/ })).toBeInTheDocument();
-    expect(savePostingForLater).toHaveBeenCalled();
   });
 
-  it("says when there's nothing saved or dismissed", () => {
-    const { unmount } = renderScreen({ view: "saved", kept: [] });
-    expect(screen.getByText("Nothing saved yet. Save a posting from your search results to keep it here.")).toBeInTheDocument();
+  it("says when there's nothing saved, dismissed, new or found", () => {
+    const { unmount } = renderScreen({ ...showing("saved", []) });
+    expect(screen.getByText("Nothing saved yet. Save a posting to keep it here.")).toBeInTheDocument();
     unmount();
-    renderScreen({ view: "dismissed", kept: [] });
-    expect(screen.getByText("Nothing dismissed. Postings you dismiss stay out of your searches and wait here.")).toBeInTheDocument();
-  });
-
-  it("brings a dismissed posting back into the searches", async () => {
-    renderScreen({ view: "dismissed", kept: [posting("a", { state: { ...state, dismissed: true } })] });
-    expect(screen.getByText("1 dismissed posting, kept out of your searches")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start application →" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Bring back" }));
-    expect(restorePosting).toHaveBeenCalledWith({ source: "JSEARCH", externalId: "a", saved: false });
-    expect(toast).toHaveBeenCalledWith("Brought back. It'll show in your searches again.");
-    expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument();
-  });
-});
-
-describe("the From filter (E14-7): what AI clients found, apart from the job source's", () => {
-  const saved = { ...state, saved: true };
-  const mixed = [posting("a", { state: saved }), posting("b", { source: "CLIENT", via: "Claude Code", state: saved })];
-
-  it("offers the sources Saved holds, and narrows the URL to one", async () => {
-    renderScreen({ view: "saved", kept: mixed });
-    const from = screen.getByRole("combobox", { name: "From" });
-    expect(within(from).getAllByRole("option").map((option) => option.textContent)).toEqual(["All sources", "JSearch", "AI clients (Claude, Gemini…)"]);
-    await userEvent.selectOptions(from, "CLIENT");
-    expect(router.push).toHaveBeenCalledWith("/jobs?view=saved&from=client", { scroll: false });
-  });
-
-  it("isn't shown while a list holds one source only", () => {
-    renderScreen({ view: "saved", kept: [posting("a", { state: saved })] });
-    expect(screen.queryByRole("combobox", { name: "From" })).not.toBeInTheDocument();
-  });
-
-  it("shows only that source's postings, and says so when there are none", () => {
-    const { unmount } = renderScreen({ view: "saved", kept: mixed, from: "CLIENT" });
-    const items = within(screen.getByRole("list", { name: "Postings" })).getAllByRole("listitem");
-    expect(items).toHaveLength(1);
-    expect(items[0]).toHaveTextContent("Designer b");
-    expect(screen.getByRole("combobox", { name: "From" })).toHaveValue("CLIENT");
-    unmount();
-    renderScreen({ view: "dismissed", kept: [posting("a", { state: { ...state, dismissed: true } })], from: "CLIENT" });
-    expect(screen.getByText("Nothing dismissed from AI clients.")).toBeInTheDocument();
-  });
-
-  it("narrows Past searches the same way", () => {
-    const history = [
-      { day: "Today", searches: [{ id: "s1", sources: ["JSEARCH" as const], addedBy: "", query, found: 16, time: "14:32" }] },
-      { day: "Sun 27 Sep", searches: [{ id: "s4", sources: ["CLIENT" as const], addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] },
-    ];
-    const { unmount } = renderScreen({ view: "history", history, from: "CLIENT" });
-    expect(screen.queryByRole("region", { name: "Today" })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Sun 27 Sep" })).getByRole("link")).toHaveTextContent("AI client · Gemini CLI");
-    unmount();
-    renderScreen({ view: "history", history, from: "ADZUNA" });
-    expect(screen.getByText("No searches from Adzuna.")).toBeInTheDocument();
-  });
-});
-
-describe("sorting by score", () => {
-  const scored = (score: number): PostingState => ({ ...state, score: { score, reasons: [], redFlags: [] } });
-  const found = [posting("a"), posting("b", { state: scored(60) }), posting("c", { source: "CLIENT", via: "Claude Code", state: scored(80) })];
-  const titles = () => within(screen.getByRole("list", { name: "Postings" })).getAllByRole("button", { name: /^Designer/ }).map((button) => button.textContent!.slice(0, 10));
-
-  it("switches Past searches to every posting they found, keeping the From filter", async () => {
-    const history = [{ day: "Today", searches: [{ id: "s1", sources: ["JSEARCH" as const], addedBy: "", query, found: 3, time: "14:32" }] }];
-    renderScreen({ view: "history", history, from: "JSEARCH" });
-    await userEvent.click(screen.getByRole("radio", { name: "Postings by score" }));
-    expect(router.push).toHaveBeenCalledWith("/jobs?view=history&sort=score&from=jsearch", { scroll: false });
-  });
-
-  it("lists them highest score first, unscored after, and can go back to the order they were found in", async () => {
-    renderScreen({ view: "history", byScore: true, found });
-    expect(screen.getByRole("radio", { name: "Postings by score" })).toBeChecked();
-    expect(screen.getByText("3 postings from your past searches, each job once · 2 scored")).toBeInTheDocument();
-    expect(titles()).toEqual(["Designer c", "Designer b", "Designer a"]);
-    expect(screen.getByRole("heading", { level: 2, name: "Designer c" })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Sort by score", pressed: true }));
-    expect(titles()).toEqual(["Designer a", "Designer b", "Designer c"]);
-
-    await userEvent.click(screen.getByRole("radio", { name: "Searches" }));
-    expect(router.push).toHaveBeenCalledWith("/jobs?view=history", { scroll: false });
-  });
-
-  it("narrows them to one source, and keeps the sort", async () => {
-    const { unmount } = renderScreen({ view: "history", byScore: true, found, from: "CLIENT" });
-    expect(titles()).toEqual(["Designer c"]);
-    unmount();
-    renderScreen({ view: "history", byScore: true, found });
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "From" }), "CLIENT");
-    expect(router.push).toHaveBeenCalledWith("/jobs?view=history&sort=score&from=client", { scroll: false });
-  });
-
-  it("says when past searches found nothing", () => {
-    renderScreen({ view: "history", byScore: true, found: [] });
-    expect(screen.getByText("Your past searches found no postings yet.")).toBeInTheDocument();
-  });
-
-  it("sorts a search's results, once one of them is scored", async () => {
-    const { unmount } = renderScreen({ search: stored([posting("a"), posting("b")]) });
-    expect(screen.queryByRole("button", { name: "Sort by score" })).not.toBeInTheDocument();
-    unmount();
-    renderScreen({ search: stored(found) });
-    expect(titles()).toEqual(["Designer a", "Designer b", "Designer c"]);
-    await userEvent.click(screen.getByRole("button", { name: "Sort by score", pressed: false }));
-    expect(titles()).toEqual(["Designer c", "Designer b", "Designer a"]);
-  });
-});
-
-describe("the Source list: one or several sources for a search", () => {
-  it("starts from the Settings source, ticks more in a menu that stays open, and searches them together", async () => {
+    const second = renderScreen({ ...showing("new", []) });
+    expect(screen.getByText("Nothing new. Every posting here has been opened.")).toBeInTheDocument();
+    second.unmount();
     renderScreen();
-    const picker = screen.getByRole("button", { name: "Source" });
-    expect(picker).toHaveTextContent("JSearch");
-    expect(screen.getByText("Uses 1 search from JSearch")).toBeInTheDocument();
-
-    await userEvent.click(picker);
-    const menu = await screen.findByRole("menu");
-    const items = within(menu).getAllByRole("menuitemcheckbox");
-    expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false"]);
-    // Adzuna has no key: listed, but not for ticking, and it says why.
-    expect(items[2]).toHaveAttribute("aria-disabled", "true");
-    expect(items[2]).toHaveTextContent("Add your Adzuna app ID and key in Settings → Job search first.");
-    expect(within(menu).getByRole("menuitem", { name: /Keys and sources in Settings/ })).toHaveAttribute("href", "/settings?section=jobs");
-
-    await userEvent.click(within(menu).getByRole("menuitemcheckbox", { name: /SerpApi/ }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    expect(picker).toHaveTextContent("JSearch + SerpApi");
-    expect(screen.getByText("Uses 1 search each from JSearch and SerpApi")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query, sources: ["JSEARCH", "SERPAPI"] });
+    expect(screen.getByText(/Every posting a search finds lands here, once/)).toBeInTheDocument();
   });
 
-  it("needs at least one source", async () => {
-    renderScreen();
-    await userEvent.click(screen.getByRole("button", { name: "Source" }));
-    await userEvent.click(within(await screen.findByRole("menu")).getByRole("menuitemcheckbox", { name: /JSearch/ }));
-    await userEvent.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Source" })).toHaveTextContent("Choose a source");
-    await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(screen.getByText("Choose at least one source.")).toBeInTheDocument();
-    expect(runJobSearch).not.toHaveBeenCalled();
-  });
-
-  it("opens a kept search with the sources it ran on, and names them over its postings", () => {
-    renderScreen({ search: stored([posting("a"), posting("b", { source: "SERPAPI" })], false, { sources: ["JSEARCH", "SERPAPI"] }) });
-    expect(screen.getByRole("button", { name: "Source" })).toHaveTextContent("JSearch + SerpApi");
-    expect(screen.getByText(/2 postings from JSearch and SerpApi · searched today at 14:32/)).toBeInTheDocument();
-  });
-
-  it("says what a source couldn't do beside the results, who stood in, and where to fix it", () => {
-    renderScreen({
-      search: stored([posting("a")], false, {
-        sources: ["ARBEITSAGENTUR"],
-        problems: [
-          { source: "SERPAPI", problem: "no-key", message: "Add your SerpApi key in Settings → Job search first." },
-          { source: "JSEARCH", problem: "quota", message: "You've used up your JSearch searches for this month.", fallback: "ARBEITSAGENTUR" },
-        ],
-      }),
-    });
-    const note = screen.getByRole("note");
-    expect(note).toHaveTextContent("Add your SerpApi key in Settings → Job search first.");
-    expect(note).toHaveTextContent("You've used up your JSearch searches for this month. Searched Bundesagentur für Arbeit instead.");
-    expect(within(note).getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
-  });
-
-  it("keeps Within when FreeHire is ticked with a source that filters by distance", () => {
-    renderScreen({ search: stored([], false, { sources: ["JSEARCH", "FREEHIRE"] }) });
-    expect(screen.getByLabelText("Within")).toBeEnabled();
-    expect(screen.queryByText(/has no distance filter/)).not.toBeInTheDocument();
-    expect(screen.getByText("No postings for “product designer” within 25 km of Hamburg. Try a bigger radius or fewer words.")).toBeInTheDocument();
-  });
-
-  it("says which other sources listed the same job", () => {
-    renderScreen({ search: stored([posting("a", { alsoOn: ["SERPAPI", "ADZUNA"] })]) });
-    expect(screen.getAllByText(/Also on SerpApi and Adzuna/).length).toBeGreaterThan(0);
-  });
-
-  it("toasts a source's problem when a next page comes without it", async () => {
-    vi.mocked(showMorePostings).mockResolvedValue({
-      ok: true,
-      data: { ok: true, postings: [posting("c")], more: false, problems: [{ source: "SERPAPI", problem: "unavailable", message: "SerpApi isn't answering right now. Try again in a minute." }] },
-    });
-    renderScreen({ search: stored([posting("a")], true, { sources: ["JSEARCH", "SERPAPI"] }) });
-    await userEvent.click(screen.getByRole("button", { name: "Show more" }));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("SerpApi isn't answering right now. Try again in a minute."));
-    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+  it("links to Recruiters and Careers pages, with how many each holds (jobauto fork)", () => {
+    renderScreen({ elsewhere: { recruiters: 5, employers: 2 } });
+    const links = within(screen.getByRole("navigation", { name: "Also in Find work" })).getAllByRole("link");
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Recruiters5", "/recruiters"],
+      ["Careers pages2", "/careers"],
+    ]);
   });
 });
 
-describe("search words from the profile, above the form", () => {
+describe("search words from the profile, in the form (jobauto fork)", () => {
   it("fills What with a word in one click, and searches only when Search is pressed", async () => {
     renderScreen({ suggestions: ["Financial Analyst", "Meldewesen"] });
     const row = screen.getByRole("group", { name: "Search words from your profile" });
+    expect(row).toHaveTextContent("From your profile:");
     expect(within(row).getAllByRole("button").map((button) => button.textContent)).toEqual(["Financial Analyst", "Meldewesen"]);
 
     await userEvent.click(within(row).getByRole("button", { name: "Meldewesen" }));
@@ -715,11 +595,238 @@ describe("search words from the profile, above the form", () => {
     expect(within(row).getByRole("button", { name: "Meldewesen" })).toHaveAttribute("aria-pressed", "true");
     expect(runJobSearch).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, keywords: "Meldewesen" }, sources: ["JSEARCH"] });
+    expect(runJobSearch).toHaveBeenCalledWith({ query: { ...query, keywords: "Meldewesen" } });
+  });
+
+  it("names the profile they're from when there are several", () => {
+    renderScreen({ suggestions: ["Financial Analyst"], suggestionsFrom: "Reporting" });
+    expect(screen.getByRole("group", { name: "Search words from your profile" })).toHaveTextContent("From Reporting:");
   });
 
   it("shows no row without words", () => {
     renderScreen();
     expect(screen.queryByRole("group", { name: "Search words from your profile" })).not.toBeInTheDocument();
+  });
+});
+
+describe("what a search uses of the portals' plans (jobauto fork)", () => {
+  it("counts a search from each portal switched on that has a quota, Jooble's 500 in all among them", () => {
+    const { unmount } = renderScreen({ sources: ["JSEARCH", "JOOBLE", "ARBEITSAGENTUR"] });
+    expect(screen.getByText("Uses 1 search each from JSearch and Jooble")).toBeInTheDocument();
+    unmount();
+    renderScreen({ sources: ["ARBEITSAGENTUR"] });
+    expect(screen.getByText("No search quota used")).toBeInTheDocument();
+  });
+});
+
+describe("the German a posting asks for, against the profile's (jobauto fork)", () => {
+  const fluent = posting("a", { description: "Verhandlungssichere Deutschkenntnisse in Wort und Schrift." });
+  const english = posting("b", { description: "Our working language is English." });
+
+  it("hides open postings that need far more German than the profile has, until shown, and badges the rest", async () => {
+    renderScreen({ german: "A2", ...found([fluent, english]) });
+    const list = screen.getByRole("list", { name: "Postings" });
+    expect(within(list).getAllByRole("button", { name: /^Designer/ })).toHaveLength(1);
+    expect(within(list).getByRole("button", { name: /^Designer b/ })).toHaveTextContent("English team");
+    await userEvent.click(screen.getByRole("button", { name: "1 needs more German than you have · Show" }));
+    const shown = within(list).getByRole("button", { name: /^Designer a/ });
+    expect(shown).toHaveTextContent("German C1");
+    await userEvent.click(shown);
+    // Beside the scoring model's requirements, under How it fits.
+    expect(within(screen.getByRole("region", { name: "How it fits" })).getByText("Needs more German than your profile has: “Verhandlungssichere Deutschkenntnisse in Wort und Schrift.”")).toBeInTheDocument();
+  });
+
+  it("keeps the toggle when every open posting needs more German", async () => {
+    renderScreen({ german: "A2", ...found([fluent]) });
+    expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "1 needs more German than you have · Show" }));
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toBeInTheDocument();
+  });
+
+  it("hides nothing that's saved, applied for, or in Saved", () => {
+    const { unmount } = renderScreen({ german: "A2", ...found([posting("a", { description: fluent.description, state: { ...state, applicationId: "app-1" } })]) });
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveTextContent("German C1");
+    unmount();
+    renderScreen({ german: "A2", ...showing("saved", [posting("a", { description: fluent.description, state: { ...state, saved: true } })], { saved: 1 }) });
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /needs more German/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("postings AI clients and careers pages added (jobauto fork)", () => {
+  const byClient = posting("a", { source: "CLIENT", via: "", state: { ...state, foundOn: [{ portal: "CLIENT", url: "" }], addedBy: ["Claude"] } });
+  const fromCareers = posting("b", { source: "CAREERS", via: "", state: { ...state, foundOn: [{ portal: "CAREERS", url: "" }], addedBy: ["Company b"] } });
+
+  it("says who added each, instead of a portal", () => {
+    renderScreen({ library: { postings: [byClient, fromCareers], total: 2, more: false } });
+    const client = screen.getByRole("button", { name: /^Designer a/ });
+    expect(client).toHaveTextContent("3 days ago · Added by Claude · not scored yet");
+    expect(client).not.toHaveTextContent("AI client");
+    expect(screen.getByRole("button", { name: /^Designer b/ })).toHaveTextContent("3 days ago · From its careers page · not scored yet");
+    expect(screen.getByText("posted 3 days ago · Added by Claude")).toBeInTheDocument();
+  });
+
+  it("can be narrowed to them with the Portal filter", async () => {
+    renderScreen();
+    await choose("Portal", "AI client");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?portal=CLIENT", { scroll: false });
+    await choose("Portal", "Careers pages");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?portal=CAREERS", { scroll: false });
+  });
+
+  it("names an AI client's search under Found by", async () => {
+    const days = [{ day: "Sun 27 Sep", searches: [{ id: "s4", source: "CLIENT", addedBy: "Gemini CLI", query: { ...query, keywords: "analyst" }, found: 4, time: "18:20" }] }];
+    renderScreen({ searches: days });
+    await userEvent.click(screen.getByRole("button", { name: /^Found by: / }));
+    expect(screen.getByRole("menuitemradio", { name: "AI client · Gemini CLI · Sun 27 Sep 18:20" })).toBeInTheDocument();
+  });
+
+  it("opens what one added without making it the search, and can remove it", async () => {
+    const added: StoredSearch = { ...stored([byClient]), source: "CLIENT", addedBy: "Claude", query: { ...query, keywords: "analyst" }, portals: [{ id: "CLIENT", status: "done", found: 1, next: null, message: null }] };
+    renderScreen({ ...found([byClient]), foundSearch: added });
+    expect(screen.getByText("1 posting from AI client · Claude · added today at 14:32")).toBeInTheDocument();
+    // The search bar keeps the user's own search: nothing to search again or ask more of.
+    const bar = within(screen.getByRole("region", { name: "Search" }));
+    expect(bar.getAllByRole("listitem")[0]).toHaveTextContent("product designer");
+    expect(screen.queryByRole("button", { name: "Search again" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^More from/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Remove this search" }));
+    expect(removeJobSearch).toHaveBeenCalledWith({ id: "run-1" });
+  });
+});
+
+describe("the same job on several portals (E22-6)", () => {
+  const foundOn = [
+    { portal: "JSEARCH", url: "https://www.linkedin.com/jobs/view/1" },
+    { portal: "ADZUNA", url: "https://www.adzuna.de/details/2" },
+    { portal: "FREEHIRE", url: "https://careers.northwind.example/jobs/3" },
+  ];
+  const twice = posting("a", { url: foundOn[0].url, state: { ...state, postingId: "p-a", foundOn } });
+
+  it("shows a posting once, saying which other portals found it, each with its link", () => {
+    renderScreen({ library: { postings: [twice], total: 1, more: false } });
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveTextContent(/Adzuna and FreeHire/);
+    const line = screen.getByText(/Found on/);
+    expect(line).toHaveTextContent(/^Found on JSearch.*, Adzuna.* and FreeHire.*, as the same job\. Not the same job$/);
+    expect(within(line).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(foundOn.map((entry) => entry.url));
+  });
+
+  it("opens the employer's own link when one of the portals has it", () => {
+    renderScreen({ library: { postings: [twice], total: 1, more: false } });
+    expect(screen.getByRole("link", { name: /^Open posting/ })).toHaveAttribute("href", foundOn[2].url);
+  });
+
+  it("shows them apart again on Not the same job", async () => {
+    vi.mocked(splitSameJob).mockResolvedValue({ ok: true, data: { count: 2 } });
+    renderScreen({ library: { postings: [twice], total: 1, more: false } });
+    await userEvent.click(screen.getByRole("button", { name: "Not the same job" }));
+    expect(splitSameJob).toHaveBeenCalledWith({ postingId: "p-a" });
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  });
+
+  it("has no Not the same job for a posting found on one portal", () => {
+    renderScreen({ library: { postings: [posting("b")], total: 1, more: false } });
+    expect(screen.queryByRole("button", { name: "Not the same job" })).not.toBeInTheDocument();
+  });
+});
+
+describe("the Archive (E22-7)", () => {
+  const archived = (id: string, extra: Partial<PostingState> = {}) => posting(id, { state: { ...state, postingId: `p-${id}`, new: true, archived: true, ...extra } });
+  const inArchive = (postings: ShownPosting[]) => ({
+    library: { postings, total: postings.length, more: false },
+    filters: { ...DEFAULT_FILTERS, tab: "archive" as const },
+    counts: { open: 4, new: 1, saved: 0, applied: 0, dismissed: 0, archived: postings.length },
+    archiveDays: 60,
+  });
+
+  it("is the last tab, with how many it holds and when postings move there (PL2)", () => {
+    renderScreen(inArchive([archived("a"), archived("b")]));
+    const tabs = screen.getByRole("navigation", { name: "Where they stand" });
+    expect(within(tabs).getByRole("link", { name: /Archive/ })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("link", { name: /Archive/ })).toHaveTextContent("2");
+    expect(within(tabs).getByRole("link", { name: /^All open/ })).toHaveAttribute("href", "/jobs");
+    expect(screen.getByText(/move here 60 days after a search last found them/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Change the days" })).toHaveAttribute("href", "/settings?section=jobs");
+  });
+
+  it("marks one a search found again as still listed, and nothing as new", () => {
+    renderScreen(inArchive([archived("a", { stillListedAt: "2026-10-03T08:00:00.000Z" }), archived("b")]));
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveTextContent("Still listed · Today");
+    expect(screen.getByRole("button", { name: /^Designer b/ })).not.toHaveTextContent("New");
+  });
+
+  it("moves back or removes the posting shown", async () => {
+    vi.mocked(moveBackPostings).mockResolvedValue({ ok: true, data: { count: 1 } });
+    vi.mocked(removeArchivedPostings).mockResolvedValue({ ok: true, data: { count: 1 } });
+    renderScreen(inArchive([archived("a"), archived("b")]));
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Move back" }));
+    expect(moveBackPostings).toHaveBeenCalledWith({ postingIds: ["p-a"] });
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Designer a/ })).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(removeArchivedPostings).toHaveBeenCalledWith({ postingIds: ["p-b"] });
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("moves back or removes those selected", async () => {
+    vi.mocked(removeArchivedPostings).mockResolvedValue({ ok: true, data: { count: 2 } });
+    renderScreen(inArchive([archived("a"), archived("b"), archived("c")]));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select “Designer a”" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select “Designer c”" }));
+    expect(screen.getByRole("checkbox", { name: "2 selected" })).toBePartiallyChecked();
+    const bar = screen.getByRole("checkbox", { name: "2 selected" }).closest("div.flex-wrap") as HTMLElement;
+    await userEvent.click(within(bar).getByRole("button", { name: "Remove" }));
+    expect(removeArchivedPostings).toHaveBeenCalledWith({ postingIds: ["p-a", "p-c"] });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Designer/ })).toHaveLength(1));
+  });
+
+  it("removes all it shows once that's confirmed", async () => {
+    vi.mocked(removeAllArchived).mockResolvedValue({ ok: true, data: { count: 2 } });
+    renderScreen(inArchive([archived("a"), archived("b")]));
+    await userEvent.click(screen.getByRole("button", { name: "Remove all" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Remove all 2 postings in the Archive?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(removeAllArchived).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Remove all" }));
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove all" }));
+    expect(removeAllArchived).toHaveBeenCalledWith({ filters: { ...DEFAULT_FILTERS, tab: "archive" } });
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
+  });
+
+  it("says when it's empty", () => {
+    renderScreen(inArchive([]));
+    expect(screen.getByText("Nothing in the Archive. A posting you don't save, apply for or dismiss moves here 60 days after a search last found it.")).toBeInTheDocument();
+  });
+});
+
+describe("what the job agent found (E22-8)", () => {
+  const byAgent = (id: string, agent: PostingState["agent"]) => posting(id, { state: { ...state, postingId: `p-${id}`, agentSearches: ["Designers in Hamburg"], agent } });
+
+  it("is a choice under Found by", async () => {
+    renderScreen();
+    await choose("Found by", "the job agent");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?found=agent", { scroll: false });
+  });
+
+  it("says which of its searches found a posting", () => {
+    renderScreen({ library: { postings: [byAgent("a", null)], total: 1, more: false } });
+    expect(screen.getByRole("button", { name: /^Designer a/ })).toHaveTextContent("Found by the agent · Designers in Hamburg");
+  });
+
+  it("prepares a draft from a posting it scored, and links to one it wrote", async () => {
+    vi.mocked(prepareAgentDraft).mockResolvedValue({ ok: true, data: { jobId: "draft-job", applicationId: null } });
+    const scored = byAgent("a", { candidateId: "c-a", status: "SCORED", applicationId: null });
+    const drafted = byAgent("b", { candidateId: "c-b", status: "DRAFTED", applicationId: "app-b" });
+    renderScreen({ library: { postings: [scored, drafted], total: 2, more: false } });
+    await userEvent.click(screen.getByRole("button", { name: "Prepare draft" }));
+    expect(prepareAgentDraft).toHaveBeenCalledWith({ candidateId: "c-a" });
+    expect(await screen.findByRole("button", { name: "Preparing draft…" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Designer b/ }));
+    expect(screen.getByRole("link", { name: "Review the draft" })).toHaveAttribute("href", "/applications/app-b");
+  });
+
+  it("says when it found nothing yet", () => {
+    renderScreen({ filters: { ...DEFAULT_FILTERS, found: "agent" }, counts: { open: 3, new: 0, saved: 0, applied: 0, dismissed: 0, archived: 0 } });
+    expect(screen.getByText("Nothing from the job agent here yet. What its runs find lands here, best first.")).toBeInTheDocument();
   });
 });

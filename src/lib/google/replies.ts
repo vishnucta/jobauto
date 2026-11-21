@@ -46,7 +46,7 @@ export async function setReplyHandled(emailId: string, handled: boolean): Promis
   return count > 0;
 }
 
-/** Links a mail to an application ("Needs a look"), with the rest of its thread. Null unlinks. */
+/** Links a mail to an application, with the rest of its thread: from "Needs a look", or moved from another (public #134). Null unlinks. */
 export async function linkThread(emailId: string, applicationId: string | null): Promise<void> {
   const email = await prisma.emailMessage.findUnique({ where: { id: emailId }, select: { threadId: true } });
   if (!email) throw new ActionError(GONE);

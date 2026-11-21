@@ -28,9 +28,9 @@ export function WeeklyTarget({ progress }: { progress: WeeklyProgress }) {
   const status = weekStatus({ ...progress, target });
 
   return (
-    <section aria-labelledby="week-heading" className={`${card} gap-4 px-7 py-[26px]`}>
+    <section aria-labelledby="target-heading" className={`${card} gap-4 px-7 py-[26px]`}>
       <div className="flex items-baseline justify-between gap-3">
-        <h2 id="week-heading" className="text-[15px] font-medium">
+        <h2 id="target-heading" className="text-[15px] font-medium">
           This week
         </h2>
         {target > 0 && streak > 0 && <span className="text-meta text-muted">{plural(streak, "week", "weeks")} in a row</span>}

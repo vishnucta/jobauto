@@ -18,15 +18,22 @@ import {
 } from "@/lib/profile";
 import { loadProfileName } from "@/lib/profile-data";
 import { firstSort, nextSort } from "@/lib/profile-entries";
-import { loadSettings, saveSettings } from "@/lib/settings-data";
+import { loadProfileSettings, saveProfileSettings } from "@/lib/profiles";
 
 // What the profile's changes do. The profile's Server Actions
 // (src/app/(app)/profile/actions.ts) check the session and the form's input,
 // then call these; the Claude connector's tools
-// (src/lib/connector/tools/profile.ts) call them too.
+// (src/lib/connector/tools/profile.ts) call them too. Since there are several
+// profiles (E24-1), a change that adds to a list, orders it or touches a
+// profile's own headline, summary or settings takes that profile's id; the
+// rest of the basics, the photo and the languages are every profile's.
 
-/** Saves the Basics (PRO-1, PRO-2): one row per filled-in field, and a cleared one's row removed. Answers with whether the name changed. */
-export async function saveBasicsFields(basics: Basics): Promise<{ nameChanged: boolean }> {
+/**
+ * Saves the Basics (PRO-1, PRO-2): one row per filled-in shared field, and a
+ * cleared one's row removed; the headline and summary go on the profile
+ * (E24-1). Answers with whether the name changed.
+ */
+export async function saveBasicsFields(profileId: string, basics: Basics): Promise<{ nameChanged: boolean }> {
   const before = await loadProfileName();
   await prisma.$transaction([
     ...Object.entries(fieldsFromBasics(basics)).map(([key, value]) =>
@@ -36,6 +43,8 @@ export async function saveBasicsFields(basics: Basics): Promise<{ nameChanged: b
     ),
     // The old one-line address, now held by the four address fields.
     prisma.profileField.deleteMany({ where: { key: LEGACY_ADDRESS_KEY } }),
+    // The headline and summary are the profile's own (E24-1).
+    prisma.profile.updateMany({ where: { id: profileId }, data: { headline: basics.headline, summary: basics.summary } }),
   ]);
   return { nameChanged: before !== basics.name };
 }
@@ -67,7 +76,7 @@ export async function deletePhoto(): Promise<void> {
 
 // ─── Languages (PRO-4) ───────────────────────────────────────────────────────
 
-/** Adds a language with its level. Adding one that exists, in any case, updates its level instead of adding a duplicate. */
+/** Adds a language with its level, for every profile. Adding one that exists, in any case, updates its level instead of adding a duplicate. */
 export async function addOrUpdateLanguage(name: string, level: LanguageLevel) {
   const existing = await prisma.language.findUnique({ where: { name } });
   const language = existing
@@ -77,24 +86,26 @@ export async function addOrUpdateLanguage(name: string, level: LanguageLevel) {
 }
 
 // ─── Entries (PRO-5 to PRO-8, PRO-13, #218) ──────────────────────────────────
-// "+ Add…" makes a new entry, blank unless `data` fills it in; Undo puts a
-// removed one back from what was kept of it.
+// "+ Add…" makes a new entry in a profile, blank unless `data` fills it in;
+// Undo puts a removed one back into its profile from what was kept of it.
+// Sort values count only that profile's entries (E24-1).
 
 /** "+ Add a role": last in date order (a blank one has no dates yet), first in an order set by hand. */
-export async function newExperience(data: Omit<Prisma.ExperienceCreateInput, "sort"> = {}) {
-  const manual = (await loadSettings()).experienceOrder === "manual";
-  const sort = manual ? await firstSort(prisma.experience) : await nextSort(prisma.experience);
-  return prisma.experience.create({ data: { ...data, sort } });
+export async function newExperience(profileId: string, data: Omit<Prisma.ExperienceUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  const manual = (await loadProfileSettings(profileId)).experienceOrder === "manual";
+  const sort = manual ? await firstSort(prisma.experience, { profileId }) : await nextSort(prisma.experience, { profileId });
+  return prisma.experience.create({ data: { ...data, profileId, sort } });
 }
 
-/** Puts a removed role back, with the links to skills that still exist; answers with it and those skills' ids. */
-export async function restoreExperienceEntry({ skillIds, ...entry }: ExperienceItem) {
-  const skills = await prisma.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true } });
+/** Puts a removed role back, with the links to the profile's skills that still exist; answers with it and those skills' ids. */
+export async function restoreExperienceEntry(profileId: string, { skillIds, ...entry }: ExperienceItem) {
+  const skills = await prisma.skill.findMany({ where: { profileId, id: { in: skillIds } }, select: { id: true } });
   const restored = await prisma.experience.upsert({
     where: { id: entry.id },
     create: {
       ...entry,
-      sort: await nextSort(prisma.experience),
+      profileId,
+      sort: await nextSort(prisma.experience, { profileId }),
       skills: { create: skills.map((skill) => ({ skillId: skill.id })) },
     },
     update: {},
@@ -103,20 +114,21 @@ export async function restoreExperienceEntry({ skillIds, ...entry }: ExperienceI
 }
 
 /** "+ Add a project": placed like a new role. */
-export async function newProject(data: Omit<Prisma.ProjectCreateInput, "sort"> = {}) {
-  const manual = (await loadSettings()).projectOrder === "manual";
-  const sort = manual ? await firstSort(prisma.project) : await nextSort(prisma.project);
-  return prisma.project.create({ data: { ...data, sort } });
+export async function newProject(profileId: string, data: Omit<Prisma.ProjectUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  const manual = (await loadProfileSettings(profileId)).projectOrder === "manual";
+  const sort = manual ? await firstSort(prisma.project, { profileId }) : await nextSort(prisma.project, { profileId });
+  return prisma.project.create({ data: { ...data, profileId, sort } });
 }
 
-/** Puts a removed project back, with the links to skills that still exist; answers with it and those skills' ids. */
-export async function restoreProjectEntry({ skillIds, ...entry }: ProjectItem) {
-  const skills = await prisma.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true } });
+/** Puts a removed project back, with the links to the profile's skills that still exist; answers with it and those skills' ids. */
+export async function restoreProjectEntry(profileId: string, { skillIds, ...entry }: ProjectItem) {
+  const skills = await prisma.skill.findMany({ where: { profileId, id: { in: skillIds } }, select: { id: true } });
   const restored = await prisma.project.upsert({
     where: { id: entry.id },
     create: {
       ...entry,
-      sort: await nextSort(prisma.project),
+      profileId,
+      sort: await nextSort(prisma.project, { profileId }),
       skills: { create: skills.map((skill) => ({ skillId: skill.id })) },
     },
     update: {},
@@ -125,42 +137,42 @@ export async function restoreProjectEntry({ skillIds, ...entry }: ProjectItem) {
 }
 
 /** "+ Add education": placed like a new role. */
-export async function newEducation(data: Omit<Prisma.EducationCreateInput, "sort"> = {}) {
-  const manual = (await loadSettings()).educationOrder === "manual";
-  const sort = manual ? await firstSort(prisma.education) : await nextSort(prisma.education);
-  return prisma.education.create({ data: { ...data, sort } });
+export async function newEducation(profileId: string, data: Omit<Prisma.EducationUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  const manual = (await loadProfileSettings(profileId)).educationOrder === "manual";
+  const sort = manual ? await firstSort(prisma.education, { profileId }) : await nextSort(prisma.education, { profileId });
+  return prisma.education.create({ data: { ...data, profileId, sort } });
 }
 
-export async function restoreEducationEntry(entry: EducationItem) {
+export async function restoreEducationEntry(profileId: string, entry: EducationItem) {
   return prisma.education.upsert({
     where: { id: entry.id },
-    create: { ...entry, sort: await nextSort(prisma.education) },
+    create: { ...entry, profileId, sort: await nextSort(prisma.education, { profileId }) },
     update: {},
   });
 }
 
 /** "+ Add a publication": at the top, where the newest usually goes. */
-export async function newPublication(data: Omit<Prisma.PublicationCreateInput, "sort"> = {}) {
-  return prisma.publication.create({ data: { ...data, sort: await firstSort(prisma.publication) } });
+export async function newPublication(profileId: string, data: Omit<Prisma.PublicationUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  return prisma.publication.create({ data: { ...data, profileId, sort: await firstSort(prisma.publication, { profileId }) } });
 }
 
 /** Puts a removed publication back, last; the list then saves its place in the order. */
-export async function restorePublicationEntry(entry: PublicationItem) {
+export async function restorePublicationEntry(profileId: string, entry: PublicationItem) {
   return prisma.publication.upsert({
     where: { id: entry.id },
-    create: { ...entry, sort: await nextSort(prisma.publication) },
+    create: { ...entry, profileId, sort: await nextSort(prisma.publication, { profileId }) },
     update: {},
   });
 }
 
-export async function newReference(data: Omit<Prisma.ReferenceCreateInput, "sort"> = {}) {
-  return prisma.reference.create({ data: { ...data, sort: await nextSort(prisma.reference) } });
+export async function newReference(profileId: string, data: Omit<Prisma.ReferenceUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  return prisma.reference.create({ data: { ...data, profileId, sort: await nextSort(prisma.reference, { profileId }) } });
 }
 
-export async function restoreReferenceEntry(entry: ReferenceItem) {
+export async function restoreReferenceEntry(profileId: string, entry: ReferenceItem) {
   return prisma.reference.upsert({
     where: { id: entry.id },
-    create: { ...entry, sort: await nextSort(prisma.reference) },
+    create: { ...entry, profileId, sort: await nextSort(prisma.reference, { profileId }) },
     update: {},
   });
 }
@@ -170,20 +182,21 @@ export async function restoreReferenceEntry(entry: ReferenceItem) {
 /** The sections ordered by date until an entry is moved by hand. */
 export type OrderedSection = "experience" | "project" | "education";
 
-/** Each ordered section's setting. */
+/** Each ordered section's setting, one of the profile's own (E24-1). */
 export const ORDER_SETTING = { experience: "experienceOrder", project: "projectOrder", education: "educationOrder" } as const;
 
-/** The section's table, as far as ordering needs it. */
-function entries(db: Prisma.TransactionClient, section: OrderedSection) {
+/** The section's table in one profile, as far as ordering needs it. */
+function entries(db: Prisma.TransactionClient, section: OrderedSection, profileId: string) {
   const select = { id: true, sort: true, startYear: true, startMonth: true, endYear: true, endMonth: true, current: true } as const;
+  const where = { profileId };
   const setSort = (entryId: string, sort: number) => ({ where: { id: entryId }, data: { sort } });
   if (section === "experience") {
-    return { list: () => db.experience.findMany({ select }), setSort: (entryId: string, sort: number) => db.experience.update(setSort(entryId, sort)) };
+    return { list: () => db.experience.findMany({ where, select }), setSort: (entryId: string, sort: number) => db.experience.update(setSort(entryId, sort)) };
   }
   if (section === "project") {
-    return { list: () => db.project.findMany({ select }), setSort: (entryId: string, sort: number) => db.project.update(setSort(entryId, sort)) };
+    return { list: () => db.project.findMany({ where, select }), setSort: (entryId: string, sort: number) => db.project.update(setSort(entryId, sort)) };
   }
-  return { list: () => db.education.findMany({ select }), setSort: (entryId: string, sort: number) => db.education.update(setSort(entryId, sort)) };
+  return { list: () => db.education.findMany({ where, select }), setSort: (entryId: string, sort: number) => db.education.update(setSort(entryId, sort)) };
 }
 
 /** Whether `ids` is every one of the `known` ids, each once. */
@@ -191,29 +204,29 @@ const isWholeList = (ids: string[], known: Set<string>) =>
   ids.length === known.size && new Set(ids).size === ids.length && ids.every((entryId) => known.has(entryId));
 
 /**
- * Saves an order set by hand: `ids` is every entry of the section, in the new
- * order. From then on the section keeps that order instead of dates.
+ * Saves an order set by hand: `ids` is every entry of the profile's section,
+ * in the new order. From then on the section keeps that order instead of dates.
  */
-export async function reorderSection(section: OrderedSection, ids: string[]): Promise<void> {
+export async function reorderSection(profileId: string, section: OrderedSection, ids: string[]): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    const table = entries(tx, section);
+    const table = entries(tx, section, profileId);
     const known = new Set((await table.list()).map((entry) => entry.id));
     if (!isWholeList(ids, known)) throw new ActionError("The list changed in the meantime. Reload the page and try again.");
     for (const [sort, entryId] of ids.entries()) await table.setSort(entryId, sort);
-    await saveSettings({ [ORDER_SETTING[section]]: "manual" }, tx);
+    await saveProfileSettings(profileId, { [ORDER_SETTING[section]]: "manual" }, tx);
   });
 }
 
-/** Goes back to date order; answers with the section's ids in that order. */
-export async function sortSectionByDate(section: OrderedSection): Promise<string[]> {
-  await saveSettings({ [ORDER_SETTING[section]]: "date" });
-  return inEntryOrder(await entries(prisma, section).list(), "date").map((entry) => entry.id);
+/** Goes back to date order; answers with the profile's section's ids in that order. */
+export async function sortSectionByDate(profileId: string, section: OrderedSection): Promise<string[]> {
+  await saveProfileSettings(profileId, { [ORDER_SETTING[section]]: "date" });
+  return inEntryOrder(await entries(prisma, section, profileId).list(), "date").map((entry) => entry.id);
 }
 
-/** Saves the publications' order (#218): `ids` is every publication, in the new order. */
-export async function reorderPublicationList(ids: string[]): Promise<void> {
+/** Saves the publications' order (#218): `ids` is every publication of the profile, in the new order. */
+export async function reorderPublicationList(profileId: string, ids: string[]): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    const known = new Set((await tx.publication.findMany({ select: { id: true } })).map((entry) => entry.id));
+    const known = new Set((await tx.publication.findMany({ where: { profileId }, select: { id: true } })).map((entry) => entry.id));
     if (!isWholeList(ids, known)) throw new ActionError("The list changed in the meantime. Reload the page and try again.");
     for (const [sort, entryId] of ids.entries()) await tx.publication.update({ where: { id: entryId }, data: { sort } });
   });

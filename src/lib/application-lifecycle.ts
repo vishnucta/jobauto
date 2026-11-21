@@ -19,10 +19,16 @@ const GONE = "That application no longer exists.";
 export async function setApplicationArchived(applicationId: string, archived: boolean): Promise<void> {
   const current = await prisma.application.findUnique({ where: { id: applicationId }, select: { updatedAt: true } });
   if (!current) throw new ActionError(GONE);
-  await prisma.application.update({
-    where: { id: applicationId },
-    data: { archivedAt: archived ? new Date() : null, updatedAt: current.updatedAt },
-  });
+  await prisma.$transaction([
+    prisma.application.update({
+      where: { id: applicationId },
+      data: { archivedAt: archived ? new Date() : null, updatedAt: current.updatedAt },
+    }),
+    // Its mail's status suggestions go with it (#358): they'd only nag from the Inbox.
+    ...(archived
+      ? [prisma.emailMessage.updateMany({ where: { applicationId, suggestedStatus: { not: null } }, data: { suggestedStatus: null } })]
+      : []),
+  ]);
 }
 
 /**

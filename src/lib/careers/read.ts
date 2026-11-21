@@ -2,14 +2,14 @@ import "server-only";
 
 import { parse } from "node-html-parser";
 
-import { PostingSource } from "@/generated/prisma/enums";
 import type { FoundPosting } from "@/lib/job-search/search";
+import { CAREERS_SOURCE } from "@/lib/job-search/sources";
 import { fetchHtml, htmlText } from "@/lib/posting-fetch";
 
 import { BOARD_NAMES, type Board } from "./boards";
 
 // Reading the jobs on a careers page (jobauto fork): each job system's public
-// feed of open jobs, in the shape Find jobs' postings have. Feeds sit on the
+// feed of open jobs, in the shape every posting has. Feeds sit on the
 // job system's own hosts; a page of the employer's own goes through the
 // guarded fetch, as a posting's link does.
 
@@ -57,7 +57,7 @@ const web = (value: string) => (/^https?:\/\//i.test(value) ? value.slice(0, 200
 function job(board: Board, fields: { id: string; title: string; company: string; place?: string; remote?: boolean | null; postedAt?: string | null; url: string; description?: string }): FoundPosting {
   const description = (fields.description ?? "").slice(0, 100_000);
   return {
-    source: PostingSource.CAREERS,
+    source: CAREERS_SOURCE,
     externalId: `${board.kind}:${boardKey(board)}:${fields.id}`.slice(0, 500),
     title: fields.title.slice(0, 500),
     company: fields.company.slice(0, 300),

@@ -6,13 +6,17 @@ import { resetData, sql } from "./support";
 // The setup guide (E21): it opens by itself on a fresh install and walks
 // through each step.
 // Hosted AI keys aren't checked here: that would reach the vendors.
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
   await resetData();
+  // Axe reads colours as they are (#381): a button's colour transition under the pointer, caught halfway, failed contrast now and then.
+  await page.emulateMedia({ reducedMotion: "reduce" });
 });
 
 async function expectAccessible(page: Page) {
   const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
-  expect(violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical").map((violation) => violation.id)).toEqual([]);
+  // Each with the elements it found, so a failure that doesn't repeat can still be traced.
+  const serious = violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical");
+  expect(serious.map((violation) => `${violation.id}: ${violation.nodes.map((node) => `${node.target.join(" ")} ${node.any[0]?.message ?? ""}`).join("; ")}`)).toEqual([]);
 }
 
 const freshInstall = async () => {
@@ -47,16 +51,26 @@ test("opens by itself on a fresh install and walks through every step", async ({
   expect(saved.count).toBe(0);
   await page.getByRole("link", { name: "Continue →" }).click();
 
-  // Job search: JSearch with a key, checked against the fake source.
+  // Job search (E22-9): where and what, then JSearch ticked with a key, checked against the fake source.
   await expect(page.getByRole("heading", { name: "Where to look for jobs" })).toBeVisible();
   await page.getByRole("radio", { name: "Any kind of job" }).click();
-  await page.getByRole("radio", { name: "JSearch" }).click();
+  await page.getByRole("checkbox", { name: /^JSearch/ }).check();
   await page.getByLabel("JSearch API key").fill("e2e-jsearch-key");
   await page.getByRole("button", { name: "Check it" }).click();
   await expect(page.getByText("It works: Dossier can search JSearch.")).toBeVisible();
   await page.getByRole("link", { name: "Continue →" }).click();
 
-  // Scoring: your AI is the choice already.
+  // Scoring: your AI is the choice already; the other scoring models come with their key steps and a check (E25-8).
+  await expect(page.getByRole("radio", { name: "Your AI" })).toBeChecked();
+  await expect(page.getByRole("radio")).toHaveCount(4);
+  await page.getByRole("radio", { name: /^OpenRouter/ }).click();
+  await expect(page.getByRole("list", { name: "Setting up OpenRouter" })).toBeVisible();
+  await expect(page.getByLabel("OpenRouter key")).toBeVisible();
+  await expect(page.getByLabel("Model")).toHaveAttribute("placeholder", "openai/gpt-6-luna");
+  await page.getByRole("radio", { name: /^OpenAI Decisions/ }).click();
+  await expect(page.getByLabel("OpenAI key")).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("radio", { name: "Your AI" }).click();
   await expect(page.getByRole("radio", { name: "Your AI" })).toBeChecked();
   await page.getByRole("link", { name: "Continue →" }).click();
 
@@ -90,7 +104,8 @@ test("opens again from Settings, and leaving it goes back to the app for good", 
   await page.getByRole("navigation", { name: "Setup steps" }).getByRole("link", { name: /Scoring/ }).click();
   await expect(page.getByRole("heading", { name: "How to judge a posting" })).toBeVisible();
 
-  // Where it was left, until it's left for good.
+  // Where it was left, until it's left for good. A step is saved after it shows (#381): go back once it is.
+  await expect.poll(async () => (await sql<{ value: string }>(`SELECT value FROM "Setting" WHERE key = 'setupGuide'`))[0]?.value ?? "").toContain("scoring");
   await page.goto("/welcome");
   await expect(page.getByRole("heading", { name: "How to judge a posting" })).toBeVisible();
   await page.getByRole("button", { name: "Leave setup" }).click();

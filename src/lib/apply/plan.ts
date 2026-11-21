@@ -1,5 +1,3 @@
-import type { PostingSource } from "@/generated/prisma/enums";
-
 import { detectAts, hostOf, type AtsInfo } from "./ats";
 import { applyEmailIn } from "./email-detect";
 
@@ -27,7 +25,7 @@ export function planFor({
 }: {
   postingUrl: string;
   postingText: string;
-  posting: { url: string; source: PostingSource } | null;
+  posting: { url: string; source: string } | null;
 }): ApplyPlan {
   const url = [postingUrl, posting?.url ?? ""].find((link) => /^https?:\/\//i.test(link)) ?? "";
   const ats = detectAts(url);

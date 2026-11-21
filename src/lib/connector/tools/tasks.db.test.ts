@@ -231,12 +231,18 @@ describe("the task tools", () => {
     expect(await check(agentDraft.id)).toMatchObject({ candidate_id: "candidate-1", result: { application_id: applicationId }, link: "https://dossier.example/agent" });
 
     await savePosting(posting);
-    const score = await task("posting-score", { input: { posting }, result: { score: 82, reasons: ["Led a design system"], redFlags: [] } });
+    // How many requirements the profile covers (E32-2), for each profile it was scored against (E25-5).
+    const requirements = [
+      { text: "Figma", mustHave: true, covered: true, evidence: "Designer at Acme", skill: "Figma" },
+      { text: "Go", mustHave: false, covered: false, evidence: null, skill: null },
+    ];
+    const fit = { score: 82, reasons: ["Led a design system"], redFlags: [], breakdown: { factors: [], cap: null, requirements }, profileId: "first", profileName: "" };
+    const score = await task("posting-score", { input: { posting, profiles: "first" }, result: { score: fit, scores: [fit] } });
     expect(await check(score.id)).toMatchObject({
       task: "Scoring a posting",
       posting: "Product Designer at Acme",
-      result: { score: 82, band: "Good fit", reasons: ["Led a design system"], red_flags: [] },
-      link: "https://dossier.example/jobs?view=saved",
+      result: { best: { covered: "1 of 2", fit: "Good fit" }, reasons: ["Led a design system"] },
+      link: "https://dossier.example/jobs?show=saved",
     });
 
     const startups = await task("startups-refresh", {

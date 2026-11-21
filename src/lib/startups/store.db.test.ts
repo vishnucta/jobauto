@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { alertIfOn } from "@/lib/alerts";
+import { emit } from "@/lib/notifications/notify";
 import { loadSettings } from "@/lib/settings-data";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { placeOf } from "./place";
 import { refreshStartups, refreshStartupsJob } from "./refresh";
@@ -14,6 +14,8 @@ import {
   markSentAsContacted,
   removeStartup,
   rescoreStartups,
+  saveStartupScore,
+  startupPosting,
   startupPostingText,
   sweepStartups,
   updateStartup,
@@ -35,7 +37,9 @@ const profile = vi.hoisted(() => ({
   ],
   experience: [],
 }));
-vi.mock("@/lib/profile-data", () => ({ loadProfile: async () => profile }));
+// Other profiles (E24-6) by id; any other id is the first's.
+const others = vi.hoisted(() => new Map<string, unknown>());
+vi.mock("@/lib/profile-data", () => ({ loadProfile: async (id?: string) => (id && others.get(id)) ?? profile }));
 vi.mock("@/lib/log", () => ({ logServerError: vi.fn() }));
 // Startups' sites and the sources answer from here, never the internet.
 const web = vi.hoisted(() => ({ emails: [] as StartupEmail[], noApplicationsFrom: "", looked: [] as string[] }));
@@ -48,7 +52,7 @@ vi.mock("./emails", async (importOriginal) => ({
 }));
 const sources = vi.hoisted(() => ({ yc: [] as unknown[], hnFails: false, licensed: [] as unknown[] }));
 vi.mock("./sources/licences", () => ({ fetchLicensedFirms: async () => sources.licensed }));
-vi.mock("@/lib/alerts", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/alerts")>()), alertIfOn: vi.fn(async () => {}) }));
+vi.mock("@/lib/notifications/notify", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/notifications/notify")>()), emit: vi.fn(async () => 0) }));
 vi.mock("./sources/yc", () => ({ fetchYcStartups: async () => sources.yc }));
 vi.mock("./sources/hn", async () => {
   const { SourceError } = await import("./http");
@@ -86,7 +90,7 @@ beforeEach(async () => {
   await resetDatabase(prisma());
   web.emails = [];
   sources.licensed = [];
-  vi.mocked(alertIfOn).mockClear();
+  vi.mocked(emit).mockClear();
   web.noApplicationsFrom = "";
   web.looked = [];
   sources.yc = [];
@@ -138,12 +142,23 @@ describe("keeping startups (#222)", () => {
     expect(await names({ source: "YC" })).toEqual(["Faraway"]);
     expect(await names({ withEmail: true })).toEqual(["Munich Co"]);
     expect(await names({ q: "remote co" })).toEqual(["Remote Co"]);
-    expect(await names({ minScore: 70 })).toEqual(["Acme"]);
+    // Where it hires from, for the profile's country (E32-4).
+    expect((await listStartups(filter({}), berlin)).startups.map((entry) => [entry.company, entry.hiresFrom])).toEqual([
+      ["Acme", "hires from Germany"],
+      ["Munich Co", "hires from Germany"],
+      ["Remote Co", "hires from Germany"],
+      ["Faraway", ""],
+    ]);
 
+    // The tabs (PL1): Hiring now is every one not dismissed; Applied for, contacted or with an application.
     const [faraway] = (await listStartups(filter({ source: "YC" }), berlin)).startups;
     await updateStartup(faraway.id, { status: "DISMISSED", notes: "Too far" });
-    const list = await listStartups(filter({ status: "DISMISSED" }), berlin, { limit: 1 });
-    expect(list).toMatchObject({ total: 1, counts: { NEW: 3, SAVED: 0, CONTACTED: 0, DISMISSED: 1 } });
+    const list = await listStartups(filter({ view: "DISMISSED" }), berlin, { limit: 1 });
+    expect(list).toMatchObject({ total: 1, counts: { HIRING: 3, NEW: 3, SAVED: 0, APPLIED: 0, DISMISSED: 1 } });
+    const [acme] = (await listStartups(filter({ q: "acme" }), berlin)).startups;
+    await prisma().startup.update({ where: { id: acme.id }, data: { applicationId: (await prisma().application.create({ data: { title: "Acme" } })).id } });
+    expect(await names({ view: "APPLIED" })).toEqual(["Acme"]);
+    expect(await names({ view: "HIRING" })).toEqual(["Acme", "Munich Co", "Remote Co"]);
     expect(list.startups[0].notes).toBe("Too far");
     expect(await updateStartup("missing", { status: "SAVED" })).toBeNull();
   });
@@ -169,7 +184,7 @@ describe("keeping startups (#222)", () => {
     web.emails = [address("jobs@acme.io")];
     const looked = await lookUpStartup(row.id, { now });
     expect(looked).toMatchObject({ emails: [{ email: "jobs@acme.io" }], emailsCheckedAt: now.toISOString(), peopleCheckedAt: null });
-    expect(looked?.reasons).toContain("Publishes an address for applications");
+    expect(looked?.reasons).toContainEqual({ text: "Publishes an address for applications", good: true });
 
     web.emails = [address("jane@acme.io", { label: "Person", onRequest: true })];
     web.noApplicationsFrom = "“No unsolicited applications.” (acme.io/careers)";
@@ -201,6 +216,15 @@ describe("keeping startups (#222)", () => {
     expect(await getStartup(rows.Kept.id)).toMatchObject({ emails: [{ email: "jobs@kept.io" }], peopleCheckedAt: null });
   });
 
+  it("removes job seekers' posts nobody touched (public #144)", async () => {
+    const seeker = (externalId: string) => startup({ externalId, company: "I’m a backend engineer", website: "", details: "I’m a backend engineer | Software Engineer | Remote\nLooking for my next role." });
+    await upsertStartups([startup(), seeker("2"), seeker("3")], now);
+    const saved = (await prisma().startup.findFirstOrThrow({ where: { externalId: "3" } })).id;
+    await prisma().startup.update({ where: { id: saved }, data: { status: "SAVED" } });
+    expect(await sweepStartups(now)).toEqual({ removed: 1, addressesDropped: 0 });
+    expect((await prisma().startup.findMany({ orderBy: { externalId: "asc" } })).map((row) => row.externalId)).toEqual(["1", "3"]);
+  });
+
   it("scores again after the profile changed", async () => {
     await upsertStartups([startup()], now);
     profile.skills = [];
@@ -211,6 +235,56 @@ describe("keeping startups (#222)", () => {
       { id: "1", name: "Android" },
       { id: "2", name: "Kotlin" },
     ];
+  });
+
+  it("scores against every profile and keeps the best one's (E24-6)", async () => {
+    const ios = await prisma().profile.create({ data: { name: "iOS", sort: 1 } });
+    others.set(ios.id, { ...profile, basics: { ...profile.basics, headline: "iOS engineer" }, skills: [{ id: "3", name: "Swift" }] });
+    try {
+      const swift = startup({ externalId: "2", company: "Swifty", website: "https://swifty.io", summary: "Swift apps for bakers", details: "Swifty | iOS Engineer | Berlin\nSwift.", roles: ["iOS Engineer"] });
+      await upsertStartups([startup(), swift], now);
+      const rows = await prisma().startup.findMany({ orderBy: { externalId: "asc" } });
+      expect(rows.map((row) => [row.company, row.profileId])).toEqual([
+        ["Acme", TEST_PROFILE_ID],
+        ["Swifty", ios.id],
+      ]);
+      expect(rows[1].reasons).toContainEqual(expect.stringMatching(/Swift/));
+      expect((await getStartup(rows[1].id))?.profileId).toBe(ios.id);
+
+      // Without that profile, the first's is the best again.
+      others.delete(ios.id);
+      await prisma().profile.delete({ where: { id: ios.id } });
+      expect((await prisma().startup.findUniqueOrThrow({ where: { id: rows[1].id } })).profileId).toBeNull();
+      await rescoreStartups(now);
+      expect((await prisma().startup.findUniqueOrThrow({ where: { id: rows[1].id } })).profileId).toBe(TEST_PROFILE_ID);
+    } finally {
+      others.clear();
+    }
+  });
+
+  it("keeps the scoring model's score through refreshes and site look-ups, and scores the post without addresses (#524)", async () => {
+    await upsertStartups([startup()], now);
+    const [row] = await prisma().startup.findMany();
+    expect(await getStartup(row.id)).toMatchObject({ aiScored: false, reasons: expect.arrayContaining([{ text: expect.any(String), good: true }]) });
+    const posting = await startupPosting(row.id);
+    expect(posting).toMatchObject({ title: "Android Engineer", company: "Acme", place: "Berlin, Germany", remote: false });
+    expect(posting!.description).toContain("Kotlin, Android.");
+    expect(posting!.description).not.toMatch(/jobs@|jane at/);
+
+    const reasons = [
+      { text: "Builds Android apps in Kotlin", good: true },
+      { text: "Wants fluent German", good: false },
+    ];
+    expect(await saveStartupScore(row.id, { score: 81.4, reasons: ["Builds Android apps in Kotlin"], redFlags: ["Wants fluent German"] }, "score-posting@3", TEST_PROFILE_ID)).toMatchObject({
+      score: 81,
+      aiScored: true,
+      reasons,
+    });
+    await upsertStartups([startup({ summary: "Now with tractors" })], now);
+    await rescoreStartups(now);
+    await lookUpStartup(row.id, { now });
+    expect(await getStartup(row.id)).toMatchObject({ summary: "Now with tractors", score: 81, aiScored: true, reasons });
+    expect((await prisma().startup.findUniqueOrThrow({ where: { id: row.id } })).scoredWith).toBe("score-posting@3");
   });
 
   it("hands New application the startup's text without any address", async () => {
@@ -225,19 +299,18 @@ describe("keeping startups (#222)", () => {
 });
 
 describe("refreshing startups (#222)", () => {
-  it("keeps newly licensed firms, and alerts about new ones from the second look on (jobauto fork)", async () => {
+  it("keeps newly licensed firms, and notifies about new ones from the second look on (jobauto fork)", async () => {
     const firm = (externalId: string, company: string) => startup({ source: "LICENCE", externalId, company, website: "", location: "Frankfurt am Main, Germany", stage: "Investment firm", roles: [] });
     sources.licensed = [firm("mifid:1", "Xervices GmbH"), firm("mica:2", "Elbe Digital Assets GmbH")];
     await refreshStartups(async () => {}, new AbortController().signal, now);
     expect(await prisma().startup.count({ where: { source: "LICENCE" } })).toBe(2);
-    // The first look shows the past year's firms without an alert.
-    expect(alertIfOn).not.toHaveBeenCalled();
+    // The first look shows the past year's firms without a notification.
+    expect(emit).not.toHaveBeenCalled();
 
     sources.licensed = [...sources.licensed, firm("mifid:3", "Nordlicht Markets GmbH")];
     await refreshStartups(async () => {}, new AbortController().signal, now);
-    expect(alertIfOn).toHaveBeenCalledTimes(1);
-    expect(alertIfOn).toHaveBeenCalledWith(expect.objectContaining({ title: "A newly licensed firm in Germany", open: "/startups?source=licence" }));
-    expect(vi.mocked(alertIfOn).mock.calls[0][0].message).toMatch(/^\d+ · Nordlicht Markets GmbH, Frankfurt am Main$/);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith("startups.licensed", { firms: [{ company: "Nordlicht Markets GmbH", place: "Frankfurt am Main" }] }, now);
   });
 
   it("keeps what both sources found, says which failed, and looks up the best new sites", async () => {

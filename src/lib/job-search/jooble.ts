@@ -2,9 +2,10 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { PortalAdapter, PortalFields } from "@/lib/portals/engine";
 import { fetchPosting } from "@/lib/posting-fetch";
 
-import type { JobSourceAdapter, RequestContext, SourceCredentials } from "./adapter";
+import type { RequestContext } from "./adapter";
 import { countryName } from "./countries";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
@@ -18,6 +19,8 @@ import { plainText } from "./text";
 // no country, and the free plan is 500 searches in all, not a month: a page of
 // results is one of them, and nothing here asks twice. Only a snippet of each
 // posting comes back, so the rest is read from its page when it's selected.
+// A built-in portal with code of its own (jobauto fork; see
+// src/lib/portals/built-in.ts), its key the "key" field.
 
 const BASE_URL = "https://jooble.org/api";
 /** What the log calls a request: its real path holds the key. */
@@ -99,8 +102,8 @@ function searchBody(query: SearchQuery, page: number): Record<string, string> {
     // Jooble has no remote filter: the word does what it can.
     keywords: query.remoteOnly ? `${query.keywords} remote` : query.keywords,
     location: query.place || (query.country ? countryName(query.country) : ""),
-    // A radius only means something around a place.
-    ...(query.place ? { radius: String(radiusFor(query.radiusKm)) } : {}),
+    // A radius only means something around a place; Any distance sends none (public #138).
+    ...(query.place && query.radiusKm !== null ? { radius: String(radiusFor(query.radiusKm)) } : {}),
     page: String(page),
   };
 }
@@ -111,9 +114,9 @@ function cursorOf(next: string | null): { page: number; seen: number } {
   return match ? { page: Math.max(1, Number(match[1])), seen: Number(match[2]) } : { page: 1, seen: 0 };
 }
 
-async function searchPage(query: SearchQuery, { key }: SourceCredentials["JOOBLE"], next: string | null, context: RequestContext = {}): Promise<SearchPage> {
+async function searchPage(query: SearchQuery, fields: PortalFields, next: string | null, context: RequestContext = {}): Promise<SearchPage> {
   const { page, seen } = cursorOf(next);
-  const url = new URL(`${context.baseUrl ?? BASE_URL}/${encodeURIComponent(key)}`);
+  const url = new URL(`${context.baseUrl ?? BASE_URL}/${encodeURIComponent(fields.key ?? "")}`);
   const answer = responseSchema.safeParse(await requestJson("JOOBLE", url, { body: searchBody(query, page), label: CALL, signal: context.signal }));
   if (!answer.success) throw jobSearchError("changed", "JOOBLE", { detail: `${CALL}: unexpected answer` });
 
@@ -137,8 +140,8 @@ async function searchPage(query: SearchQuery, { key }: SourceCredentials["JOOBLE
   return { postings, next: answer.data.jobs.length > 0 && given < total ? `page:${page + 1}:${given}` : null };
 }
 
-export const jooble: JobSourceAdapter<"JOOBLE"> = {
-  source: "JOOBLE",
+export const jooble: PortalAdapter = {
+  id: "JOOBLE",
   search: searchPage,
   // The rest of the posting is on its page, which the guarded fetcher reads like "Fetch" does (E7-8); Jooble's own page may turn it away.
   details: async (posting) => {
@@ -147,7 +150,7 @@ export const jooble: JobSourceAdapter<"JOOBLE"> = {
     return page.ok ? page.text : null;
   },
   // Whatever country the key is for, an answer (even without jobs) shows Jooble takes it.
-  test: async (credentials, context) => {
-    await searchPage({ keywords: "developer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, credentials, null, context);
+  test: async (fields, context) => {
+    await searchPage({ keywords: "developer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, fields, null, context);
   },
 };

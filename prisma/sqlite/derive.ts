@@ -30,8 +30,9 @@ export function sqliteSchema(postgres: string): string {
   const unknown = /@db\.\w+/.exec(schema);
   if (unknown) throw new Error(`SQLite has no ${unknown[0]}: say in prisma/sqlite/derive.ts what it becomes.`);
   // A list of values that starts empty becomes a JSON array that starts
-  // empty (see HEADER), such as the fork's PostingSearch.sources. The code
-  // only ever reads and writes such a list whole, never filters on its items.
+  // empty (see HEADER), as the fork's PostingSearch.sources was before
+  // 1.15. The code only ever reads and writes such a list whole, never
+  // filters on its items.
   const enums = new Set(Array.from(schema.matchAll(/^enum (\w+) \{/gm), (match) => match[1]));
   schema = schema.replace(/^( +\w+ +)(\w+)\[\]( *)(.*)$/gm, (line, field: string, type: string, gap: string, attributes: string) => {
     if (!SCALARS.has(type) && !enums.has(type)) return line;

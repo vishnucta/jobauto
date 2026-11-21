@@ -29,7 +29,7 @@ export const switchEmployer = action(z.object({ id, enabled: z.boolean() }), asy
 
 export const deleteEmployer = action(z.object({ id }), async ({ id: employerId }, { toast }) => {
   if (!(await removeEmployer(employerId))) throw new ActionError(GONE);
-  toast("No longer followed. The jobs found on its page stay in Find jobs.");
+  toast("No longer followed. The jobs found on its page stay in Positions.");
   return null;
 });
 

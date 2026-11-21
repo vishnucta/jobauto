@@ -2,19 +2,21 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { startJob } from "@/lib/jobs/runner";
+import { keepFound } from "@/lib/library";
 import { saveScore } from "@/lib/posting-scores";
 import { dismissPosting, savePosting } from "@/lib/postings";
 import { loadProfile } from "@/lib/profile-data";
+import { copyProfile } from "@/lib/profiles";
 import { saveSettings } from "@/lib/settings-data";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../../prisma/seed/demo";
 
 import { challengeOf, exchangeCode, issueCode, registerClient } from "../oauth";
 
-// Find jobs' tools (jobauto fork), called as Claude calls them, through
-// /api/mcp, against the test database with the demo data.
+// Positions' tools (jobauto fork, on 1.15's Positions), called as Claude
+// calls them, through /api/mcp, against the test database with the demo data.
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -39,6 +41,9 @@ import { POST } from "@/app/api/mcp/route";
 
 const prisma = () => db.client!;
 const CLAUDE = "https://claude.ai/api/mcp/auth_callback";
+/** The demo's one profile, named after its headline (prisma/seed/demo.ts), and its page. */
+const DEMO_PROFILE = "Senior Product Designer";
+const PROFILE_PAGE = `https://dossier.example/profile?profile=${TEST_PROFILE_ID}`;
 
 function found(id: string, title: string) {
   return {
@@ -98,61 +103,83 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<{
   return { isError: result.isError ?? false, text, json: json as Record<string, unknown> & unknown[] };
 }
 
-const storeSearch = (postings: unknown[], createdAt?: Date) =>
-  prisma().postingSearch.create({
+/** A kept search with what it found, in the library as a search keeps it (E22-5). */
+const storeSearch = async (postings: ReturnType<typeof found>[], createdAt?: Date) => {
+  const search = await prisma().postingSearch.create({
     data: {
-      sources: ["JSEARCH"],
+      source: "JSEARCH",
       query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" },
-      postings: postings as object[],
+      portals: [{ id: "JSEARCH", status: "done", found: postings.length, next: "page:2", message: null }],
       found: postings.length,
-      cursors: { JSEARCH: "page:2" },
       createdAt,
     },
   });
+  await keepFound(search.id, "JSEARCH", postings);
+  return search;
+};
 
-describe("Find jobs through the Claude connector", () => {
+/** A score that covers one of two requirements, as a scoring model's answers add up (E32-2). */
+const halfCovered = {
+  score: 60,
+  reasons: [],
+  redFlags: [],
+  breakdown: {
+    factors: [],
+    cap: null,
+    requirements: [
+      { text: "Figma", mustHave: true, covered: true, evidence: "Designer at Northwind", skill: "Figma" },
+      { text: "Go", mustHave: false, covered: false, evidence: null, skill: "Go" },
+    ],
+  },
+};
+
+describe("Positions through the Claude connector", () => {
   it("offers its tools, with hints that say what they change", async () => {
     const { tools } = (await rpc("tools/list", {})) as { tools: { name: string; annotations?: Record<string, boolean> }[] };
     const hints = Object.fromEntries(tools.map((entry) => [entry.name, entry.annotations]));
     expect(hints.list_postings).toEqual({ readOnlyHint: true });
-    // Unsave and restore delete a posting nothing else keeps.
+    // Dismiss trims a posting's text, which only the portal gives back.
     expect(hints.update_postings).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
     expect(hints.remove_search).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
     expect(hints.score_with_dossier).toEqual({ readOnlyHint: false, openWorldHint: true });
   });
 
-  it("lists saved and dismissed postings and past searches, with the ids the other tools take", async () => {
+  it("lists Positions' tabs and the searches that found them, with the ids the other tools take", async () => {
     const search = await storeSearch([found("p1", "Product Designer"), found("p2", "Brand Designer"), found("p3", "UX Writer")]);
     const saved = await savePosting(found("p1", "Product Designer"));
-    await saveScore(found("p1", "Product Designer"), { score: 88, reasons: ["Led a design system"], redFlags: [] }, "test");
+    await saveScore(found("p1", "Product Designer"), halfCovered, "test", TEST_PROFILE_ID);
     await dismissPosting(found("p2", "Brand Designer"));
 
     expect((await tool("list_postings")).json).toMatchObject({
-      saved: { total: 1, postings: [{ posting_id: saved.id, title: "Product Designer", saved: true, fit: { score: 88 } }], link: "https://dossier.example/jobs?view=saved" },
-      dismissed: { total: 1, postings: [{ title: "Brand Designer" }], link: "https://dossier.example/jobs?view=dismissed" },
+      saved: { total: 1, postings: [{ posting_id: saved.id, title: "Product Designer", saved: true, fit: { covered: "1 of 2", fit: "Good fit" } }], link: "https://dossier.example/jobs?show=saved" },
+      dismissed: { total: 1, postings: [{ title: "Brand Designer", dismissed: true }], link: "https://dossier.example/jobs?show=dismissed" },
       searches: {
         total: 1,
         searches: [{ search_id: search.id, searched: "designer · Berlin, 25 km", ran: expect.stringMatching(/^Today at \d\d:\d\d$/), found: 3, source: "JSearch" }],
-        link: "https://dossier.example/jobs?view=history",
+        link: "https://dossier.example/jobs",
       },
     });
     expect(Object.keys((await tool("list_postings", { view: "searches" })).json)).toEqual(["searches"]);
     expect((await tool("list_postings", { view: "saved", limit: 1 })).json).toMatchObject({ saved: { total: 1 } });
+    // All open: everything not dismissed, Best fit first.
+    expect((await tool("list_postings", { view: "open" })).json).toMatchObject({ open: { total: 2, postings: [{ title: "Product Designer" }, { title: "UX Writer" }], link: "https://dossier.example/jobs" } });
+    expect((await tool("list_postings", { view: "open", covers: "all" })).json).toMatchObject({ open: { total: 0 } });
 
     const opened = await tool("list_postings", { search_id: search.id, from: 2, limit: 1 });
     expect(opened.json).toMatchObject({
       search_id: search.id,
       searched: "designer · Berlin, 25 km",
+      source: "JSearch",
       found: 3,
       more_available: true,
       postings: [{ number: 2, title: "Brand Designer", dismissed: true }],
-      link: `https://dossier.example/jobs?search=${search.id}`,
+      link: `https://dossier.example/jobs?found=${search.id}`,
     });
     expect(opened.json.postings).toHaveLength(1);
     expect(await tool("list_postings", { search_id: "gone" })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
   });
 
-  it("pages through every list with from and limit, since the views show them all", async () => {
+  it("pages through every list with from and limit, since Positions shows them all", async () => {
     const day = (date: number) => new Date(`2026-10-${date}T09:00:00Z`);
     const searches = await Promise.all([20, 21, 22].map((date) => storeSearch([found(`s${date}`, "Designer")], day(date))));
     for (const [index, date] of [20, 21, 22].entries()) {
@@ -162,7 +189,7 @@ describe("Find jobs through the Claude connector", () => {
       await prisma().posting.updateMany({ where: { externalId: `d${index}` }, data: { dismissedAt: day(date) } });
     }
 
-    // Newest first, as on the screens: the second of each list.
+    // Newest first, as on the screen: the second of each list.
     expect((await tool("list_postings", { from: 2, limit: 1 })).json).toMatchObject({
       saved: { total: 3, postings: [{ title: "Saved 2" }] },
       dismissed: { total: 3, postings: [{ title: "Dismissed 2" }] },
@@ -172,7 +199,7 @@ describe("Find jobs through the Claude connector", () => {
     expect((await tool("list_postings", { view: "saved", from: 4 })).json).toMatchObject({ saved: { total: 3, postings: [] } });
   });
 
-  it("saves, dismisses and brings back postings, from a search by number or by posting_id", async () => {
+  it("saves, dismisses, brings back and moves back postings, from a search by number or by posting_id", async () => {
     const search = await storeSearch([found("p1", "Product Designer"), found("p2", "Brand Designer")]);
     const first = await tool("update_postings", {
       search_id: search.id,
@@ -188,20 +215,20 @@ describe("Find jobs through the Claude connector", () => {
         { number: 2, posting_id: expect.any(String), title: "Brand Designer", saved: false, dismissed: true },
       ],
       not_found: [9],
-      link: `https://dossier.example/jobs?search=${search.id}`,
+      link: `https://dossier.example/jobs?found=${search.id}`,
     });
     const [designer, brand] = first.json.updated as { posting_id: string }[];
 
-    // Dismissing takes it out of Saved; one brought back that nothing else keeps is no longer stored.
+    // Dismissing takes it out of Saved; one brought back stays in Positions (E22-5).
     const second = await tool("update_postings", {
       changes: [
         { action: "dismiss", posting_id: designer.posting_id },
         { action: "restore", posting_id: brand.posting_id },
       ],
     });
-    expect(second.json).toMatchObject({ updated: [{ posting_id: designer.posting_id, saved: false, dismissed: true }, { title: "Brand Designer", saved: false, dismissed: false }], link: "https://dossier.example/jobs?view=saved" });
-    expect(await prisma().posting.findUnique({ where: { id: brand.posting_id } })).toBeNull();
-    expect((await tool("update_postings", { changes: [{ action: "dismiss", posting_id: designer.posting_id }] })).json).toMatchObject({ link: "https://dossier.example/jobs?view=dismissed" });
+    expect(second.json).toMatchObject({ updated: [{ posting_id: designer.posting_id, saved: false, dismissed: true }, { title: "Brand Designer", saved: false, dismissed: false }], link: "https://dossier.example/jobs" });
+    expect(await prisma().posting.findUnique({ where: { id: brand.posting_id } })).not.toBeNull();
+    expect((await tool("update_postings", { changes: [{ action: "dismiss", posting_id: designer.posting_id }] })).json).toMatchObject({ link: "https://dossier.example/jobs?show=dismissed" });
 
     // Each one is found before any change, so bringing back and saving the same posting works in one go.
     const third = await tool("update_postings", {
@@ -211,9 +238,14 @@ describe("Find jobs through the Claude connector", () => {
       ],
     });
     expect(third.json).toMatchObject({ updated: [{ saved: true, dismissed: false }, { saved: true, dismissed: false }] });
-    const again = (third.json.updated as { posting_id: string }[])[1].posting_id;
-    expect((await tool("update_postings", { changes: [{ action: "unsave", posting_id: again }] })).json).toMatchObject({ updated: [{ title: "Product Designer", saved: false, dismissed: false }] });
-    expect(await prisma().posting.count()).toBe(0);
+    expect((await tool("update_postings", { changes: [{ action: "unsave", posting_id: designer.posting_id }] })).json).toMatchObject({ updated: [{ title: "Product Designer", saved: false, dismissed: false }] });
+    expect(await prisma().posting.count()).toBe(2);
+
+    // Move back (E22-7): out of the Archive, into Positions again.
+    await prisma().posting.update({ where: { id: brand.posting_id }, data: { archivedAt: new Date() } });
+    expect((await tool("list_postings", { view: "archive" })).json).toMatchObject({ archive: { total: 1, postings: [{ posting_id: brand.posting_id, archived: true }], link: "https://dossier.example/jobs?tab=archive" } });
+    expect((await tool("update_postings", { changes: [{ action: "move_back", posting_id: brand.posting_id }] })).json).toMatchObject({ updated: [{ title: "Brand Designer", archived: false }] });
+    expect((await tool("list_postings", { view: "archive" })).json).toMatchObject({ archive: { total: 0 } });
 
     expect(await tool("update_postings", { changes: [{ action: "save", posting_id: "gone" }] })).toMatchObject({
       isError: true,
@@ -222,7 +254,7 @@ describe("Find jobs through the Claude connector", () => {
     expect(await tool("update_postings", { search_id: "gone", changes: [{ action: "save", number: 1 }] })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
   });
 
-  it("keeps jobs an AI client found itself as a search of their own, named by the client, and leaves out what Dossier already has", async () => {
+  it("keeps jobs an AI client found itself in Positions as a search of their own, named by the client, and leaves out what Dossier already has", async () => {
     const job = (title: string, url: string) => ({ title, company: "Acme", place: "Hamburg", url, description: `${title}: Excel, reporting.`, found_on: "LinkedIn", posted: "2026-10-28" });
     const jsearch = await storeSearch([found("p1", "Product Designer")], new Date("2026-10-20T09:00:00Z"));
     const added = await tool("add_found_jobs", {
@@ -234,18 +266,18 @@ describe("Find jobs through the Claude connector", () => {
     expect(added.isError).toBe(false);
     const searchId = added.json.search_id as string;
     expect(added.json).toMatchObject({
-      searched: "financial analyst · Hamburg, 25 km",
+      searched: "financial analyst · Hamburg",
       source: "AI client · Gemini CLI",
       added: 2,
       postings: [
-        { number: 1, title: "Financial Analyst", company: "Acme", place: "Hamburg", posted: "2026-10-28", via: "LinkedIn", url: "https://jobs.example/fa?utm_source=x" },
+        { number: 1, title: "Financial Analyst", company: "Acme", place: "Hamburg", posted: "2026-10-28", via: "LinkedIn", url: "https://jobs.example/fa?utm_source=x", added_by: ["Gemini CLI"] },
         { number: 2, title: "Junior Analyst" },
       ],
       skipped: [{ title: "Financial Analyst again", reason: "twice in this list" }],
-      link: `https://dossier.example/jobs?search=${searchId}`,
+      link: `https://dossier.example/jobs?found=${searchId}`,
     });
 
-    // Listed with the job source's searches, saying who added it, and saved or dismissed like any other.
+    // Listed with the portals' searches, saying who added it, and saved or dismissed like any other.
     expect((await tool("list_postings", { view: "searches" })).json).toMatchObject({
       searches: { total: 2, searches: [{ search_id: searchId, source: "AI client · Gemini CLI", found: 2 }, { search_id: jsearch.id, source: "JSearch" }] },
     });
@@ -257,15 +289,15 @@ describe("Find jobs through the Claude connector", () => {
     });
     expect(await prisma().posting.findMany({ where: { source: "CLIENT" }, select: { title: true }, orderBy: { title: "asc" } })).toEqual([{ title: "Financial Analyst" }, { title: "Junior Analyst" }]);
 
-    // Narrowed to one source, as the From filter on Find jobs does.
-    expect((await tool("list_postings", { view: "saved", source: "client" })).json).toMatchObject({
-      saved: { total: 1, postings: [{ title: "Financial Analyst" }], link: "https://dossier.example/jobs?view=saved&from=client" },
+    // Narrowed to one portal, as Positions' Portal filter does (the fork's From filter).
+    expect((await tool("list_postings", { view: "saved", portal: "CLIENT" })).json).toMatchObject({
+      saved: { total: 1, postings: [{ title: "Financial Analyst" }], link: "https://dossier.example/jobs?show=saved&portal=CLIENT" },
     });
-    expect((await tool("list_postings", { view: "searches", source: "jsearch" })).json).toMatchObject({
-      searches: { total: 1, searches: [{ search_id: jsearch.id }], link: "https://dossier.example/jobs?view=history&from=jsearch" },
+    expect((await tool("list_postings", { view: "searches", portal: "JSEARCH" })).json).toMatchObject({
+      searches: { total: 1, searches: [{ search_id: jsearch.id }], link: "https://dossier.example/jobs?portal=JSEARCH" },
     });
 
-    // Nothing is added twice: what a job source found (by link, or the same opening on another site), what's saved or dismissed, stay out, each with where it is.
+    // Nothing is added twice: what a portal found (by link, or the same opening on another site), what's saved or dismissed, stay out, each with where it is.
     const again = await tool("add_found_jobs", {
       searched: { keywords: "analyst" },
       jobs: [
@@ -300,21 +332,21 @@ describe("Find jobs through the Claude connector", () => {
     });
   });
 
-  it("removes a past search, and keeps the postings saved from it", async () => {
+  it("removes a search, and keeps what it found in Positions", async () => {
     const search = await storeSearch([found("p1", "Product Designer")]);
     await savePosting(found("p1", "Product Designer"));
     expect((await tool("remove_search", { search_id: search.id })).json).toMatchObject({
       search_id: search.id,
       removed: true,
-      message: "Search removed. Saved postings from it stay in Saved.",
-      link: "https://dossier.example/jobs?view=history",
+      message: "Search removed. What it found stays in Positions.",
+      link: "https://dossier.example/jobs",
     });
     expect(await prisma().postingSearch.count()).toBe(0);
     expect(await prisma().posting.count()).toBe(1);
     expect(await tool("remove_search", { search_id: search.id })).toMatchObject({ isError: true, text: "That search is no longer kept." });
   });
 
-  it("has Dossier's own model score a posting, and follows a scoring under way", async () => {
+  it("has Dossier score a posting against a profile, or all of them, and follows a scoring under way", async () => {
     const search = await storeSearch([found("p1", "Product Designer")]);
     fake.aiUsable = false;
     const yourself = await tool("score_with_dossier", { search_id: search.id, number: 1 });
@@ -327,20 +359,26 @@ describe("Find jobs through the Claude connector", () => {
       status: "started",
       title: "Product Designer",
       company: "Acme",
-      link: `https://dossier.example/jobs?search=${search.id}`,
+      profile: DEMO_PROFILE,
+      link: `https://dossier.example/jobs?found=${search.id}`,
       next: "Call check_task with this task_id until it's done.",
     });
-    expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "posting-score" }), { posting: found("p1", "Product Designer") }, { key: "posting-score:JSEARCH:p1" });
+    expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "posting-score" }), { posting: found("p1", "Product Designer"), profiles: TEST_PROFILE_ID }, { key: "posting-score:JSEARCH:p1" });
 
     const running = await prisma().job.create({ data: { type: "posting-score", key: "posting-score:JSEARCH:p1", status: "RUNNING", input: {} } });
     const row = await savePosting(found("p1", "Product Designer"));
-    expect((await tool("score_with_dossier", { posting_id: row.id })).json).toMatchObject({ task_id: running.id, title: "Product Designer" });
+    expect((await tool("score_with_dossier", { posting_id: row.id, all_profiles: true })).json).toMatchObject({ task_id: running.id, title: "Product Designer", profile: "all" });
     expect(startJob).toHaveBeenCalledTimes(1);
 
     expect(await tool("score_with_dossier", { posting_id: "gone" })).toMatchObject({ isError: true, text: "That posting is no longer in Dossier." });
     expect(await tool("score_with_dossier", { search_id: search.id, number: 5 })).toMatchObject({ isError: true });
     expect(await tool("score_with_dossier", { search_id: "gone", number: 1 })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
     expect(await tool("score_with_dossier", {})).toMatchObject({ isError: true, text: "Give search_id and number, or posting_id." });
+    expect(await tool("score_with_dossier", { posting_id: row.id, profile: "Frontend" })).toMatchObject({ isError: true });
+
+    // As in Positions, nothing is scored against a profile whose levels aren't chosen (E24-3).
+    await prisma().profile.update({ where: { id: TEST_PROFILE_ID }, data: { levelFrom: null, levelTo: null } });
+    expect(await tool("score_with_dossier", { posting_id: row.id })).toMatchObject({ isError: true, text: expect.stringContaining("Profile → Jobs it's for") });
   });
 
   it("suggests search words from the profile, as the profile editor does, with Senior only when wanted", async () => {
@@ -352,7 +390,7 @@ describe("Find jobs through the Claude connector", () => {
     expect(expected.seniorYears).not.toBeNull();
     const answer = await tool("get_search_words");
     expect(answer.isError).toBe(false);
-    expect(answer.json).toMatchObject({ german: expected.german, best: searchChips(expected), link: "https://dossier.example/profile" });
+    expect(answer.json).toMatchObject({ profile: DEMO_PROFILE, german: expected.german, best: searchChips(expected), link: PROFILE_PAGE });
     const groups = answer.json.groups as { title: string; words: { text: string; language: string; why: string }[] }[];
     expect(groups.map((group) => group.title)).toEqual(expected.groups.map((group) => group.title));
     expect(groups.flatMap((group) => group.words.map((word) => word.text))).toEqual(expected.groups.flatMap((group) => group.words.map((word) => word.text)));
@@ -366,11 +404,21 @@ describe("Find jobs through the Claude connector", () => {
     expect(without.json.senior_years).toEqual(expected.seniorYears ?? undefined);
   });
 
+  it("suggests search words from the profile named (E24-1)", async () => {
+    const backend = await copyProfile(TEST_PROFILE_ID, "Backend");
+    await prisma().experience.updateMany({ where: { profileId: backend }, data: { role: "Backend Engineer" } });
+    const answer = await tool("get_search_words", { profile: "Backend" });
+    expect(answer.json).toMatchObject({ profile: "Backend", link: `https://dossier.example/profile?profile=${backend}` });
+    expect((answer.json.groups as { words: { text: string }[] }[]).flatMap((group) => group.words.map((word) => word.text))).toContain("Backend Engineer");
+    expect(await tool("get_search_words", { profile: "Frontend" })).toMatchObject({ isError: true });
+  });
+
   it("says what is missing when the profile has nothing to suggest from", async () => {
     await prisma().experience.deleteMany();
     await prisma().skill.deleteMany();
-    await prisma().profileField.deleteMany({ where: { key: { in: ["headline"] } } });
-    expect(await tool("get_search_words")).toMatchObject({ isError: false, json: { groups: [], message: expect.stringContaining("Fill them in on Profile"), link: "https://dossier.example/profile" } });
+    // The headline is the profile's own (E24-1).
+    await prisma().profile.updateMany({ data: { headline: "" } });
+    expect(await tool("get_search_words")).toMatchObject({ isError: false, json: { groups: [], message: expect.stringContaining("Fill them in on Profile"), link: PROFILE_PAGE } });
   });
 
   it("marks the search words as read-only", async () => {

@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import type { StartupEmail } from "@/lib/startups/types";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../../prisma/seed/demo";
@@ -28,7 +28,8 @@ vi.mock("@/lib/jobs/runner", async (importOriginal) => ({
 vi.mock("@/lib/ai/config", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/ai/config")>()), isAiConfigured: async () => true }));
 vi.mock("@/lib/job-search/config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/job-search/config")>()),
-  loadJobSearchConfig: async () => ({ source: "JSEARCH", saved: true, jsearch: { key: "k", host: "openwebninja", keyState: "set" }, adzuna: { appId: "", key: null, keyState: "none" } }),
+  // JSearch switched on with its key (E22-3), as the agent's own tests have it.
+  loadJobSearchConfig: async () => ({ saved: true, freehire: { url: "https://freehire.me" }, portals: [{ id: "JSEARCH", on: true, offered: true, fields: {}, keys: {}, acceptedAt: null }] }),
   credentialsFor: () => ({ key: "k", host: "openwebninja" }),
 }));
 vi.mock("@/lib/time-zone", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/time-zone")>()), lastKnownTimeZone: async () => "Europe/Berlin" }));
@@ -89,8 +90,8 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<{
   return { isError: result.isError ?? false, text, json: json as Record<string, unknown> & unknown[] };
 }
 
-/** A posting the agent found and scored. */
-const find = (externalId: string, score: number, data: Record<string, unknown> = {}) =>
+/** A posting the agent found and scored: `covered` of 4 requirements (E32-2). */
+const find = (externalId: string, covered: number, data: Record<string, unknown> = {}) =>
   prisma().agentCandidate.create({
     data: {
       source: "JSEARCH",
@@ -102,7 +103,10 @@ const find = (externalId: string, score: number, data: Record<string, unknown> =
       url: `https://jobs.example/${externalId}`,
       description: `The whole posting ${externalId}`,
       complete: true,
-      score,
+      score: covered * 25,
+      covered,
+      requirements: 4,
+      mustMissing: 0,
       reasons: ["Python"],
       redFlags: [],
       ...data,
@@ -135,11 +139,11 @@ describe("the job agent's tools", () => {
   it("reads the agent: its settings, runs, drafts waiting for review and finds, best first", async () => {
     const ledgerly = await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } });
     await prisma().application.update({ where: { id: ledgerly.id }, data: { awaitingReview: true } });
-    const draft = await find("draft", 90, { status: "DRAFTED", applicationId: ledgerly.id });
-    const good = await find("good", 75, { redFlags: ["On-call rota"] });
-    await find("better", 88);
-    const low = await find("low", 30);
-    await find("gone", 95, { status: "DISMISSED" });
+    const draft = await find("draft", 4, { status: "DRAFTED", applicationId: ledgerly.id });
+    const good = await find("good", 3, { redFlags: ["On-call rota"] });
+    await find("better", 4);
+    const low = await find("low", 1);
+    await find("gone", 4, { status: "DISMISSED" });
     const job = await prisma().job.create({ data: { type: "agent-draft", key: `agent-candidate:${good.id}`, input: { candidateId: good.id } } });
     await saveSettings({ agentRuns: [{ at: "2026-10-23T05:00:00.000Z", manual: false, message: "2 new postings are waiting for a look." }] });
 
@@ -152,22 +156,26 @@ describe("the job agent's tools", () => {
         country: "de",
         radius_km: 25,
         searches: [{ name: "My search", enabled: true, searches_for: "Data scientist · Berlin, 25 km" }],
-        min_score: 70,
+        // The minimum score of 70 from before is "at least two thirds" (E32-2).
+        covers: "two-thirds",
         auto_draft: false,
         time_zone: "Europe/Berlin",
       },
       recent_runs: [{ result: "2 new postings are waiting for a look." }],
       drafts: [{ find_id: draft.id, application_id: ledgerly.id, link: `https://dossier.example/applications/${ledgerly.id}` }],
-      finds: [{ title: "Posting better", score: 88 }, { find_id: good.id, reasons: ["Python"], red_flags: ["On-call rota"], drafting_task_id: job.id }],
-      below_minimum_count: 1,
+      finds: [
+        { title: "Posting better", covered: "4 of 4", fit: "Strong fit" },
+        { find_id: good.id, covered: "3 of 4", reasons: ["Python"], red_flags: ["On-call rota"], drafting_task_id: job.id },
+      ],
+      skipped_count: 1,
       link: "https://dossier.example/agent",
     });
-    expect(agent.json).not.toHaveProperty("below_minimum");
-    expect((await tool("get_job_agent", { include_below_minimum: true })).json.below_minimum).toMatchObject([{ find_id: low.id, score: 30 }]);
+    expect(agent.json).not.toHaveProperty("skipped");
+    expect((await tool("get_job_agent", { include_skipped: true })).json.skipped).toMatchObject([{ find_id: low.id, covered: "1 of 4", skipped: expect.stringContaining("under your cut-off") }]);
 
     // One find whole, with its draft's text, but not the letter's sender or signature.
     const one = await tool("get_job_agent", { find_id: draft.id });
-    expect(one.json).toMatchObject({ find_id: draft.id, status: "Draft ready for review", posting: "The whole posting draft", application_id: ledgerly.id });
+    expect(one.json).toMatchObject({ find_id: draft.id, status: "Draft ready for review", covered: "4 of 4", posting: "The whole posting draft", application_id: ledgerly.id });
     expect(one.json.resume).toContain("## Summary");
     expect(one.json.cover_letter).not.toContain("## Sender");
     expect(one.json.cover_letter).not.toContain("## Signature");
@@ -185,13 +193,13 @@ describe("the job agent's tools", () => {
     });
     expect(await prisma().agentSearch.count()).toBe(0);
 
-    const saved = await tool("update_job_agent", { enabled: true, keywords: "Product designer", country: "Germany", place: "", hour: 9, min_score: 80, auto_draft: true, max_drafts: 2 });
+    const saved = await tool("update_job_agent", { enabled: true, keywords: "Product designer", country: "Germany", place: "", hour: 9, covers: "half", strong_matches_cover: "all", auto_draft: true, max_drafts: 2 });
     expect(saved.json).toMatchObject({
       saved: true,
-      settings: { enabled: true, keywords: "Product designer", place: "", country: "de", hour: 9, min_score: 80, auto_draft: true, max_drafts: 2 },
+      settings: { enabled: true, keywords: "Product designer", place: "", country: "de", hour: 9, covers: "half", strong_matches_cover: "all", auto_draft: true, max_drafts: 2 },
       link: "https://dossier.example/agent",
     });
-    expect(await loadSettings()).toMatchObject({ agentEnabled: true, agentHour: 9, agentMinScore: 80, agentMaxScores: 15 });
+    expect(await loadSettings()).toMatchObject({ agentEnabled: true, agentHour: 9, agentCovers: "half", alertMinScore: 90, agentMaxScores: 15 });
     expect(await prisma().agentSearch.findMany()).toMatchObject([{ name: "My search", enabled: true, query: { ...query, keywords: "Product designer", place: "" } }]);
 
     // A search there already keeps its name and its level; only the fields given change.
@@ -217,21 +225,22 @@ describe("the job agent's tools", () => {
       isError: true,
       text: "Saved the changes, but it can't run now. The agent ran less than an hour ago. Try again in 40 minutes.",
     });
-    expect((await loadSettings()).agentMinScore).toBe(60);
+    // A minimum score from before 1.15 is saved as the cut-off it maps to (E32-2).
+    expect((await loadSettings()).agentCovers).toBe("half");
 
     await saveSettings({ agentEnabled: false });
     expect(await tool("update_job_agent", { run_now: true })).toMatchObject({ isError: true, text: "Turn the job agent on in Settings → Job agent first." });
   });
 
   it("prepares a find's draft in the background, and approves a draft into Applications", async () => {
-    const scored = await find("good", 80);
+    const scored = await find("good", 3);
     expect((await tool("act_on_agent_find", { find_id: scored.id, action: "prepare_draft" })).json).toMatchObject({ task_id: "agent-draft-task", status: "started", find_id: scored.id });
-    expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "agent-draft" }), { candidateId: scored.id }, { key: `agent-candidate:${scored.id}` });
+    expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "agent-draft" }), { candidateId: scored.id, auto: false }, { key: `agent-candidate:${scored.id}` });
     const queued = await prisma().job.create({ data: { type: "agent-draft", key: `agent-candidate:${scored.id}`, input: { candidateId: scored.id } } });
     expect((await tool("act_on_agent_find", { find_id: scored.id, action: "prepare_draft" })).json).toMatchObject({ task_id: queued.id, already_running: true });
 
     const application = await prisma().application.create({ data: { origin: "AGENT", awaitingReview: true } });
-    const drafted = await find("drafted", 90, { status: "DRAFTED", applicationId: application.id });
+    const drafted = await find("drafted", 4, { status: "DRAFTED", applicationId: application.id });
     expect((await tool("act_on_agent_find", { find_id: drafted.id, action: "prepare_draft" })).json).toMatchObject({ application_id: application.id, status: "Draft ready for review" });
     expect(await tool("act_on_agent_find", { find_id: scored.id, action: "approve" })).toMatchObject({ isError: true, text: "That draft isn't ready to approve." });
     expect((await tool("act_on_agent_find", { find_id: drafted.id, action: "approve" })).json).toMatchObject({
@@ -246,14 +255,15 @@ describe("the job agent's tools", () => {
     expect(await tool("act_on_agent_find", { find_id: "nope", action: "prepare_draft" })).toMatchObject({ isError: true, text: "That posting is no longer in the agent's queue." });
   });
 
-  it("dismisses a find, deleting its draft, and restores one from what Find jobs keeps", async () => {
+  it("dismisses a find, deleting its draft, and restores one from what Positions keeps", async () => {
     const application = await prisma().application.create({ data: { origin: "AGENT", awaitingReview: true } });
-    const drafted = await find("drafted", 90, { status: "DRAFTED", applicationId: application.id });
+    const drafted = await find("drafted", 4, { status: "DRAFTED", applicationId: application.id });
     expect((await tool("act_on_agent_find", { find_id: drafted.id, action: "dismiss" })).json).toMatchObject({ status: "Dismissed", message: "Dismissed, with its draft if it had one. It won't come back." });
     expect(await prisma().application.count({ where: { id: application.id } })).toBe(0);
 
-    const scored = await find("good", 80, { redFlags: ["On-call rota"] });
-    await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "good", score: 80, reasons: ["Python"], redFlags: ["On-call rota"], scoredWith: "score-posting@1" } });
+    const scored = await find("good", 3, { redFlags: ["On-call rota"] });
+    // Scores are kept per profile (E25-5).
+    await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "good", profileId: TEST_PROFILE_ID, score: 80, reasons: ["Python"], redFlags: ["On-call rota"], scoredWith: "score-posting@1" } });
     expect(await tool("act_on_agent_find", { find_id: scored.id, action: "restore" })).toMatchObject({ isError: true, text: "That posting isn't dismissed." });
     expect((await tool("act_on_agent_find", { find_id: scored.id, action: "dismiss" })).json).toMatchObject({ message: "Dismissed. It won't come back unless it's restored." });
     expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id: scored.id } })).toMatchObject({ status: "DISMISSED", url: "", description: "", reasons: [] });
@@ -263,17 +273,17 @@ describe("the job agent's tools", () => {
     ]);
 
     expect((await tool("act_on_agent_find", { find_id: scored.id, action: "restore" })).json).toMatchObject({ status: "Waiting for a look", link: "https://dossier.example/agent" });
+    // Positions keeps a dismissed posting trimmed (E22-5): its text comes back from the portal when it's read again.
     expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id: scored.id } })).toMatchObject({
       status: "SCORED",
       url: "https://jobs.example/good",
-      description: "The whole posting good",
       reasons: ["Python"],
       redFlags: ["On-call rota"],
     });
-    // Out of Find jobs' Dismissed again, and not kept there for nothing.
-    expect(await prisma().posting.count({ where: { externalId: "good" } })).toBe(0);
+    // Out of Positions' Dismissed again; Positions keeps it (E22-5).
+    expect(await prisma().posting.findFirstOrThrow({ where: { externalId: "good" } })).toMatchObject({ dismissedAt: null });
 
-    // Once Find jobs no longer keeps the posting, there's nothing to bring it back from.
+    // Once Positions no longer keeps the posting, there's nothing to bring it back from.
     await tool("act_on_agent_find", { find_id: scored.id, action: "dismiss" });
     await prisma().posting.deleteMany({ where: { externalId: "good" } });
     expect((await tool("get_job_agent", { include_dismissed: true })).json.dismissed).toMatchObject([{ find_id: drafted.id }]);
@@ -298,14 +308,14 @@ describe("the Startups tools", () => {
     });
     const acme = await startup({ emails: [address("jobs@acme.io")], notes: "Met them at a meetup" });
     await startup({ company: "Beta", score: 90, summary: "Fintech for farmers", details: "", website: "" });
-    await startup({ company: "Kept", status: "SAVED" });
+    await startup({ company: "Kept", status: "SAVED", score: 70 });
 
     const list = await tool("list_startups");
     expect(list.json).toMatchObject({
       last_refresh: expect.any(String),
       refresh_problems: ["Hacker News took too long to answer"],
-      counts: { NEW: 2, SAVED: 1, CONTACTED: 0, DISMISSED: 0 },
-      total: 2,
+      counts: { HIRING: 3, NEW: 2, SAVED: 1, APPLIED: 0, DISMISSED: 0 },
+      total: 3,
       startups: [
         { company: "Beta", match: 90 },
         {
@@ -318,15 +328,18 @@ describe("the Startups tools", () => {
           addresses: [{ email: "jobs@acme.io", label: "Hiring", published_on: "https://acme.io/careers" }],
           notes: "Met them at a meetup",
         },
+        // Hiring now lists every one not dismissed (E32-4).
+        { company: "Kept", status: "SAVED" },
       ],
       link: "https://dossier.example/startups",
     });
     expect(list.json).not.toHaveProperty("next");
-    expect((await tool("list_startups", { status: "SAVED" })).json.startups).toMatchObject([{ company: "Kept" }]);
+    expect((await tool("list_startups", { view: "SAVED" })).json.startups).toMatchObject([{ company: "Kept" }]);
+    expect((await tool("list_startups", { view: "NEW" })).json).toMatchObject({ total: 2 });
     expect((await tool("list_startups", { with_address: true })).json.startups).toMatchObject([{ company: "Acme" }]);
     expect((await tool("list_startups", { search: "fintech" })).json).toMatchObject({ total: 1, link: "https://dossier.example/startups?q=fintech" });
 
-    expect((await tool("list_startups", { id: acme.id })).json).toMatchObject({ id: acme.id, post: expect.stringContaining("Kotlin, Android"), link: "https://dossier.example/startups?q=Acme" });
+    expect((await tool("list_startups", { id: acme.id })).json).toMatchObject({ id: acme.id, post: expect.stringContaining("Kotlin, Android"), link: "https://dossier.example/startups?q=Acme&view=new" });
     expect(await tool("list_startups", { id: "gone" })).toMatchObject({ isError: true, text: "That startup is no longer in the list." });
   });
 
@@ -387,13 +400,13 @@ describe("the Startups tools", () => {
       application_id: written.id,
       status: "NEW",
       message: "Linked: Startups opens this application, and counts the startup as contacted once it's sent.",
-      link: "https://dossier.example/startups?q=Acme",
+      link: "https://dossier.example/startups?q=Acme&view=new",
     });
     expect((await tool("update_startup", { id: acme.id, application_id: written.id })).isError).toBe(false);
 
     // Once it's sent, the startup counts as contacted, and the daily tidy-up keeps people's addresses only where an application was linked.
     await prisma().application.update({ where: { id: written.id }, data: { status: "SENT" } });
-    expect((await tool("list_startups", { status: "CONTACTED" })).json.startups).toMatchObject([{ id: acme.id, application_id: written.id }]);
+    expect((await tool("list_startups", { view: "APPLIED" })).json.startups).toMatchObject([{ id: acme.id, application_id: written.id }]);
     const unlinked = await startup({ company: "Gamma", emails: [jane], peopleCheckedAt: new Date("2026-10-23T08:00:00Z"), seenAt: new Date("2026-11-29T00:00:00Z") });
     expect(await sweepStartups(new Date("2026-11-30T00:00:00Z"))).toMatchObject({ addressesDropped: 1 });
     expect((await tool("list_startups", { id: acme.id })).json.addresses).toMatchObject([{ email: "jobs@acme.io" }, { email: "jane@acme.io" }]);

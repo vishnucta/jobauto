@@ -44,10 +44,21 @@ export function checkDue(feed: AnnouncementFeed | null, now: Date, development =
 }
 
 /**
- * Off in this fork (jobauto): a server asks only when DOSSIER_API_URL points
- * it at a backend, such as Dossier's own (API_URL), and tests never do.
+ * Production servers ask; development servers only when pointed at a backend,
+ * and tests never do. The portal catalog (portals/catalog.ts) goes by this;
+ * Dossier's notices go by announcementsRun.
  */
 export function checkRuns(): boolean {
+  return process.env.NODE_ENV === "production" || env.DOSSIER_API_URL !== undefined;
+}
+
+/**
+ * Dossier's notices are off in this fork (jobauto): a server asks for them
+ * only when DOSSIER_API_URL points it at a backend, such as Dossier's own
+ * (API_URL), and tests never do. The portal catalog shares DOSSIER_API_URL
+ * but not this rule, so it still reads with the variable unset.
+ */
+export function announcementsRun(): boolean {
   return env.DOSSIER_API_URL !== undefined;
 }
 
@@ -122,6 +133,6 @@ export async function checkAnnouncements({ now = new Date(), fetchImpl = fetch, 
  * settings it read anyway, so a page costs nothing until a check is due. Never throws.
  */
 export async function checkAnnouncementsIfDue(settings: Pick<SettingsData, "announcementFeed">): Promise<void> {
-  if (!checkRuns() || !checkDue(settings.announcementFeed, new Date())) return;
+  if (!announcementsRun() || !checkDue(settings.announcementFeed, new Date())) return;
   await checkAnnouncements().catch((error: unknown) => logServerError("announcements", error));
 }

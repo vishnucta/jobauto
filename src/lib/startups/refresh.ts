@@ -2,9 +2,9 @@ import "server-only";
 
 import { z } from "zod";
 
-import { alertIfOn, matchLines } from "@/lib/alerts";
 import { defineJob, findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
+import { emit } from "@/lib/notifications/notify";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { saveSettings } from "@/lib/settings-data";
@@ -62,18 +62,15 @@ export async function refreshStartups(
   // The first time, every firm of the past year is new: the screen shows them, without an alert.
   const firstLook = (await prisma.startup.count({ where: { source: "LICENCE" } })) === 0;
   const added = await upsertStartups(found, now);
-  // Newly licensed firms are rare and early is the point: they go to the phone.
+  // Newly licensed firms are rare and early is the point: they're a
+  // notification ("Newly licensed firms" in Settings → Notifications).
   const newFirms = await prisma.startup.findMany({
     where: { source: "LICENCE", externalId: { in: licensed.filter((id) => !knownLicensed.has(id)) } },
     orderBy: { score: "desc" },
-    select: { company: true, location: true, score: true },
+    select: { company: true, location: true },
   });
   if (newFirms.length > 0 && !firstLook) {
-    await alertIfOn({
-      title: newFirms.length === 1 ? "A newly licensed firm in Germany" : `${newFirms.length} newly licensed firms in Germany`,
-      message: matchLines(newFirms.map((firm) => ({ title: firm.company, company: firm.location.replace(/, Germany$/, ""), score: firm.score }))),
-      open: "/startups?source=licence",
-    });
+    await emit("startups.licensed", { firms: newFirms.map((firm) => ({ company: firm.company, place: firm.location.replace(/, Germany$/, "") })) }, now);
   }
   // Ones this refresh didn't find again are scored against today's profile too.
   await rescoreStartups(now);

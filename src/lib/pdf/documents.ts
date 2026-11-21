@@ -5,6 +5,7 @@ import { AttachmentError, enabledAttachments, mergePdfs } from "@/lib/attachment
 import { resolveFileName } from "@/lib/file-name";
 import { prisma } from "@/lib/prisma";
 import { loadProfileName } from "@/lib/profile-data";
+import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
 import { loadSettings } from "@/lib/settings-data";
 import { FIT_LEVELS } from "@/lib/themes";
 
@@ -57,15 +58,25 @@ const TAILORED = { resume: DocumentKind.RESUME, letter: DocumentKind.COVER_LETTE
 /** Application ids are cuids; anything else never reaches a print path. */
 const APPLICATION_ID = /^[a-z0-9]{1,64}$/i;
 
-/** A document's PDF with its file name, or why there's none to make. A tailored one names its application. */
-export async function renderDocumentPdf(doc: PdfDocument, applicationId = ""): Promise<{ pdf: Uint8Array; fileName: string } | { error: string }> {
+/**
+ * A document's PDF with its file name, or why there's none to make. A
+ * tailored one names its application; the base resume is a profile's own
+ * (E24-2), the first one's when none is named or it's gone.
+ */
+export async function renderDocumentPdf(
+  doc: PdfDocument,
+  applicationId = "",
+  profileId?: string | null,
+): Promise<{ pdf: Uint8Array; fileName: string } | { error: string }> {
   const [name, settings] = await Promise.all([loadProfileName(), loadSettings()]);
   const date = new Date();
 
   if (doc === "base") {
+    const id = await profileIdOr(profileId);
+    const own = await loadProfileSettings(id);
     // "Fit to one page" (public issue 69): squeezed a step at a time until it fits, as the preview does.
-    let pdf = await renderPdf(printBasePath());
-    for (let fit = 1; settings.fitBaseResume && fit <= FIT_LEVELS && countPdfPages(pdf) > 1; fit++) pdf = await renderPdf(printBasePath(fit));
+    let pdf = await renderPdf(printBasePath(0, id));
+    for (let fit = 1; own.fitBaseResume && fit <= FIT_LEVELS && countPdfPages(pdf) > 1; fit++) pdf = await renderPdf(printBasePath(fit, id));
     return { pdf, fileName: resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, date }) };
   }
 

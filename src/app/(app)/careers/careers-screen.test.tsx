@@ -39,19 +39,23 @@ const employer = (extra: Partial<EmployerView> = {}): EmployerView => ({
 });
 
 const open = (employers: EmployerView[] = [employer()]) =>
-  render(<CareersScreen employers={employers} counts={{ searches: 1, saved: 0, dismissed: 0, recruiters: 2 }} suggestedWords="Regulatory Reporting, EMIR" today="2026-11-13T12:00:00.000Z" timeZone="UTC" />);
+  render(<CareersScreen employers={employers} counts={{ recruiters: 2, employers: employers.length }} suggestedWords="Regulatory Reporting, EMIR" today="2026-11-13T12:00:00.000Z" timeZone="UTC" />);
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("Careers pages", () => {
-  it("is a Find jobs tab, and shows each page followed with what its last check found", () => {
+  it("sits under Positions, and shows each page followed with what its last check found", () => {
     open();
-    expect(screen.getByRole("link", { name: /Careers pages/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1, name: "Careers pages" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Positions" })).toHaveAttribute("href", "/jobs");
+    const links = within(screen.getByRole("navigation", { name: "Also in Find work" })).getAllByRole("link");
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([["Recruiters2", "/recruiters"]]);
     const card = screen.getByRole("listitem", { name: "Acme" });
     expect(card).toHaveTextContent("Personio · https://acme.jobs.personio.de");
     expect(card).toHaveTextContent("Titles with Reporting, Meldewesen in Hamburg");
     expect(card).toHaveTextContent(/Checked .*: 3 matching jobs, 1 new/);
-    expect(within(card).getByRole("link", { name: "See what it found" })).toHaveAttribute("href", "/jobs?view=history&from=careers");
+    // Positions through its Portal filter: what careers pages added.
+    expect(within(card).getByRole("link", { name: "See what it found" })).toHaveAttribute("href", "/jobs?portal=CAREERS");
   });
 
   it("says why a page couldn't be read", () => {
@@ -75,9 +79,12 @@ describe("Careers pages", () => {
     await userEvent.click(screen.getByRole("button", { name: "Check all now" }));
     expect(checkCareers).toHaveBeenCalledWith({});
     expect(screen.getByRole("button", { name: "Reading Acme's careers page" })).toBeInTheDocument();
-    act(() => jobs.onChange!({ id: "job-1", status: "DONE", result: { checked: 1, added: 2, searchId: "s1", problems: [], message: "2 new jobs added to Find jobs from 1 careers page." } }));
-    expect(toast).toHaveBeenCalledWith("2 new jobs added to Find jobs from 1 careers page.", { action: expect.objectContaining({ label: "Show them" }) });
+    act(() => jobs.onChange!({ id: "job-1", status: "DONE", result: { checked: 1, added: 2, searchId: "s1", problems: [], message: "2 new jobs added to Positions from 1 careers page." } }));
+    expect(toast).toHaveBeenCalledWith("2 new jobs added to Positions from 1 careers page.", { action: expect.objectContaining({ label: "Show them" }) });
     expect(router.refresh).toHaveBeenCalled();
+    // Show them opens Positions on what that check added.
+    vi.mocked(toast).mock.calls[0][1]!.action!.onClick();
+    expect(router.push).toHaveBeenCalledWith("/jobs?found=s1");
   });
 
   it("turns a page off, and stops following one after asking", async () => {

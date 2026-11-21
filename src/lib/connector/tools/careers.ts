@@ -8,10 +8,10 @@ import { createEmployer, employerFields, listEmployers, removeEmployer, setEmplo
 
 import { failure, started, text, type ToolContext } from "../kit";
 
-// Careers pages, under Find jobs (jobauto fork): the employers whose own
-// careers pages are checked each morning, as the Careers pages tab lists
-// them, and Check now. New jobs go into Find jobs as a search from the
-// careers source, which list_postings reads.
+// Careers pages, under Find work (jobauto fork): the employers whose own
+// careers pages are checked each morning, as the Careers pages screen lists
+// them, and Check now. New jobs go into Positions as a search from the
+// CAREERS portal, which list_postings reads.
 
 const GONE = "That employer is no longer followed.";
 const id = z.string().min(1).max(64);
@@ -47,8 +47,8 @@ export function registerCareersTools({ server, linkTo }: ToolContext): void {
     {
       title: "List careers pages followed",
       description:
-        "The employers whose own careers pages Dossier checks each morning (Find jobs → Careers pages), with the words and places each keeps and what the last check found. " +
-        "New jobs from them are in list_postings with source careers.",
+        "The employers whose own careers pages Dossier checks each morning (Find work → Careers pages), with the words and places each keeps and what the last check found. " +
+        "New jobs from them are in Positions: list_postings with portal CAREERS.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
@@ -63,7 +63,7 @@ export function registerCareersTools({ server, linkTo }: ToolContext): void {
     {
       title: "Follow a careers page",
       description:
-        "Adds an employer to Find jobs → Careers pages, as Follow does: its careers page is read each morning, and new jobs that match its words and places go into Find jobs. " +
+        "Adds an employer to Find work → Careers pages, as Follow does: its careers page is read each morning, and new jobs that match its words and places go into Positions. " +
         "Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, and pages with job data (JSON-LD). Follow with check_careers_pages to read it now.",
       inputSchema: z.object(fieldsInput),
       annotations: { readOnlyHint: false, openWorldHint: false },
@@ -107,13 +107,13 @@ export function registerCareersTools({ server, linkTo }: ToolContext): void {
     "remove_careers_page",
     {
       title: "Stop following a careers page",
-      description: "Stops checking an employer's careers page, as Stop following does. The jobs already found on it stay in Find jobs.",
+      description: "Stops checking an employer's careers page, as Stop following does. The jobs already found on it stay in Positions.",
       inputSchema: z.object({ id }),
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     async ({ id: employerId }) => {
       if (!(await removeEmployer(employerId))) return failure(GONE);
-      return text({ removed: true, message: "No longer followed. The jobs found on its page stay in Find jobs.", link });
+      return text({ removed: true, message: "No longer followed. The jobs found on its page stay in Positions.", link });
     },
   );
 
@@ -122,7 +122,7 @@ export function registerCareersTools({ server, linkTo }: ToolContext): void {
     {
       title: "Check careers pages now",
       description:
-        "Reads the careers pages now, as Check now does: the given employers, or every one checked each morning. New matching jobs go into Find jobs as one search. " +
+        "Reads the careers pages now, as Check now does: the given employers, or every one checked each morning. New matching jobs go into Positions as one search. " +
         "Answers with a task_id: follow it with check_task, whose result has the search_id of the jobs added.",
       inputSchema: z.object({ ids: z.array(id).max(200).optional().describe("Only these employers; without it, every one checked each morning") }),
       annotations: { readOnlyHint: false, openWorldHint: true },

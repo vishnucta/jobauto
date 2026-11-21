@@ -8,8 +8,8 @@ import { ActionError } from "@/lib/action";
 import { approveCandidate } from "@/lib/agent/draft";
 import { isAiUsable } from "@/lib/ai/config";
 import { AiError } from "@/lib/ai/errors";
-import { scoreFrom } from "@/lib/ai/tasks/score-posting";
-import { fitBand } from "@/lib/fit";
+import { factorsFrom } from "@/lib/ai/tasks/score-posting";
+import { fitFromAnswers } from "@/lib/fit";
 import { GoogleError } from "@/lib/google/errors";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
 import { JobSearchError } from "@/lib/job-search/errors";
@@ -17,29 +17,32 @@ import {
   DEFAULT_RADIUS_KM,
   EXPERIENCE_LEVELS,
   experienceAskedFor,
-  foundPostingSchema,
   POSTED_WITHIN,
   RADII_KM,
   type ExperienceLevel,
-  type JobSource,
   type PostedWithin,
   type SearchQuery,
 } from "@/lib/job-search/search";
-import { describeSourceProblem } from "@/lib/job-search/sources";
 import { getJob, startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
+import { coverageOf, fitWords } from "@/lib/posting-coverage";
 import { saveScore } from "@/lib/posting-scores";
+import { postingsOfSearch } from "@/lib/library";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { foundFromPosting } from "@/lib/postings";
 import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
+import { levelsProblem, profileNamed } from "@/lib/profiles";
+import { LOCATION_FITS, SENIORITY_FITS } from "@/lib/scoring/factors";
+import { MAX_LINES } from "@/lib/scoring/posting-lines";
+import { EDUCATION_LEVELS, EXTRA_LEVELS, LOCATION_OPTIONS, REQUIREMENT_KINDS, SENIORITY_OPTIONS, WORK_LEVELS } from "@/lib/scoring/questions";
 import { statusInfo } from "@/lib/status";
 import { applyStatusChange } from "@/lib/status-changes";
 import { appVersion } from "@/lib/version";
 
 import { connectorDraftJob } from "./draft";
-import { documentText, failure, postingLine, postingSource, resolvePosting, text, type ToolContext } from "./kit";
+import { documentText, failure, hasMore, portalProblems, portalsAnswered, postingLine, postingSource, profileInput, resolvePosting, text, type ToolContext } from "./kit";
 import { registerAgentTools } from "./tools/agent";
 import { registerApplicationTools } from "./tools/applications";
 import { registerApplyTools } from "./tools/apply";
@@ -52,7 +55,15 @@ import { registerCareersTools } from "./tools/careers";
 import { registerPrepTools } from "./tools/prep";
 import { registerSettingsTools } from "./tools/settings";
 import { registerTaskTools } from "./tools/tasks";
-import { saveWrittenApplication, WRITTEN_IN_CLAUDE, writtenDetailsSchema, writtenLetterSchema, writtenMatchSchema, writtenResumeSchema } from "./write";
+import {
+  reviseWrittenApplication,
+  saveWrittenApplication,
+  WRITTEN_IN_CLAUDE,
+  writtenDetailsSchema,
+  writtenLetterSchema,
+  writtenMatchSchema,
+  writtenResumeSchema,
+} from "./write";
 
 // The Claude connector's tools (#221, src/app/api/mcp), adapted from Anirudh
 // Sharma's fork of Dossier: search for jobs, read the profile and the
@@ -99,13 +110,40 @@ function guardTools(server: McpServer): McpServer {
   return server;
 }
 
+// save_job_scores takes the answers Dossier's scoring models give (E25-1), so
+// a score written in Claude chat counts requirements like any other.
+const scale = (levels: readonly { means: string }[]) => levels.map((level, index) => `${index}: ${level.means}`).join(" ");
+const choices = (options: Record<string, { means: string }>) =>
+  Object.entries(options)
+    .map(([value, { means }]) => `"${value}": ${means}`)
+    .join(" ");
+const reason = z.string().max(300).describe("One short sentence to the user (\"You…\"), pointing at the posting and the profile");
+const levelAnswer = (levels: readonly { means: string }[]) => z.object({ level: z.number().int().min(0).max(levels.length - 1).describe(scale(levels)), reason });
+const answersSchema = z.object({
+  requirements: z
+    .array(
+      z.object({
+        text: z.string().trim().min(1).max(300).describe("One thing the posting asks of applicants, copied word for word from the posting"),
+        must_have: z.boolean().describe(`true for ${REQUIREMENT_KINDS.must.means} false for ${REQUIREMENT_KINDS.nice.means}`),
+        covered: z.boolean().describe("Whether the profile shows it, anywhere in it, directly or clearly, never a stretch"),
+        evidence: z.string().max(120).optional().describe("When covered: the part of the profile that shows it, in a few words, such as \"Senior Designer at Acme\" or \"Figma (skill)\""),
+        skill: z.string().max(60).optional().describe("The one skill, tool or language it's about, as the user would list it, such as \"Kubernetes\"; left out when it's about something else, such as years or a degree"),
+      }),
+    )
+    .max(MAX_LINES)
+    .describe("Each requirement once. Leave out what isn't asked of applicants, such as the company, the team, the job's tasks, benefits, pay or how to apply."),
+  work: levelAnswer(WORK_LEVELS).describe("How close the profile's paid work is to the job's day-to-day work"),
+  extra: levelAnswer(EXTRA_LEVELS).describe("How much the profile's projects, volunteering, certifications, publications and other activities support it for the job"),
+  education: levelAnswer(EDUCATION_LEVELS).describe("How well the profile's education meets what the posting asks for"),
+  seniority: z.object({ fit: z.enum(SENIORITY_FITS).describe(choices(SENIORITY_OPTIONS)), reason }).describe("The job's level against jobsItsFor from get_profile"),
+  location: z.object({ fit: z.enum(LOCATION_FITS).describe(choices(LOCATION_OPTIONS)), reason }).describe("Whether the user can work where and how the job is, by whereItWantsToWork from get_profile"),
+  thin: z.boolean().default(false).describe("true when the posting is too short or too vague to tell what it requires of applicants"),
+});
+
 /**
  * Dossier as an MCP server, for one request; `origin` is the address links in
  * answers point to, `clientName` the name the client signed in with.
  */
-/** The sources search_jobs can be asked for, as the From filter names them. */
-const SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "jooble", "freehire", "arbeitsagentur"] as const satisfies readonly Lowercase<JobSource>[];
-
 export function createDossierServer(origin: string, clientName = ""): McpServer {
   const linkTo = (path: string) => `${origin}${path}`;
   const server = guardTools(
@@ -113,16 +151,17 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       { name: "dossier", title: "Dossier", version: appVersion },
       {
         instructions:
-          "Dossier is the user's own job search app: one profile, tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
-          "Its tools do what its screens do. " +
-          "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs; " +
-          "keep its keywords short, as a source treats every word as a requirement: get_search_words suggests them from the profile; " +
-          "jobs you find yourself on the web go into Find jobs with add_found_jobs, kept apart from the job source's as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
+          "Dossier is the user's own job search app: their profiles (one per kind of job they look for), tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
+          "Its tools do what its screens do. Tools that read or write a profile take its name as profile (get_profile lists them); without one they use the first. " +
+          "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs: they ask every portal switched on in Settings and keep what they find in Positions; " +
+          "keep its keywords short, as a portal treats every word as a requirement: get_search_words suggests them from the profile; " +
+          "jobs you find yourself on the web go into Positions with add_found_jobs, marked as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
           "or have Dossier's AI score them with score_with_dossier; keep or drop postings with update_postings. " +
           "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
-          "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application. " +
+          "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application; " +
+          "change a saved Draft with update_application rather than saving it again. " +
           "Or let Dossier's AI draft it with draft_application. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
-          "Recruiters are the agencies and recruiters on Find jobs → Recruiters: list_recruiters, add_recruiter, update_recruiter, set_recruiter_status, snooze_recruiter and remove_recruiter keep track of them, " +
+          "Recruiters are the agencies and recruiters on Find work → Recruiters: list_recruiters, add_recruiter, update_recruiter, set_recruiter_status, snooze_recruiter and remove_recruiter keep track of them, " +
           "and draft_recruiter_message drafts the message to write; Dossier sends nothing, so record that the user wrote or heard back only when they say so. " +
           "check_resume says whether a resume's PDF reads correctly for an applicant tracking system, names the posting's requirements, and has clean text. " +
           "Change the profile only with what the user told you or confirmed. " +
@@ -139,7 +178,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     {
       title: "Search for jobs",
       description:
-        "Searches the job source set up in Dossier's settings, or the sources given, together, and keeps the search in Find jobs → Past searches. Each search uses one search from the user's plan with each source. " +
+        "Searches every job portal switched on in Settings → Job search that lists jobs in the country, and keeps what they find in Positions. A portal that limits searches, such as JSearch, counts it as one of them. " +
         "Keep the keywords to a title or two or three words (get_search_words suggests them): a whole headline finds nothing. " +
         "Returns a search_id and numbered postings; pass both to get_posting, save_job_scores or save_application, or the search_id to more_jobs.",
       inputSchema: z.object({
@@ -149,16 +188,11 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         remote_only: z.boolean().optional().describe("Only remote postings."),
         radius_km: z.literal(RADII_KM).optional(),
         posted_within: z.enum(POSTED).optional().describe("any, day, 3days, week or month. Defaults to month."),
-        sources: z
-          .array(z.enum(SOURCE_NAMES))
-          .min(1)
-          .optional()
-          .describe("Which sources to search, together, with the same job listed once: jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur. Defaults to the one chosen in Settings. A source that can't answer is reported, and a ready one stands in for it."),
         experience: z
           .enum(LEVELS)
           .optional()
           .describe(
-            "The experience level, as Find jobs' Level: any, intern, junior (entry level), mid, senior or lead. Defaults to any. " +
+            "The experience level, as the Level in Positions' search: any, intern, junior (entry level), mid, senior or lead. Defaults to any. " +
               "Postings for another level are left out, so a page can come back short: more_jobs has the next.",
           ),
       }),
@@ -179,17 +213,18 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         // Left out rather than "any", as Find jobs does (public issue 100).
         ...(input.experience ? { experience: input.experience } : {}),
       };
-      const ran = await runSearch(query, input.sources?.map((name) => name.toUpperCase() as JobSource));
+      const ran = await runSearch(query, { wait: true });
       if (!ran.ok) return failure(ran.message);
       const search = await loadSearch(ran.id);
       if (!search) return failure("The search ran, but couldn't be read back. Try again.");
       return text({
         search_id: search.id,
         searched: searchedLine(query, countryName(country)),
-        sources: search.sources.map((source) => source.toLowerCase()),
-        problems: search.problems.length > 0 ? search.problems.map(describeSourceProblem) : undefined,
+        // The portals that answered, and those that failed or were skipped, with why (E22-4).
+        portals: portalsAnswered(search.portals),
+        problems: portalProblems(search.portals),
         found: search.postings.length,
-        more_available: search.more,
+        more_available: hasMore(search.portals),
         postings: search.postings.map((posting, index) => postingLine(posting, index + 1)),
         link: linkTo(`/jobs?search=${search.id}`),
       });
@@ -200,20 +235,19 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     "more_jobs",
     {
       title: "Show more jobs",
-      description: "The next page of a search from search_jobs. Uses one more search from the user's plan.",
+      description: "The next page of a search from search_jobs, from the portals that have more. A portal that limits searches counts it as one of them.",
       inputSchema: z.object({ search_id: z.string().min(1).max(100) }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
     async ({ search_id }) => {
       const before = await prisma.postingSearch.findUnique({ where: { id: search_id }, select: { found: true } });
       if (!before) return failure("That search is no longer kept. Search again.");
-      const more = await showMoreFor(search_id);
+      const more = await showMoreFor(search_id, { wait: true });
       if (!more.ok) return failure(more.message);
       return text({
         search_id,
         added: more.postings.length,
-        more_available: more.more,
-        problems: more.problems.length > 0 ? more.problems.map(describeSourceProblem) : undefined,
+        more_available: more.next !== null,
         postings: more.postings.map((posting, index) => postingLine(posting, before.found + index + 1)),
       });
     },
@@ -224,34 +258,36 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     {
       title: "Save fit scores for postings",
       description:
-        "Saves how well postings fit the user (from a search_jobs search by number, or handed over by posting_id), so Find jobs shows each score with its reasons. " +
-        "Read the profile first, and the whole posting with get_posting when the snippet is too short to judge. " +
-        "Score each from 0 to 100 against the profile from get_profile: 85-100 excellent (clearly meets the core requirements), 70-84 good (most core requirements, a gap or two), 50-69 possible (meaningful gaps or a stretch), 0-49 poor. " +
-        "Judge skills and experience, seniority and scope, location, remote work and language, and salary when both say something. " +
-        "Give one to four short reasons, each tying a requirement to a specific role, project, skill or degree, and up to three real red flags. " +
+        "Saves how well postings fit a profile (from a search_jobs search by number, or handed over by posting_id), so Positions shows how many of each posting's requirements the profile covers, with the reasons. " +
+        "Read the profile with get_profile first, and the whole posting with get_posting when the snippet is too short to judge. " +
+        "For each posting, answer the questions Dossier's scoring models answer: each requirement, whether it's a must-have and whether the profile shows it; then work, extra activities, education, seniority and location. Dossier adds the answers up. " +
         "Never invent experience, and never use age, gender, nationality or any other protected characteristic.",
       inputSchema: z.object({
         search_id: z.string().max(100).optional().describe("The search the numbered postings are from"),
         scores: z
           .array(
-            z.object({
+            answersSchema.extend({
               number: z.number().int().min(1).optional().describe("The posting's number in the search"),
               posting_id: z.string().max(100).optional().describe("Instead of a number: a posting Dossier handed over"),
-              score: z.number().int().min(0).max(100),
-              reasons: z.array(z.string().max(300)).min(1).max(4),
-              red_flags: z.array(z.string().max(300)).max(3).default([]),
             }),
           )
           .min(1)
           .max(50),
+        profile: profileInput.describe("The profile from get_profile the scores are against; the first when left out"),
       }),
       annotations: { readOnlyHint: false, idempotentHint: true },
     },
-    async ({ search_id, scores }) => {
-      const search = search_id ? await prisma.postingSearch.findUnique({ where: { id: search_id }, select: { postings: true } }) : null;
+    async ({ search_id, scores, profile }) => {
+      // Each posting keeps a score per profile (E25-5).
+      const chosen = await profileNamed(profile);
+      if ("error" in chosen) return failure(chosen.error);
+      // As in Dossier, nothing scores against a profile until the user has chosen its levels (E24-3).
+      const waiting = await levelsProblem(chosen.id);
+      if (waiting) return failure(`${waiting.message} Ask the user to choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
+      const search = search_id ? await prisma.postingSearch.findUnique({ where: { id: search_id }, select: { id: true } }) : null;
       if (search_id && !search) return failure("That search is no longer kept. Search again.");
-      const kept = foundPostingSchema.array().catch([]).parse(search?.postings ?? []);
-      const saved: { number?: number; posting_id?: string; title: string; score: number; band: string }[] = [];
+      const kept = search ? await postingsOfSearch(search.id) : [];
+      const saved: { number?: number; posting_id?: string; title: string; covered: string; fit: string }[] = [];
       const missing: (number | string)[] = [];
       for (const entry of scores) {
         const row = entry.posting_id ? await prisma.posting.findUnique({ where: { id: entry.posting_id } }) : null;
@@ -260,9 +296,18 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           missing.push(entry.posting_id ?? entry.number ?? "?");
           continue;
         }
-        const fit = scoreFrom({ score: entry.score, reasons: entry.reasons, redFlags: entry.red_flags });
-        await saveScore(posting, fit, WRITTEN_IN_CLAUDE);
-        saved.push({ number: entry.number, posting_id: entry.posting_id, title: posting.title, score: fit.score, band: fitBand(fit.score) });
+        // The requirements stand in for the posting's numbered lines, which the AI model answers by number.
+        const requirements = entry.requirements.map((requirement, line) => ({
+          line,
+          kind: requirement.must_have ? ("must" as const) : ("nice" as const),
+          covered: requirement.covered,
+          evidence: requirement.evidence ?? "",
+          skill: requirement.skill ?? "",
+        }));
+        const fit = fitFromAnswers(factorsFrom({ ...entry, requirements }, entry.requirements.map((requirement) => requirement.text)));
+        await saveScore(posting, fit, WRITTEN_IN_CLAUDE, chosen.id);
+        const coverage = coverageOf(fit);
+        saved.push({ number: entry.number, posting_id: entry.posting_id, title: posting.title, covered: `${coverage.hit} of ${coverage.total}`, fit: fitWords(coverage) });
       }
       return text({ saved, not_found: missing.length > 0 ? missing : undefined, link: linkTo(search_id ? `/jobs?search=${search_id}` : "/jobs?view=saved") });
     },
@@ -379,7 +424,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       description:
         "Saves a tailored resume and cover letter you wrote as a Draft application in Dossier, where the user can review, edit and download them as PDFs. " +
         "Give the posting (posting_id or paste_id when Dossier handed it over, search_id and number, posting_url or posting_text), its details, the resume (by the ids from get_profile) and the letter. " +
-        "Only use facts from the profile. Nothing is sent.",
+        "Only use facts from the profile. Nothing is sent. To change an application already saved, use update_application instead of saving it again.",
       inputSchema: z.object({
         ...postingSource,
         details: writtenDetailsSchema,
@@ -387,13 +432,17 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         cover_letter: writtenLetterSchema,
         match: writtenMatchSchema.describe("What the posting asks for and whether the profile covers it, partly covers it, or has a gap; Dossier shows it as the application's match"),
         note: z.string().max(2000).optional().describe("What the user asked to stress, kept with the application"),
+        profile: profileInput.describe("The profile from get_profile the resume was written from; the first when left out"),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ details, resume, cover_letter, match, note, ...source }) => {
+    async ({ details, resume, cover_letter, match, note, profile, ...source }) => {
+      const chosen = await profileNamed(profile);
+      if ("error" in chosen) return failure(chosen.error);
       const posting = await resolvePosting(source);
       if ("error" in posting) return failure(posting.error);
       const saved = await saveWrittenApplication({
+        profileId: chosen.id,
         posting: posting.text.slice(0, 100_000),
         postingUrl: posting.url.slice(0, 2000),
         postingId: posting.postingId,
@@ -414,22 +463,66 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
   );
 
   server.registerTool(
+    "update_application",
+    {
+      title: "Change a draft application",
+      description:
+        "Replaces the resume, the cover letter or the match of a Draft application, for changes the user asks for after save_application. " +
+        "Read it with get_application first and keep what the user changed by hand. Give only the parts that change, each whole, in save_application's form; the rest stays. " +
+        "Only a Draft can be changed. Only use facts from the profile. Nothing is sent.",
+      inputSchema: z.object({
+        application_id: z.string().min(1).max(100),
+        change: z.string().trim().min(1).max(200).describe("What the user asked to change, in a few words, e.g. 'Shorter first bullet'; shown in the document's history"),
+        resume: writtenResumeSchema.optional(),
+        cover_letter: writtenLetterSchema.optional(),
+        // Without save_application's default: a match left out stays as it is.
+        match: writtenMatchSchema.unwrap().optional(),
+      }),
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    async ({ application_id, change, resume, cover_letter, match }) => {
+      if (!resume && !cover_letter && !match) return failure("Give the resume, cover_letter or match to change.");
+      const revised = await reviseWrittenApplication(application_id, { resume, letter: cover_letter, match, change });
+      if ("error" in revised) return failure(revised.error);
+      return text({
+        application_id,
+        status: "Draft",
+        link: linkTo(`/applications/${application_id}`),
+        check_these: revised.unverified.length > 0 ? revised.unverified : undefined,
+        next: revised.unverified.length > 0 ? "Dossier marked names or numbers it couldn't find in the profile or posting; tell the user to check them." : undefined,
+      });
+    },
+  );
+
+  server.registerTool(
     "draft_application",
     {
       title: "Have Dossier draft an application",
       description:
         "Has Dossier's own AI model draft the application, only when an AI provider is set up in Dossier's settings. " +
         "Without one, write it yourself with get_profile, get_posting and save_application. Takes one to three minutes: follow it with check_draft.",
-      inputSchema: z.object({ ...postingSource, note: z.string().max(2000).optional().describe("Anything the documents should stress, in the user's words") }),
+      inputSchema: z.object({
+        ...postingSource,
+        note: z.string().max(2000).optional().describe("Anything the documents should stress, in the user's words"),
+        profile: profileInput.describe("The profile to write it from; the first when left out"),
+      }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ note, ...source }) => {
+    async ({ note, profile, ...source }) => {
       if (!(await isAiUsable())) {
         return failure("Dossier has no AI model of its own set up. Write the application yourself: get_profile, get_posting, then save_application.");
       }
+      const chosen = await profileNamed(profile);
+      if ("error" in chosen) return failure(chosen.error);
       const posting = await resolvePosting(source);
       if ("error" in posting) return failure(posting.error);
-      const jobId = await startJob(connectorDraftJob, { posting: posting.text.slice(0, 100_000), postingUrl: posting.url.slice(0, 2000), note: note ?? "", postingId: posting.postingId });
+      const jobId = await startJob(connectorDraftJob, {
+        posting: posting.text.slice(0, 100_000),
+        postingUrl: posting.url.slice(0, 2000),
+        note: note ?? "",
+        postingId: posting.postingId,
+        profileId: chosen.id,
+      });
       return text({ draft_id: jobId, status: "started", next: "Call check_draft with this draft_id in a minute or so." });
     },
   );

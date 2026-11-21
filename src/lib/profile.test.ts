@@ -7,6 +7,7 @@ import {
   BASICS_FIELDS,
   basicsFromFields,
   byStartDateDesc,
+  experienceMonths,
   inEntryOrder,
   fieldsFromBasics,
   filledBasics,
@@ -15,6 +16,8 @@ import {
   formatMonthYear,
   LANGUAGE_LEVELS,
   languageLevelLabel,
+  nextMissing,
+  PROFILE_KEYS,
   profileStrength,
   type DateSpan,
 } from "./profile";
@@ -160,6 +163,27 @@ describe("profile strength", () => {
   });
 });
 
+describe("nextMissing (E33-1)", () => {
+  const basics = { ...(Object.fromEntries(BASICS_FIELDS.map((field) => [field, ""])) as Record<(typeof BASICS_FIELDS)[number], string>), showAge: false };
+  const full = { ...basics, name: "L", headline: "h", email: "e", city: "c", country: "n", summary: "s" };
+  const role = (bullets: string, volunteering = false) => ({ bullets, volunteering }) as never;
+  const profile = (over: object) => ({ basics: full, experience: [role("Led it")], education: [{} as never], skills: [{} as never], ...over });
+
+  it("names the next thing to add, in the order the meter weighs them", () => {
+    expect(nextMissing(profile({ basics }))).toBe("Add your name in Basics.");
+    expect(nextMissing(profile({ basics: { ...full, email: " " } }))).toBe("Add your email address in Basics.");
+    expect(nextMissing(profile({ basics: { ...full, country: "" } }))).toBe("Add where you live in Basics.");
+    expect(nextMissing(profile({ basics: { ...full, headline: "" } }))).toBe("Add a headline.");
+    expect(nextMissing(profile({ basics: { ...full, summary: "" } }))).toBe("Write a summary.");
+    expect(nextMissing(profile({ experience: [role("", true)] }))).toBe("Add a role: experience matters most.");
+    expect(nextMissing(profile({ experience: [role("Led it"), role("")] }))).toBe("One role has no lines yet.");
+    expect(nextMissing(profile({ experience: [role(""), role(" ")] }))).toBe("2 roles have no lines yet.");
+    expect(nextMissing(profile({ education: [] }))).toBe("Add your education.");
+    expect(nextMissing(profile({ skills: [] }))).toBe("Add your skills.");
+    expect(nextMissing(profile({}))).toBeNull();
+  });
+});
+
 describe("stored basics", () => {
   const basics = {
     ...(Object.fromEntries(BASICS_FIELDS.map((field) => [field, ""])) as Record<(typeof BASICS_FIELDS)[number], string>),
@@ -171,6 +195,13 @@ describe("stored basics", () => {
   it("stores filled-in fields as text and marks empty ones for removal", () => {
     expect(fieldsFromBasics(basics)).toMatchObject({ name: "Jane Doe", dob: "1992-04-18", showAge: "true", email: null });
     expect(fieldsFromBasics({ ...basics, showAge: false }).showAge).toBeNull();
+  });
+
+  it("keeps the headline and summary out of the shared rows: they're each profile's own (E24-1)", () => {
+    expect(fieldsFromBasics({ ...basics, headline: "Analyst", summary: "Ten years" })).not.toHaveProperty("headline");
+    expect(PROFILE_KEYS).toEqual(expect.arrayContaining(["name", "street", "houseNumber", "postalCode", "showAge"]));
+    expect(PROFILE_KEYS).not.toContain("headline");
+    expect(PROFILE_KEYS).not.toContain("summary");
   });
 
   it("reads them back, with missing keys empty and unknown ones ignored", () => {
@@ -223,3 +254,29 @@ describe("inEntryOrder (E4-9)", () => {
   });
 });
 
+
+describe("years of experience (#294, E24-5)", () => {
+  const today = new Date(2026, 10, 15);
+  const role = (startYear: number, endYear: number | null, volunteering = false) => ({
+    id: `r${startYear}`, role: "Designer", company: "", location: "", descriptor: "", volunteering, bullets: "", skillIds: [],
+    startYear, startMonth: 1, endYear, endMonth: endYear === null ? null : 12, current: endYear === null,
+  });
+  const entry = (startYear: number, endYear: number) => ({
+    id: `i${startYear}`, title: "Freelance", subtitle: "", details: "", link: "", onResumes: false, startYear, startMonth: 1, endYear, endMonth: 12, current: false,
+  });
+  const section = (countsAs: "WORK_EXPERIENCE" | "EDUCATION" | "EXTRA_ACTIVITIES", format: "ENTRIES" | "LINES" = "ENTRIES") => ({
+    id: "s1", title: "Freelance work", format, countsAs, items: [entry(2018, 2019)],
+  });
+
+  it("counts paid roles, never volunteering", () => {
+    expect(experienceMonths({ experience: [role(2020, 2021), role(2015, 2016, true)] }, today)).toBe(24);
+  });
+
+  it("counts an entries section that counts as Work experience like a paid role, hidden entries too, and overlaps once", () => {
+    const experience = [role(2019, 2019)];
+    expect(experienceMonths({ experience, customSections: [section("WORK_EXPERIENCE")] }, today)).toBe(24);
+    expect(experienceMonths({ experience, customSections: [section("EXTRA_ACTIVITIES")] }, today)).toBe(12);
+    expect(experienceMonths({ experience, customSections: [section("EDUCATION")] }, today)).toBe(12);
+    expect(experienceMonths({ experience, customSections: [section("WORK_EXPERIENCE", "LINES")] }, today)).toBe(12);
+  });
+});

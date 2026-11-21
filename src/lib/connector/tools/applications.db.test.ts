@@ -105,7 +105,7 @@ describe("the applications area's tools (jobauto fork)", () => {
     expect(hints.list_notes).toEqual({ readOnlyHint: true, openWorldHint: false });
     expect(hints.save_note).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false });
     // Removing a fact can't be undone, and the interview date goes to Google Calendar when Dossier keeps interviews there.
-    expect(hints.update_application).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+    expect(hints.update_application_details).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
     expect(hints.delete_application).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
     // The change undone leaves the history, with the date it was made.
     expect(hints.undo_status_change).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false });
@@ -164,7 +164,7 @@ describe("the applications area's tools (jobauto fork)", () => {
 
   it("archives an application and brings it back, keeping when it was last updated", async () => {
     const kestrel = await application("Kestrel Maps");
-    expect((await tool("update_application", { id: kestrel.id, archived: true })).json).toMatchObject({
+    expect((await tool("update_application_details", { id: kestrel.id, archived: true })).json).toMatchObject({
       archived: true,
       done: ["Archived. It's off your board, and still counts on your dashboard."],
       link: `https://dossier.example/applications/${kestrel.id}`,
@@ -172,42 +172,42 @@ describe("the applications area's tools (jobauto fork)", () => {
     const archived = await saved(kestrel.id);
     expect(archived).toMatchObject({ archivedAt: expect.any(Date), updatedAt: kestrel.updatedAt });
 
-    expect((await tool("update_application", { id: kestrel.id, archived: true })).json).toMatchObject({ archived: true, done: ["It was archived already."] });
+    expect((await tool("update_application_details", { id: kestrel.id, archived: true })).json).toMatchObject({ archived: true, done: ["It was archived already."] });
     expect((await saved(kestrel.id)).archivedAt).toEqual(archived.archivedAt);
 
-    expect((await tool("update_application", { id: kestrel.id, archived: false })).json).toMatchObject({ archived: false, done: ["Back on your board."] });
+    expect((await tool("update_application_details", { id: kestrel.id, archived: false })).json).toMatchObject({ archived: false, done: ["Back on your board."] });
     expect(await saved(kestrel.id)).toMatchObject({ archivedAt: null, updatedAt: kestrel.updatedAt });
   });
 
   it("sets the next interview in the user's time zone or at the offset given, and removes it", async () => {
     const northstar = await application("Northstar Health");
-    const set = await tool("update_application", { id: northstar.id, interview_at: "2026-11-04T14:00" });
+    const set = await tool("update_application_details", { id: northstar.id, interview_at: "2026-11-04T14:00" });
     expect(set.json).toMatchObject({ next_interview: "2026-11-04T14:00:00+01:00", time_zone: "Europe/Berlin", done: ["Interview date saved. It'll show on your dashboard."] });
     expect(set.json.next).toBeUndefined();
     expect((await saved(northstar.id)).nextInterviewAt).toEqual(new Date("2026-11-04T13:00:00Z"));
     expect(calendar.sync).toHaveBeenLastCalledWith(northstar.id);
 
     // In summer time, and at an offset.
-    expect((await tool("update_application", { id: northstar.id, interview_at: "2027-07-01T09:30" })).json.next_interview).toBe("2027-07-01T09:30:00+02:00");
+    expect((await tool("update_application_details", { id: northstar.id, interview_at: "2027-07-01T09:30" })).json.next_interview).toBe("2027-07-01T09:30:00+02:00");
     expect((await saved(northstar.id)).nextInterviewAt).toEqual(new Date("2027-07-01T07:30:00Z"));
-    await tool("update_application", { id: northstar.id, interview_at: "2026-11-05T10:00:00-05:00" });
+    await tool("update_application_details", { id: northstar.id, interview_at: "2026-11-05T10:00:00-05:00" });
     expect((await saved(northstar.id)).nextInterviewAt).toEqual(new Date("2026-11-05T15:00:00Z"));
 
-    expect((await tool("update_application", { id: northstar.id, interview_at: null })).json).toMatchObject({ next_interview: null, done: ["Interview date removed."] });
+    expect((await tool("update_application_details", { id: northstar.id, interview_at: null })).json).toMatchObject({ next_interview: null, done: ["Interview date removed."] });
     expect((await saved(northstar.id)).nextInterviewAt).toBeNull();
 
     // Not in Interview yet: it's saved, and Claude learns where it shows.
     const kestrel = await application("Kestrel Maps");
-    expect((await tool("update_application", { id: kestrel.id, interview_at: "2026-11-04T14:00" })).json.next).toMatch(/set_application_status/);
+    expect((await tool("update_application_details", { id: kestrel.id, interview_at: "2026-11-04T14:00" })).json.next).toMatch(/set_application_status/);
   });
 
   it("says when the calendar followed, and when it couldn't", async () => {
     const { GoogleError } = await import("@/lib/google/errors");
     const northstar = await application("Northstar Health");
     calendar.sync.mockResolvedValueOnce({ inCalendar: true, eventLink: "https://calendar.google.com/event?eid=1" });
-    expect((await tool("update_application", { id: northstar.id, interview_at: "2026-11-04T14:00" })).json.done).toEqual(["Interview date saved, in your calendar too."]);
+    expect((await tool("update_application_details", { id: northstar.id, interview_at: "2026-11-04T14:00" })).json.done).toEqual(["Interview date saved, in your calendar too."]);
     calendar.sync.mockRejectedValueOnce(new GoogleError("unavailable", "Couldn't reach Google. Try again in a moment."));
-    expect((await tool("update_application", { id: northstar.id, interview_at: null, archived: true })).json).toMatchObject({
+    expect((await tool("update_application_details", { id: northstar.id, interview_at: null, archived: true })).json).toMatchObject({
       archived: true,
       done: ["Interview date removed, but your calendar wasn't changed: Couldn't reach Google. Try again in a moment.", "Archived. It's off your board, and still counts on your dashboard."],
     });
@@ -216,15 +216,15 @@ describe("the applications area's tools (jobauto fork)", () => {
   it("says what's wrong with an update, and changes nothing then", async () => {
     const kestrel = await application("Kestrel Maps");
     const nothing = "Say what to change: archived, interview_at, add_facts, change_facts, remove_facts or startup_id.";
-    expect(await tool("update_application", { id: kestrel.id })).toMatchObject({ isError: true, text: nothing });
-    expect(await tool("update_application", { id: kestrel.id, add_facts: [], remove_facts: [] })).toMatchObject({ isError: true, text: nothing });
-    expect(await tool("update_application", { id: kestrel.id, archived: true, interview_at: "next Tuesday" })).toMatchObject({
+    expect(await tool("update_application_details", { id: kestrel.id })).toMatchObject({ isError: true, text: nothing });
+    expect(await tool("update_application_details", { id: kestrel.id, add_facts: [], remove_facts: [] })).toMatchObject({ isError: true, text: nothing });
+    expect(await tool("update_application_details", { id: kestrel.id, archived: true, interview_at: "next Tuesday" })).toMatchObject({
       isError: true,
       text: "Give the interview's date and time like 2026-11-04T14:00, or null to remove it.",
     });
-    expect(await tool("update_application", { id: kestrel.id, interview_at: "" })).toMatchObject({ isError: true, text: expect.stringMatching(/^Give the interview's date and time/) });
+    expect(await tool("update_application_details", { id: kestrel.id, interview_at: "" })).toMatchObject({ isError: true, text: expect.stringMatching(/^Give the interview's date and time/) });
     expect(await saved(kestrel.id)).toMatchObject({ archivedAt: null, nextInterviewAt: null });
-    expect(await tool("update_application", { id: "gone", archived: true })).toMatchObject({ isError: true, text: "That application no longer exists." });
+    expect(await tool("update_application_details", { id: "gone", archived: true })).toMatchObject({ isError: true, text: "That application no longer exists." });
   });
 
   it("adds, changes and removes the facts Dossier's AI is told for an application, and lists them", async () => {
@@ -234,17 +234,17 @@ describe("the applications area's tools (jobauto fork)", () => {
     const profileFacts = () => prisma().fact.findMany({ where: { applicationId: null }, orderBy: { id: "asc" } });
     const profileBefore = await profileFacts();
 
-    const added = await tool("update_application", { id: ledgerly.id, add_facts: ["A friend on their team referred me.", "  I can start in January.  "] });
+    const added = await tool("update_application_details", { id: ledgerly.id, add_facts: ["A friend on their team referred me.", "  I can start in January.  "] });
     expect(added.json).toMatchObject({ done: ["Added 2 facts."], link: `https://dossier.example/applications/${ledgerly.id}?tab=posting` });
     const [, referral, start] = await facts();
     expect([referral.text, start.text]).toEqual(["A friend on their team referred me.", "I can start in January."]);
     expect(added.json.facts).toEqual([seeded, referral, start].map((fact) => ({ fact_id: fact.id, text: fact.text })));
 
     // One it has already isn't added again.
-    expect((await tool("update_application", { id: ledgerly.id, add_facts: ["i can start in  January.", "Remote is fine."] })).json.done).toEqual(["Added 1 fact.", "1 fact was there already."]);
+    expect((await tool("update_application_details", { id: ledgerly.id, add_facts: ["i can start in  January.", "Remote is fine."] })).json.done).toEqual(["Added 1 fact.", "1 fact was there already."]);
     expect(await facts()).toHaveLength(4);
 
-    const changed = await tool("update_application", {
+    const changed = await tool("update_application_details", {
       id: ledgerly.id,
       change_facts: [{ fact_id: referral.id, text: "Anna Weber, their head of design, referred me." }],
       remove_facts: [seeded.id],
@@ -264,7 +264,7 @@ describe("the applications area's tools (jobauto fork)", () => {
     expect(await profileFacts()).toEqual(profileBefore);
 
     // With other changes, the link goes to the application.
-    expect((await tool("update_application", { id: ledgerly.id, add_facts: ["Visa sponsorship isn't needed."], archived: true })).json).toMatchObject({
+    expect((await tool("update_application_details", { id: ledgerly.id, add_facts: ["Visa sponsorship isn't needed."], archived: true })).json).toMatchObject({
       done: ["Added 1 fact.", "Archived. It's off your board, and still counts on your dashboard."],
       archived: true,
       link: `https://dossier.example/applications/${ledgerly.id}`,
@@ -278,31 +278,31 @@ describe("the applications area's tools (jobauto fork)", () => {
     const theirs = await prisma().fact.create({ data: { applicationId: (await application("Meridian Bank")).id, text: "Theirs" } });
     const textOf = async (id: string) => (await prisma().fact.findUniqueOrThrow({ where: { id } })).text;
 
-    expect(await tool("update_application", { id: ledgerly.id, archived: true, remove_facts: [theirs.id] })).toMatchObject({ isError: true, text: `That fact isn't on this application: ${theirs.id}.` });
-    expect(await tool("update_application", { id: ledgerly.id, change_facts: [{ fact_id: profileFact.id, text: "Mine" }, { fact_id: "gone", text: "Mine" }] })).toMatchObject({
+    expect(await tool("update_application_details", { id: ledgerly.id, archived: true, remove_facts: [theirs.id] })).toMatchObject({ isError: true, text: `That fact isn't on this application: ${theirs.id}.` });
+    expect(await tool("update_application_details", { id: ledgerly.id, change_facts: [{ fact_id: profileFact.id, text: "Mine" }, { fact_id: "gone", text: "Mine" }] })).toMatchObject({
       isError: true,
       text: `Those facts aren't on this application: ${profileFact.id}, gone.`,
     });
-    expect(await tool("update_application", { id: ledgerly.id, change_facts: [{ fact_id: own.id, text: "New" }], remove_facts: [own.id] })).toMatchObject({
+    expect(await tool("update_application_details", { id: ledgerly.id, change_facts: [{ fact_id: own.id, text: "New" }], remove_facts: [own.id] })).toMatchObject({
       isError: true,
       text: "A fact can be changed or removed, not both.",
     });
-    expect(await tool("update_application", { id: ledgerly.id, add_facts: ["   "] })).toMatchObject({ isError: true, text: expect.stringContaining("Write the fact first.") });
+    expect(await tool("update_application_details", { id: ledgerly.id, add_facts: ["   "] })).toMatchObject({ isError: true, text: expect.stringContaining("Write the fact first.") });
     expect([await textOf(own.id), await textOf(profileFact.id), await textOf(theirs.id)]).toEqual([own.text, profileFact.text, "Theirs"]);
 
     // 49 facts: one more fits, two don't.
     await prisma().fact.createMany({ data: Array.from({ length: 48 }, (_, index) => ({ applicationId: ledgerly.id, text: `Fact ${index + 1}`, sort: 100 + index })) });
-    expect(await tool("update_application", { id: ledgerly.id, add_facts: ["One more", "Two more"], interview_at: "2026-11-04T14:00" })).toMatchObject({
+    expect(await tool("update_application_details", { id: ledgerly.id, add_facts: ["One more", "Two more"], interview_at: "2026-11-04T14:00" })).toMatchObject({
       isError: true,
       text: "An application keeps up to 50 facts. Remove one it no longer needs first.",
     });
     expect(await saved(ledgerly.id)).toMatchObject({ archivedAt: null, nextInterviewAt: null });
     expect(await prisma().fact.count({ where: { applicationId: ledgerly.id } })).toBe(49);
     // Removing one makes room.
-    expect((await tool("update_application", { id: ledgerly.id, remove_facts: [own.id], add_facts: ["One more", "Two more"] })).json.done).toEqual(["Removed 1 fact.", "Added 2 facts."]);
+    expect((await tool("update_application_details", { id: ledgerly.id, remove_facts: [own.id], add_facts: ["One more", "Two more"] })).json.done).toEqual(["Removed 1 fact.", "Added 2 facts."]);
     expect(await prisma().fact.count({ where: { applicationId: ledgerly.id } })).toBe(50);
 
-    expect(await tool("update_application", { id: "gone", add_facts: ["Hi"] })).toMatchObject({ isError: true, text: "That application no longer exists." });
+    expect(await tool("update_application_details", { id: "gone", add_facts: ["Hi"] })).toMatchObject({ isError: true, text: "That application no longer exists." });
   });
 
   it("links an application to the startup it's written to, as Write to them does, and unlinks it", async () => {
@@ -313,36 +313,36 @@ describe("the applications area's tools (jobauto fork)", () => {
     const kestrel = await application("Kestrel Maps");
     const linkedTo = async (id: string) => (await prisma().startup.findUniqueOrThrow({ where: { id } })).applicationId;
 
-    expect((await tool("update_application", { id: kestrel.id, startup_id: canalworks.id })).json).toMatchObject({
+    expect((await tool("update_application_details", { id: kestrel.id, startup_id: canalworks.id })).json).toMatchObject({
       done: ["Linked to Canalworks. When Dossier writes the email, it fills in the address the startup publishes. The startup counts as contacted once the application is sent."],
       link: `https://dossier.example/applications/${kestrel.id}`,
     });
     expect(await linkedTo(canalworks.id)).toBe(kestrel.id);
-    expect((await tool("update_application", { id: kestrel.id, startup_id: canalworks.id })).json.done).toEqual(["It was linked to Canalworks already."]);
+    expect((await tool("update_application_details", { id: kestrel.id, startup_id: canalworks.id })).json.done).toEqual(["It was linked to Canalworks already."]);
 
     // An application is written to one startup.
-    expect((await tool("update_application", { id: kestrel.id, startup_id: quietly.id })).json.done).toEqual([
+    expect((await tool("update_application_details", { id: kestrel.id, startup_id: quietly.id })).json.done).toEqual([
       "Linked to Quietly instead of Canalworks. The startup counts as contacted once the application is sent.",
     ]);
     expect([await linkedTo(canalworks.id), await linkedTo(quietly.id)]).toEqual([null, kestrel.id]);
 
     // Another application's startup stays theirs.
     const northstar = await application("Northstar Health");
-    expect(await tool("update_application", { id: northstar.id, startup_id: quietly.id, archived: true, add_facts: ["Met them at a meetup."] })).toMatchObject({
+    expect(await tool("update_application_details", { id: northstar.id, startup_id: quietly.id, archived: true, add_facts: ["Met them at a meetup."] })).toMatchObject({
       isError: true,
       text: "Another application is linked to Quietly already.",
     });
     expect(await saved(northstar.id)).toMatchObject({ archivedAt: null });
     expect(await prisma().fact.count({ where: { applicationId: northstar.id } })).toBe(0);
     expect(await linkedTo(quietly.id)).toBe(kestrel.id);
-    expect(await tool("update_application", { id: northstar.id, startup_id: "gone" })).toMatchObject({ isError: true, text: "That startup is no longer in the list." });
+    expect(await tool("update_application_details", { id: northstar.id, startup_id: "gone" })).toMatchObject({ isError: true, text: "That startup is no longer in the list." });
 
-    expect((await tool("update_application", { id: kestrel.id, startup_id: null })).json.done).toEqual(["Unlinked from Quietly."]);
+    expect((await tool("update_application_details", { id: kestrel.id, startup_id: null })).json.done).toEqual(["Unlinked from Quietly."]);
     expect(await linkedTo(quietly.id)).toBeNull();
-    expect((await tool("update_application", { id: kestrel.id, startup_id: null })).json.done).toEqual(["It wasn't linked to a startup."]);
+    expect((await tool("update_application_details", { id: kestrel.id, startup_id: null })).json.done).toEqual(["It wasn't linked to a startup."]);
 
     // Now it's free for another one.
-    expect((await tool("update_application", { id: northstar.id, startup_id: quietly.id })).json.done).toEqual(["Linked to Quietly. The startup counts as contacted once the application is sent."]);
+    expect((await tool("update_application_details", { id: northstar.id, startup_id: quietly.id })).json.done).toEqual(["Linked to Quietly. The startup counts as contacted once the application is sent."]);
     expect(await linkedTo(quietly.id)).toBe(northstar.id);
   });
 

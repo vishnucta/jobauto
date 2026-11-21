@@ -11,7 +11,13 @@ import { RecruitersScreen } from "./recruiters-screen";
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/recruiters" }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
-vi.mock("@/components/documents/download-pdf-button", () => ({ DownloadPdfButton: ({ children }: { children: string }) => <button type="button">{children}</button> }));
+vi.mock("@/components/documents/download-pdf-button", () => ({
+  DownloadPdfButton: ({ children, href }: { children: string; href: string }) => (
+    <button type="button" data-href={href}>
+      {children}
+    </button>
+  ),
+}));
 vi.mock("./actions", () => ({
   addRecruiter: vi.fn(),
   addSuggestedRecruiters: vi.fn(),
@@ -50,8 +56,9 @@ const fresh = recruiter({ id: "fresh", name: "Hays", speciality: "All fields", s
 const replied = recruiter({ id: "replied", name: "Michael Page", status: "REPLIED", contactedAt: days(-4) });
 const all = [fresh, replied, due];
 
-const counts = { searches: 27, saved: 0, dismissed: 0, recruiters: 3 };
-const renderScreen = (recruiters: RecruiterView[] = all) => render(<RecruitersScreen recruiters={recruiters} facts={facts} counts={counts} today={TODAY} />);
+const counts = { recruiters: 3, employers: 2 };
+const renderScreen = (recruiters: RecruiterView[] = all, profileId?: string) =>
+  render(<RecruitersScreen recruiters={recruiters} facts={facts} profileId={profileId} counts={counts} today={TODAY} />);
 const list = () => screen.getByRole("region", { name: "Your list" });
 const rows = () => within(list()).getAllByRole("listitem").map((item) => within(item).getAllByRole("button")[0].textContent);
 
@@ -66,17 +73,18 @@ beforeEach(() => {
 });
 
 describe("the Recruiters screen", () => {
-  it("is a tab of Find jobs, next to the others", () => {
+  it("sits under Positions, with a link to Careers pages beside it", () => {
     renderScreen();
-    const tabs = within(screen.getByRole("navigation", { name: "Find jobs views" })).getAllByRole("link");
-    expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("href"), tab.getAttribute("aria-current")])).toEqual([
-      ["Search", "/jobs", null],
-      ["Past searches27", "/jobs?view=history", null],
-      ["Saved0", "/jobs?view=saved", null],
-      ["Dismissed0", "/jobs?view=dismissed", null],
-      ["Recruiters3", "/recruiters", "page"],
-      ["Careers pages", "/careers", null],
-    ]);
+    expect(screen.getByRole("heading", { level: 1, name: "Recruiters" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Positions" })).toHaveAttribute("href", "/jobs");
+    const links = within(screen.getByRole("navigation", { name: "Also in Find work" })).getAllByRole("link");
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([["Careers pages2", "/careers"]]);
+  });
+
+  it("offers the Base resume of the profile the message is written from", async () => {
+    renderScreen(all, "profile-2");
+    await userEvent.click(within(list()).getByRole("button", { name: /Arkwright/ }));
+    expect(screen.getByRole("button", { name: "Download your resume" })).toHaveAttribute("data-href", "/api/pdf?doc=base&profile=profile-2");
   });
 
   it("counts the list and puts the follow-up that is due first", () => {

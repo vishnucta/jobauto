@@ -1,9 +1,9 @@
 import "server-only";
 
 import { DocumentKind } from "@/generated/prisma/enums";
-import { sameSkill } from "@/lib/ai/tasks/match-requirements";
 import { extractedSchema, matchSchema, unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
 import { readJson } from "@/lib/application-documents";
+import { lineText } from "@/lib/changed-lines";
 import { documentLabels, ENGLISH_LABELS, type DocumentLabels } from "@/lib/document-labels";
 import { detectLanguageName, knownLanguage } from "@/lib/document-language";
 import { updateDocuments } from "@/lib/document-units";
@@ -15,6 +15,7 @@ import { countPdfPages } from "@/lib/pdf/pages";
 import { prisma } from "@/lib/prisma";
 import { sameName, type ProfileData } from "@/lib/profile";
 import { loadProfile } from "@/lib/profile-data";
+import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
 import { resumeContent, sectionsWithContent, type ResumeContent } from "@/lib/resume-content";
 import { customKey, inSidebar, sectionHeading, sectionLayoutSchema, shownSections, type SectionLayout } from "@/lib/resume-sections";
 import type { SettingsData } from "@/lib/settings";
@@ -92,6 +93,25 @@ const hasWords = (haystack: string, needle: string) => ` ${haystack} `.includes(
 /** A word without its plural "s", as sameSkill forgives it: "systems" names "system". */
 const singular = (word: string) => (word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word);
 
+/**
+ * Whether two skill names mean the same skill, forgiving case, punctuation
+ * and a plural: "Design system" is "Design systems", "UX-research" is "UX
+ * research". Kept here from the "How you match" task that 1.15's scoring
+ * replaced (match-requirements.ts).
+ */
+function sameSkill(a: string, b: string): boolean {
+  const key = (name: string) =>
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .split(" ")
+      .map(singular)
+      .join(" ");
+  return key(a) === key(b);
+}
+
 /** A text's words, folded and in the singular. */
 const tokensOf = (text: string) => fold(text).split(" ").filter(Boolean).map(singular);
 
@@ -122,19 +142,23 @@ type Inputs = {
  * What the check needs, loaded the way the print pages load it, or why
  * there's nothing to check. Not loadDocuments(): its notFound() is for
  * pages, and the connector asks here too. So what loadDocuments() does for
- * a sent application's copy (#299) and for the sections is done here too.
+ * a sent application's copy (#299), for the sections and for the profile
+ * it was made from (E24-6) is done here too. The base resume is the asked
+ * profile's own (E24-2), the first one's when none is asked for.
  */
-async function loadInputs(doc: "base" | "resume", applicationId: string): Promise<Inputs | { error: string }> {
-  const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
-  const baseTheme = (await loadTheme(settings.baseThemeId)) ?? BUILT_IN_THEMES[0];
+async function loadInputs(doc: "base" | "resume", applicationId: string, profileId?: string | null): Promise<Inputs | { error: string }> {
+  const settings = await loadSettings();
   if (doc === "base") {
+    const id = await profileIdOr(profileId);
+    const [profile, own] = await Promise.all([loadProfile(id), loadProfileSettings(id)]);
+    const baseTheme = (await loadTheme(own.baseThemeId)) ?? BUILT_IN_THEMES[0];
     return {
       document: "base",
       profile,
       settings,
       split: hasSidebar(baseTheme.layout),
-      sections: settings.resumeSections,
-      language: settings.resumeLanguage ?? "English",
+      sections: own.resumeSections,
+      language: own.resumeLanguage ?? "English",
       includeReferences: settings.includeRefs,
       place: "",
       posting: null,
@@ -144,6 +168,7 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
     where: { id: applicationId },
     select: {
       id: true,
+      profileId: true,
       role: true,
       location: true,
       mode: true,
@@ -161,11 +186,14 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
   const row = application.documents[0];
   const units = row && readJson(unitsSchema, row.units);
   if (!row || !units) return { error: NO_RESUME };
+  // Drawn from the profile it was made from (E24-6), or the first when that's gone.
+  const [profile, own] = await Promise.all([loadProfile(application.profileId), loadProfileSettings(application.profileId)]);
+  const baseTheme = (await loadTheme(own.baseThemeId)) ?? BUILT_IN_THEMES[0];
   // Once it was sent, it's drawn from what it was sent with (#299).
   const copy = readFrozenCopy(application.frozen);
   const theme = copy?.themes.RESUME ?? row.theme ?? baseTheme;
   const extracted = readJson(extractedSchema, application.extracted);
-  const sections = readJson(sectionLayoutSchema, application.sections) ?? settings.resumeSections;
+  const sections = readJson(sectionLayoutSchema, application.sections) ?? own.resumeSections;
   return {
     document: "resume",
     profile: copy ? frozenProfile(copy, profile) : profile,
@@ -181,11 +209,15 @@ async function loadInputs(doc: "base" | "resume", applicationId: string): Promis
   };
 }
 
-/** The resume's PDF, checked. An application that's gone, or has no tailored resume, is an error written for the user. */
-export async function checkResume(doc: "base" | "resume", applicationId = ""): Promise<ResumeCheck | { error: string }> {
-  const inputs = await loadInputs(doc, applicationId);
+/**
+ * The resume's PDF, checked: a profile's base resume (the first one's
+ * without `profileId`), or an application's tailored one. An application
+ * that's gone, or has no tailored resume, is an error written for the user.
+ */
+export async function checkResume(doc: "base" | "resume", applicationId = "", profileId?: string | null): Promise<ResumeCheck | { error: string }> {
+  const inputs = await loadInputs(doc, applicationId, profileId);
   if ("error" in inputs) return inputs;
-  const rendered = await renderDocumentPdf(doc, applicationId);
+  const rendered = await renderDocumentPdf(doc, applicationId, profileId);
   if ("error" in rendered) return rendered;
 
   // Counted before pdf.js reads the bytes: it takes the buffer with it and leaves an empty one behind.
@@ -429,12 +461,14 @@ function requirementChecks(
     if (haystack.includes(` ${needle.join(" ")} `)) return true;
     return needle.length === 2 && lines.some((line) => needle.every((token) => line.has(token)));
   };
+  // The match's answer for a requirement, by its text: one from 1.15's scoring (E25-7) lists the scoring model's requirements, not the extracted ones in their order.
+  const matched = (text: string, index: number) => (match?.items[index]?.requirement === text ? match.items[index] : match?.items.find((item) => item.requirement === text));
   const items = extracted.requirements.flatMap((requirement, index): RequirementCheck[] => {
     if (requirement.kind === "years") return [];
     const phrase = ((requirement.kind === "language" ? requirement.language : requirement.skill) ?? requirement.text).trim();
     if (!phrase) return [];
     // A language lives in the Languages section, so it's never one to add to Skills.
-    const skill = requirement.kind === "language" ? null : skillSpelling(phrase, match?.items[index], profile);
+    const skill = requirement.kind === "language" ? null : skillSpelling(phrase, matched(requirement.text, index), profile);
     const inProfile = skill !== null || profile.languages.some((language) => sameName(language.name, phrase));
     return [{ index, requirement: requirement.text, named: named(phrase), inProfile, skill }];
   });
@@ -538,13 +572,16 @@ function datesItem(raw: string, labels: DocumentLabels): CheckItem {
  * a bullet keeps its "1.", and only a line the normaliser empties, or a
  * bullet character it uncovers, goes.
  * Publications, certifications and sections of the user's own stay word
- * for word (#218, #293, #298).
+ * for word (#218, #293, #298). The lines a unit serves requirements with
+ * (E30-4) are put right the same way, so the Fit column still finds them.
  */
 export async function cleanDocumentText(applicationId: string): Promise<void> {
   await updateDocuments(applicationId, async (documents) => {
     for (const kind of [DocumentKind.RESUME, DocumentKind.COVER_LETTER]) {
       for (const unit of documents[kind] ?? []) {
-        if (!isVerbatimUnit(unit.id)) unit.text = plainCharacters(unit.text, isBulletUnit(unit.id));
+        if (isVerbatimUnit(unit.id)) continue;
+        unit.text = plainCharacters(unit.text, isBulletUnit(unit.id));
+        if (unit.serves) unit.serves = unit.serves.map((entry) => ({ ...entry, line: lineText(plainText(entry.line)) }));
       }
     }
   });

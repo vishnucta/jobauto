@@ -2,11 +2,12 @@ import "server-only";
 
 import { z } from "zod";
 
-import { alertIfOn, matchLines } from "@/lib/alerts";
 import { dayOf } from "@/lib/calendar-view";
-import { EMPTY_QUERY, postingKey, searchRunHref, type FoundPosting } from "@/lib/job-search/search";
+import { EMPTY_QUERY, libraryHref, postingKey, type FoundPosting } from "@/lib/job-search/search";
+import { CAREERS_SOURCE } from "@/lib/job-search/sources";
 import { defineJob, findUnfinishedJobs, startJob, type JobContext } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
+import { emit } from "@/lib/notifications/notify";
 import { addClientSearch } from "@/lib/posting-searches";
 import { prisma } from "@/lib/prisma";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
@@ -19,8 +20,8 @@ import { CareersError, readBoard } from "./read";
 
 // Checking the careers pages the user follows (jobauto fork): once a day,
 // and on Check now. Each page's jobs that match its words and places, and
-// that Dossier doesn't have yet, go into Find jobs together as one search
-// from the CAREERS source, and to the phone as one alert.
+// that Dossier doesn't have yet, go into Positions together as one search
+// from the CAREERS source, new, and out as one notification ("careers.new").
 
 export { careersCheckResultSchema, type CareersCheckResult };
 
@@ -60,19 +61,18 @@ export async function checkCareersPages({ ids }: { ids?: string[] }, context: Pi
   // Jobs Dossier has already, from this source or any other, stay out (knownJobs).
   const names = [...new Set(found.map((posting) => employers.find((employer) => employer.id === owner.get(postingKey(posting)))!.name))];
   const { id, added } = found.length
-    ? await addClientSearch({ source: "CAREERS", addedBy: names.join(", ").slice(0, 200), query: { ...EMPTY_QUERY, keywords: "New jobs on careers pages" }, postings: found })
+    ? await addClientSearch({ source: CAREERS_SOURCE, addedBy: names.join(", ").slice(0, 200), query: { ...EMPTY_QUERY, keywords: "New jobs on careers pages" }, postings: found })
     : { id: null, added: [] };
   const newBy = new Map<string, number>();
   for (const posting of added) newBy.set(owner.get(postingKey(posting))!, (newBy.get(owner.get(postingKey(posting))!) ?? 0) + 1);
   for (const [employerId, count] of newBy) await prisma.employer.update({ where: { id: employerId }, data: { lastNew: count } });
 
-  if (added.length > 0) {
-    await alertIfOn({ title: `${plural(added.length, "new job", "new jobs")} on careers pages you follow`, message: matchLines(added), open: id ? searchRunHref(id) : "/careers" });
-  }
+  // Never throws: a channel that fails doesn't fail the check.
+  if (added.length > 0) await emit("careers.new", { postings: added, path: id ? libraryHref({ found: id }) : "/careers" }, now);
   const message =
     employers.length === 0
       ? "There are no careers pages to check. Add an employer first."
-      : `${added.length > 0 ? `${plural(added.length, "new job", "new jobs")} added to Find jobs` : "No new jobs"} from ${plural(employers.length, "careers page", "careers pages")}.${problems.length ? ` ${plural(problems.length, "page", "pages")} couldn't be read.` : ""}`;
+      : `${added.length > 0 ? `${plural(added.length, "new job", "new jobs")} added to Positions` : "No new jobs"} from ${plural(employers.length, "careers page", "careers pages")}.${problems.length ? ` ${plural(problems.length, "page", "pages")} couldn't be read.` : ""}`;
   return { checked, added: added.length, searchId: id, problems, message };
 }
 

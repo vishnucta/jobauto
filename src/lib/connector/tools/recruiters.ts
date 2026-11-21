@@ -22,9 +22,9 @@ import {
   type RecruiterView,
 } from "@/lib/recruiters/types";
 
-import { failure, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, profileInput, text, type ToolContext } from "../kit";
 
-// Recruiters, under Find jobs (jobauto fork): what the Recruiters tab shows
+// Recruiters, under Find work (jobauto fork): what the Recruiters tab shows
 // and what its buttons do. As on the screen, nothing here sends anything: a
 // message is drafted from the profile, and the user sends it from their own
 // mail. "Contacted" and "replied" are the user's word, so they are recorded
@@ -86,7 +86,7 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
     {
       title: "List recruiters",
       description:
-        "The agencies and recruiters on Find jobs → Recruiters, as the tab lists them: those with a follow-up due first, then those still to write to. " +
+        "The agencies and recruiters on Find work → Recruiters, as the tab lists them: those with a follow-up due first, then those still to write to. " +
         "Agencies that came up in searches and jobs are added there on their own. Give id to read one with its address, notes and history. " +
         "To write to one, draft the message with draft_recruiter_message.",
       inputSchema: z.object({
@@ -118,7 +118,7 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
     {
       title: "Add a recruiter",
       description:
-        "Adds a contact to Find jobs → Recruiters, as Add a recruiter does: an agency or recruiter (kind agency, the default), a hiring manager at an employer, " +
+        "Adds a contact to Find work → Recruiters, as Add a recruiter does: an agency or recruiter (kind agency, the default), a hiring manager at an employer, " +
         "or someone at an employer who could refer the user, such as a former colleague or an alum (referral). Nothing is sent. " +
         "An agency already on the list under the same name, or the same person at the same employer, isn't added twice: update it with update_recruiter.",
       inputSchema: z.object({
@@ -256,11 +256,17 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
       description:
         "The message the Recruiters tab drafts for a recruiter: a first one, or a follow-up to the one the user marked as sent (the default once they have). " +
         "It states only what the profile says. Nothing is sent and the recruiter's address isn't in it: the user opens it on the tab, reads and edits it, and sends it from their own mail.",
-      inputSchema: z.object({ id, kind: z.enum(["first", "follow-up"]).optional().describe("first, or follow-up") }),
+      inputSchema: z.object({
+        id,
+        kind: z.enum(["first", "follow-up"]).optional().describe("first, or follow-up"),
+        profile: profileInput.describe("The profile the message speaks from, as get_profile lists them; the first when left out"),
+      }),
       annotations: { readOnlyHint: true },
     },
-    async ({ id: recruiterId, kind }) => {
-      const [recruiter, profile] = await Promise.all([getRecruiter(recruiterId), loadProfile()]);
+    async ({ id: recruiterId, kind, profile: asked }) => {
+      const chosen = await chooseProfile(asked);
+      if ("failure" in chosen) return chosen.failure;
+      const [recruiter, profile] = await Promise.all([getRecruiter(recruiterId), loadProfile(chosen.id)]);
       if (!recruiter) return failure(GONE);
       const sort: OutreachKind = kind ?? (recruiter.status === "CONTACTED" && recruiter.contactedAt ? "follow-up" : "first");
       const draft = outreachDraft(recruiter, sort, outreachFacts(profile));

@@ -15,14 +15,27 @@ import { formatDateTime } from "@/lib/dates";
 import { countryCodeFor, countryName } from "@/lib/job-search/countries";
 import { describeSearch, EMPTY_QUERY, POSTED_WITHIN, postingKey, RADII_KM, type PostedWithin, type SearchQuery } from "@/lib/job-search/search";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
+import { COVERS, coversFromScore, fitWords, type Coverage } from "@/lib/posting-coverage";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
-import type { SettingsData } from "@/lib/settings";
+import { listProfiles, type ProfileSummary } from "@/lib/profiles";
+import { agentCoversOf, type SettingsData } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
 import { placeOf } from "@/lib/startups/place";
 import { startStartupsRefresh, STARTUPS_JOB_KEY } from "@/lib/startups/refresh";
 import { getStartup, linkStartupApplication, listStartups, lookUpStartup, removeStartup, startupPostingText, updateStartup } from "@/lib/startups/store";
-import { STARTUP_PLACES, STARTUP_SORTS, STARTUP_SOURCE_INFO, STARTUP_SOURCES, startupFilterHref, startupFilterSchema, type StartupView } from "@/lib/startups/types";
+import {
+  STARTUP_PLACES,
+  STARTUP_SORTS,
+  STARTUP_SOURCE_INFO,
+  STARTUP_SOURCES,
+  STARTUP_VIEWS,
+  startupFilterHref,
+  startupFilterSchema,
+  type StartupStatusName,
+  type StartupView,
+  type StartupViewName,
+} from "@/lib/startups/types";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
 import { documentText, failure, started, text, type ToolContext } from "../kit";
@@ -50,13 +63,22 @@ function refusal(error: unknown) {
   throw error;
 }
 
+/** "Covers at least half": a cut-off as the Agent screen says it (E32-2). */
+const COVERS_HELP = "any, half, two-thirds or all of a posting's requirements";
+
+/** "5 of 7" and how that reads: a posting's coverage as Claude sees it (E32-2). */
+const coverageLine = (coverage: Coverage) => ({ covered: `${coverage.hit} of ${coverage.total}`, fit: fitWords(coverage) });
+
 /**
  * The agent's settings, named as update_job_agent takes them. It keeps up to
- * three searches, run in order; the search fields are the first one's, which
+ * three searches, run in order, each scoring with its profile or all of them
+ * (E24-6, E25-5); the search fields are the first one's, which
  * update_job_agent changes, and `searches` lists them all.
  */
-function agentSettings(settings: SettingsData, searches: readonly SavedAgentSearch[], timeZone: string) {
+function agentSettings(settings: SettingsData, searches: readonly SavedAgentSearch[], timeZone: string, profiles: readonly ProfileSummary[]) {
   const query = searches[0]?.query ?? EMPTY_QUERY;
+  // A search without a profile of its own scores with the first.
+  const profileOf = (search: SavedAgentSearch) => (search.allProfiles ? "all profiles" : (profiles.find((profile) => profile.id === search.profileId) ?? profiles[0])?.name);
   return {
     enabled: settings.agentEnabled,
     keywords: query.keywords,
@@ -65,10 +87,18 @@ function agentSettings(settings: SettingsData, searches: readonly SavedAgentSear
     radius_km: query.radiusKm,
     remote_only: query.remoteOnly,
     posted_within: query.postedWithin,
-    searches: searches.map((search) => ({ name: search.name, enabled: search.enabled, searches_for: describeSearch(search.query, countryName(search.query.country)) })),
+    searches: searches.map((search) => ({
+      name: search.name,
+      enabled: search.enabled,
+      searches_for: describeSearch(search.query, countryName(search.query.country)),
+      profile: profiles.length > 1 || search.allProfiles ? profileOf(search) : undefined,
+    })),
     hour: settings.agentHour,
     time_zone: timeZone,
-    min_score: settings.agentMinScore,
+    // "Keep postings that cover" (E32-2), the cut-off that was a minimum score.
+    covers: agentCoversOf(settings),
+    // Which new matches get a Strong new matches notification (jobauto fork).
+    strong_matches_cover: coversFromScore(settings.alertMinScore),
     max_scores: settings.agentMaxScores,
     auto_draft: settings.agentAutoDraft,
     max_drafts: settings.agentMaxDrafts,
@@ -84,14 +114,16 @@ const findLine = (find: AgentCandidateView) => ({
   facts: find.facts || undefined,
   origin: find.origin || undefined,
   url: find.url || undefined,
-  score: find.score,
+  ...coverageLine(find.coverage),
   reasons: find.reasons,
   red_flags: find.redFlags.length > 0 ? find.redFlags : undefined,
+  // Under Skipped (E32-5): why it was left out.
+  skipped: find.why,
   error: find.error ?? undefined,
   drafting_task_id: find.draftJobId ?? undefined,
 });
 
-/** Finds dismissed lately whose posting Find jobs still keeps, so restore can put them back. */
+/** Finds dismissed lately whose posting Positions still keeps, so restore can put them back. */
 async function restorableFinds() {
   const dismissed = await prisma.agentCandidate.findMany({
     where: { status: AgentCandidateStatus.DISMISSED },
@@ -110,6 +142,8 @@ async function restorableFinds() {
 /** A startup as Claude sees it, with the addresses it publishes: people's own only when it's read on its own, a list just counts them. */
 function startupLine(startup: StartupView, { people = false }: { people?: boolean } = {}) {
   const emails = people ? startup.emails : startup.emails.filter((entry) => !entry.onRequest);
+  // The scoring model's reasons can be red flags (#524); the keyword match's are all good.
+  const flags = startup.reasons.filter((reason) => !reason.good).map((reason) => reason.text);
   return {
     id: startup.id,
     company: startup.company,
@@ -117,13 +151,16 @@ function startupLine(startup: StartupView, { people = false }: { people?: boolea
     found_on: `${STARTUP_SOURCE_INFO[startup.source].name} · ${STARTUP_SOURCE_INFO[startup.source].kind}`,
     summary: startup.summary.slice(0, 300),
     location: startup.location || undefined,
+    hires_from: startup.hiresFrom || undefined,
     remote: startup.remote ?? undefined,
     stage: startup.stage || undefined,
     roles: startup.roles.length > 0 ? startup.roles : undefined,
     posted: startup.postedAt?.slice(0, 10),
     status: startup.status,
     match: startup.score,
-    reasons: startup.reasons,
+    scored_by_ai: startup.aiScored || undefined,
+    reasons: startup.reasons.filter((reason) => reason.good).map((reason) => reason.text),
+    red_flags: flags.length > 0 ? flags : undefined,
     addresses: emails.length > 0 ? emails.map(({ email, label, from }) => ({ email, label, published_on: from || undefined })) : undefined,
     people_addresses: emails.length < startup.emails.length ? startup.emails.length - emails.length : undefined,
     no_unsolicited_applications: startup.noApplicationsFrom || undefined,
@@ -134,8 +171,11 @@ function startupLine(startup: StartupView, { people = false }: { people?: boolea
   };
 }
 
+/** The Startups tab a status shows in (E32-4): contacted is Applied for. */
+const VIEW_OF: Record<StartupStatusName, StartupViewName> = { NEW: "NEW", SAVED: "SAVED", CONTACTED: "APPLIED", DISMISSED: "DISMISSED" };
+
 /** The Startups screen showing one startup. */
-const startupHref = (startup: StartupView) => startupFilterHref(startupFilterSchema.parse({ status: startup.status, q: startup.company.slice(0, 200) }));
+const startupHref = (startup: StartupView) => startupFilterHref(startupFilterSchema.parse({ view: VIEW_OF[startup.status], q: startup.company.slice(0, 200) }));
 
 /** Registers these tools on the connector's server. */
 export function registerAgentTools({ server, linkTo }: ToolContext): void {
@@ -158,7 +198,7 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
       posted: find.postedAt?.toISOString().slice(0, 10),
       via: find.via || undefined,
       url: find.url || undefined,
-      score: find.score,
+      ...coverageLine({ hit: find.covered, total: find.requirements, mustMissing: find.mustMissing }),
       reasons: stringsOf(find.reasons),
       red_flags: redFlags.length > 0 ? redFlags : undefined,
       error: find.error ?? undefined,
@@ -177,30 +217,36 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
     {
       title: "Read the job agent",
       description:
-        "The job agent's settings, recent runs, the drafts it prepared waiting for review, and the finds it scored, each with score, reasons and red flags. " +
+        "The job agent's settings, recent runs, the drafts it prepared waiting for review, and its best finds, each with how many of its requirements the profile covers, reasons and red flags. " +
         "Give find_id for one find with its posting and its draft's text. Act on finds with act_on_agent_find.",
       inputSchema: z.object({
         find_id: z.string().min(1).max(100).optional().describe("One find, with its posting and its draft's text"),
-        include_below_minimum: z.boolean().optional().describe("Also list the finds scored below the minimum score"),
+        include_skipped: z
+          .boolean()
+          .optional()
+          .describe("Also list what it left out, each with why: below the cut-off, past the run's scoring limit, already in Positions, dismissed before, or asking for more German than the profile has"),
         include_dismissed: z.boolean().optional().describe("Also list the finds dismissed lately that restore can put back"),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ find_id, include_below_minimum, include_dismissed }) => {
+    async ({ find_id, include_skipped, include_dismissed }) => {
       if (find_id) return readFind(find_id);
       const now = new Date();
-      const [view, settings, timeZone] = await Promise.all([loadAgentView(now), loadSettings(), lastKnownTimeZone()]);
+      const [view, settings, timeZone, profiles] = await Promise.all([loadAgentView(now), loadSettings(), lastKnownTimeZone(), listProfiles()]);
       return text({
-        settings: agentSettings(settings, view.searches, timeZone),
+        settings: agentSettings(settings, view.searches, timeZone, profiles),
         setup_problem: view.setupProblem ?? undefined,
         daily_limit_reached: view.limitReached || undefined,
+        // Each portal is asked up to 3 times a day (E22-8).
+        portal_searches_today: view.budget.length > 0 ? view.budget.map((portal) => ({ portal: portal.name, used: portal.used })) : undefined,
         next_run: view.nextRun ?? undefined,
         running_task_id: view.runJobId ?? undefined,
         recent_runs: settings.agentRuns.slice(0, 5).map((run) => ({ at: formatDateTime(new Date(run.at), timeZone, now), manual: run.manual || undefined, result: run.message ?? undefined })),
         drafts: view.drafts.map((find) => ({ ...findLine(find), application_id: find.applicationId, link: linkTo(`/applications/${find.applicationId}`) })),
-        finds: view.scored.map(findLine),
-        below_minimum_count: view.belowMinimum.length,
-        below_minimum: include_below_minimum ? view.belowMinimum.map(findLine) : undefined,
+        // Best finds (E32-5): what passes the cut-off, best fit first.
+        finds: view.finds.map(findLine),
+        skipped_count: view.skipped.length,
+        skipped: include_skipped ? view.skipped.map(findLine) : undefined,
         dismissed: include_dismissed ? await restorableFinds() : undefined,
         link: linkTo("/agent"),
       });
@@ -224,7 +270,9 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
         remote_only: z.boolean().optional(),
         posted_within: z.enum(POSTED).optional().describe("any, day, 3days, week or month"),
         hour: z.number().int().min(0).max(23).optional().describe("The hour it runs after each day, in the user's time zone"),
-        min_score: z.number().int().min(0).max(100).optional().describe("Finds scored lower stay out of the queue"),
+        covers: z.enum(COVERS).optional().describe(`Keep postings that cover ${COVERS_HELP}; the rest go under Skipped`),
+        min_score: z.number().int().min(0).max(100).optional().describe("Instead of covers, a minimum score from before 1.15: 50 to 65 is half, 70 to 85 two thirds, 90 or more all"),
+        strong_matches_cover: z.enum(COVERS).optional().describe(`Which new finds get a Strong new matches notification: those that cover ${COVERS_HELP}`),
         max_scores: z.number().int().min(1).max(30).optional().describe("The most postings a run scores"),
         auto_draft: z.boolean().optional().describe("Whether a run prepares drafts for its best finds on its own"),
         max_drafts: z.number().int().min(0).max(10).optional().describe("The most drafts a run prepares on its own"),
@@ -232,7 +280,7 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ run_now, enabled, keywords, place, country, radius_km, remote_only, posted_within, hour, min_score, max_scores, auto_draft, max_drafts }) => {
+    async ({ run_now, enabled, keywords, place, country, radius_km, remote_only, posted_within, hour, covers, min_score, strong_matches_cover, max_scores, auto_draft, max_drafts }) => {
       let query: SearchQuery | undefined;
       if ([keywords, place, country, radius_km, remote_only, posted_within].some((value) => value !== undefined)) {
         const [first] = await listAgentSearches();
@@ -246,11 +294,12 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
           radiusKm: radius_km ?? current.radiusKm,
           remoteOnly: remote_only ?? current.remoteOnly,
           postedWithin: posted_within ?? current.postedWithin,
-          // The level set on the screen stays.
+          // The levels set on the screen stay.
           ...(current.experience === undefined ? {} : { experience: current.experience }),
+          ...(current.experienceTo === undefined ? {} : { experienceTo: current.experienceTo }),
         };
       }
-      const changes = { enabled, query, hour, minScore: min_score, maxScores: max_scores, maxDrafts: max_drafts, autoDraft: auto_draft };
+      const changes = { enabled, query, hour, covers, minScore: min_score, strongCovers: strong_matches_cover, maxScores: max_scores, maxDrafts: max_drafts, autoDraft: auto_draft };
       const changing = Object.values(changes).some((value) => value !== undefined);
       if (!changing && !run_now) return failure("Say what to change, or give run_now: true to run it now.");
       if (changing) {
@@ -269,8 +318,8 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
           return refusal(error);
         }
       }
-      const [settings, searches, timeZone] = await Promise.all([loadSettings(), listAgentSearches(), lastKnownTimeZone()]);
-      return text({ saved: true, settings: agentSettings(settings, searches, timeZone), link: linkTo("/agent") });
+      const [settings, searches, timeZone, profiles] = await Promise.all([loadSettings(), listAgentSearches(), lastKnownTimeZone(), listProfiles()]);
+      return text({ saved: true, settings: agentSettings(settings, searches, timeZone, profiles), link: linkTo("/agent") });
     },
   );
 
@@ -322,29 +371,28 @@ export function registerAgentTools({ server, linkTo }: ToolContext): void {
     {
       title: "List startups",
       description:
-        "Startups that are hiring, from YC startups' job posts and Hacker News' Who is hiring?, as the Startups screen lists them: status, match score and reasons, notes and the addresses they publish. " +
+        "Startups that are hiring, from YC startups' job posts, Hacker News' Who is hiring? and firms newly licensed in Germany, as the Startups screen lists them: status, match score (against the profile it fits best) with reasons and red flags, notes and the addresses they publish. " +
         "Give id to read one with its post and people's own addresses. To write to one, save an application with its post as posting_text, then link it with update_startup's application_id.",
       inputSchema: z.object({
         id: z.string().min(1).max(64).optional().describe("One startup, with its post and people's own addresses"),
-        status: z.enum(StartupStatus).optional().describe("NEW (To look at, the default), SAVED, CONTACTED or DISMISSED"),
+        view: z.enum(STARTUP_VIEWS).optional().describe("The Startups tab: HIRING (Hiring now, every one not dismissed; the default), NEW, SAVED, APPLIED (applied for or contacted) or DISMISSED"),
         search: z.string().trim().max(200).optional().describe("Words to look for, e.g. 'android fintech'"),
         place: z.enum(STARTUP_PLACES).optional().describe("any, city or country (the profile's), or remote (open to its country)"),
         source: z.enum(STARTUP_SOURCES).optional().describe("YC, HN, or LICENCE for firms newly licensed in Germany (ESMA's registers)"),
-        min_score: z.number().int().min(0).max(100).optional(),
         with_address: z.boolean().optional().describe("Only ones with an address to write to"),
         sort: z.enum(STARTUP_SORTS).optional().describe("match (the default) or newest"),
         limit: z.number().int().min(1).max(100).optional(),
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ id, status, search, place, source, min_score, with_address, sort, limit }) => {
+    async ({ id, view, search, place, source, with_address, sort, limit }) => {
       if (id) {
         const startup = await getStartup(id);
         if (!startup) return failure(GONE);
         // Its post as "Write to them" hands it to New application, without addresses: an application keeps it, and Dossier's AI reads it.
         return text({ ...startupLine(startup, { people: true }), summary: startup.summary, post: startupPostingText(startup).slice(0, 20_000) || undefined, link: linkTo(startupHref(startup)) });
       }
-      const filter = startupFilterSchema.parse({ q: search, place, source, minScore: min_score, withEmail: with_address, status, sort });
+      const filter = startupFilterSchema.parse({ q: search, place, source, withEmail: with_address, view, sort });
       const [profile, settings, timeZone, [running]] = await Promise.all([loadProfile(), loadSettings(), lastKnownTimeZone(), findUnfinishedJobs(STARTUPS_JOB_KEY)]);
       const list = await listStartups(filter, placeOf(profile.basics), { limit: limit ?? 20 });
       const last = settings.startupsLastRefresh;

@@ -6,13 +6,15 @@ import { ActionError } from "@/lib/action";
 import { isoInZone } from "@/lib/dates";
 import { syncInterviewToCalendar } from "@/lib/google/availability";
 import { GoogleError } from "@/lib/google/errors";
+import { setUpcomingInterview } from "@/lib/interviews";
 import { prisma } from "@/lib/prisma";
 
 // The next interview's date and time (E9-9), set beside the status on an
 // application's page or from Claude through the connector (jobauto fork).
-// It shows on the dashboard's "Worth a look" while the application is in
-// Interview, and while Dossier keeps interviews in Google Calendar, the
-// event is added, moved or deleted to match.
+// It shows on the dashboard's Needs you while the application is in
+// Interview, fills in the upcoming interview round (E30-6), and while Dossier
+// keeps interviews in Google Calendar, the event is added, moved or deleted
+// to match.
 
 const GONE = "That application no longer exists.";
 
@@ -20,6 +22,8 @@ const GONE = "That application no longer exists.";
 export async function saveInterviewDate(applicationId: string, at: Date | null): Promise<void> {
   const { count } = await prisma.application.updateMany({ where: { id: applicationId }, data: { nextInterviewAt: at } });
   if (count === 0) throw new ActionError(GONE);
+  // The upcoming round gets it, or it starts the next one (E30-6).
+  await setUpcomingInterview(applicationId, at);
 }
 
 /**

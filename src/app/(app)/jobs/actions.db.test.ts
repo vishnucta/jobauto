@@ -5,7 +5,7 @@ import { clearJobSearchCache } from "@/lib/job-search/cache";
 import { EMPTY_QUERY, type FoundPosting } from "@/lib/job-search/search";
 import { encryptSecret, JOB_SOURCE_KEY, TYPESAFE_KEY } from "@/lib/secrets";
 import { saveSettings } from "@/lib/settings-data";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { jsearchV2LastPage } from "@/test/job-search-fixtures";
 
 import {
@@ -68,21 +68,20 @@ afterAll(() => prisma().$disconnect());
 describe("Find jobs actions", () => {
   it("runs a search and keeps it, adds its next page, and removes it (E14-10)", async () => {
     stubFetch(() => json({ ...jsearchV2LastPage, data: { ...jsearchV2LastPage.data, cursor: "MORE" } }));
-    const run = await runJobSearch({ query, sources: ["JSEARCH"] });
-    expect(run).toEqual({ ok: true, data: { ok: true, id: expect.any(String), problems: [] } });
+    const run = await runJobSearch({ query });
+    expect(run).toEqual({ ok: true, data: { ok: true, id: expect.any(String) } });
     const id = run.ok && run.data.ok ? run.data.id : "";
 
     stubFetch(() => json(jsearchV2LastPage));
-    expect(await showMorePostings({ searchId: id })).toEqual({ ok: true, data: { ok: true, postings: [], more: false, problems: [] } });
+    expect(await showMorePostings({ searchId: id })).toEqual({ ok: true, data: { ok: true, postings: [], next: null } });
 
     expect(await removeJobSearch({ id })).toEqual({ ok: true, data: null, toast: "Search removed. Saved postings from it stay in Saved." });
     expect(await prisma().postingSearch.count()).toBe(0);
   });
 
   it("says why a search didn't run", async () => {
-    expect(await runJobSearch({ query: { ...query, country: "" }, sources: ["JSEARCH"] })).toMatchObject({ ok: true, data: { ok: false, problem: "no-country" } });
-    expect(await runJobSearch({ query: { ...query, radiusKm: 33 as never }, sources: ["JSEARCH"] })).toMatchObject({ ok: false });
-    expect(await runJobSearch({ query, sources: [] })).toMatchObject({ ok: false, error: "Some details aren't valid. Check the highlighted fields." });
+    expect(await runJobSearch({ query: { ...query, country: "" } })).toMatchObject({ ok: true, data: { ok: false, problem: "no-country" } });
+    expect(await runJobSearch({ query: { ...query, radiusKm: 33 as never } })).toMatchObject({ ok: false });
   });
 
   it("saves, dismisses and brings back a posting, with a toast where one helps", async () => {
@@ -91,7 +90,8 @@ describe("Find jobs actions", () => {
     expect(await restorePosting({ source: "JSEARCH", externalId: "job-1", saved: true })).toEqual({ ok: true, data: null });
     expect(await prisma().posting.findFirstOrThrow()).toMatchObject({ savedAt: expect.any(Date), dismissedAt: null });
     expect(await unsavePosting({ source: "JSEARCH", externalId: "job-1" })).toEqual({ ok: true, data: null, toast: "Removed from Saved." });
-    expect(await prisma().posting.count()).toBe(0);
+    // It stays in the library (E22-5), neither saved nor dismissed, and seen.
+    expect(await prisma().posting.findFirstOrThrow()).toMatchObject({ savedAt: null, dismissedAt: null, seenAt: expect.any(Date) });
   });
 
   it("refuses postings with links that aren't web addresses", async () => {
@@ -130,6 +130,14 @@ describe("Score (#208)", () => {
     expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "posting-score" }), { posting }, { key: "posting-score:JSEARCH:job-1" });
     const running = await prisma().job.create({ data: { type: "posting-score", key: "posting-score:JSEARCH:job-1", status: "RUNNING", input: { posting } } });
     expect(await startScoringPosting({ posting })).toEqual({ ok: true, data: { jobId: running.id } });
+  });
+
+  it("waits until the profile's levels are chosen, saying where to choose them (E24-3)", async () => {
+    await prisma().profile.update({ where: { id: TEST_PROFILE_ID }, data: { levelFrom: null, levelTo: null } });
+    expect(await startScoringPosting({ posting })).toEqual({
+      ok: true,
+      data: { setLevels: { profileId: TEST_PROFILE_ID, name: "My profile", message: "Set the levels for “My profile” first.", href: `/profile?section=target&profile=${TEST_PROFILE_ID}` } },
+    });
   });
 
   it("says when there's no AI provider to score with", async () => {

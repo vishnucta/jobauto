@@ -107,6 +107,8 @@ function startups(path: string, request: IncomingMessage, response: ServerRespon
 
 /** How many JSearch searches were asked for, so a spec can tell a kept search came from the database. */
 let searches = 0;
+/** What the notification webhook got (E26-2): its headers and body, newest last. */
+const webhookPosts: { signature: string | undefined; event: string | undefined; body: string }[] = [];
 
 // The project's backend (DOSSIER_API_URL, E18), in the shape of its contract.
 // A spec says what it answers; it's "ok" with no notices until then.
@@ -125,10 +127,30 @@ function answerAnnouncements(request: IncomingMessage, response: ServerResponse)
   response.writeHead(200, { "content-type": "application/json", ...headers }).end(body);
 }
 
+/** The portal catalog it serves at /v1/portals (E23), as a spec sets it. */
+let portalCatalog: unknown = { portals: [], withdrawn: [], commit: null };
+
+function answerPortals(request: IncomingMessage, response: ServerResponse) {
+  const body = JSON.stringify(portalCatalog);
+  const headers = { "cache-control": "public, max-age=86400", etag: `"${createHash("sha256").update(body).digest("hex").slice(0, 16)}"` };
+  if (request.headers["if-none-match"] === headers.etag) return void response.writeHead(304, headers).end();
+  response.writeHead(200, { "content-type": "application/json", ...headers }).end(body);
+}
+
 createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://localhost:${port}`);
   if (url.pathname === "/health") return send(response, 200, { ok: true });
   if (url.pathname === "/v1/announcements") return answerAnnouncements(request, response);
+  if (url.pathname === "/v1/portals") return answerPortals(request, response);
+  if (url.pathname === "/portals-answer" && request.method === "POST") {
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      portalCatalog = JSON.parse(body) as unknown;
+      response.writeHead(204).end();
+    });
+    return;
+  }
   if (url.pathname === "/announcement-requests") return send(response, 200, { requests: announcementRequests });
   if (url.pathname === "/announcement-answer" && request.method === "POST") {
     let body = "";
@@ -142,6 +164,17 @@ createServer((request, response) => {
   if (url.pathname === "/searches") return send(response, 200, { searches });
   if (url.pathname === "/startup-requests") return send(response, 200, { requests: siteRequests });
   if (url.pathname.startsWith("/startups/")) return startups(url.pathname, request, response);
+  // A notification channel's webhook (E26-2): it keeps what it got, for a spec to check the signature.
+  if (url.pathname === "/webhook-sink" && request.method === "POST") {
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      webhookPosts.push({ signature: request.headers["x-dossier-signature"] as string | undefined, event: request.headers["x-dossier-event"] as string | undefined, body });
+      response.writeHead(204).end();
+    });
+    return;
+  }
+  if (url.pathname === "/webhook-posts") return send(response, 200, { posts: webhookPosts });
   // Jev (DOSSIER_TYPESAFE_TEST_BASE_URL, #274): each question answered from
   // its id and line, so a spec knows the score: every Score at its top level
   // but past work one below, a line with "years", "skills" or "experience"
@@ -152,7 +185,8 @@ createServer((request, response) => {
     request.on("data", (chunk: Buffer) => (body += chunk.toString()));
     request.on("end", () => {
       const { questions } = JSON.parse(body) as { questions: Record<string, { type: string; criteria?: unknown[]; instructions: unknown }> };
-      const lineOf = (question: { instructions: unknown }) => String((question.instructions as { line?: string }).line ?? "");
+      // The engine's questions (E25): a line's are about the line in quotes.
+      const lineOf = (question: { instructions: unknown }) => /"(.*)"/.exec(String(question.instructions))?.[1] ?? "";
       const answers = Object.fromEntries(
         Object.entries(questions).map(([id, question]) => {
           if (question.type === "score") {
@@ -160,11 +194,11 @@ createServer((request, response) => {
             return [id, { type: "score", score: id === "work" ? top - 1 : top, confidence: 0.9, legend: {}, probabilities: {} }];
           }
           if (question.type === "choice") {
-            const required = /years|skills|experience/i.test(lineOf(question));
-            return [id, { type: "choice", choice: required ? "required" : "other", confidence: 0.9, probabilities: {} }];
+            const choice = id === "seniority" || id === "location" ? "fits" : /years|skills|experience/i.test(lineOf(question)) ? "must" : "other";
+            return [id, { type: "choice", choice, confidence: 0.9, probabilities: {} }];
           }
-          const shown = id.endsWith("Shown") && /product design|figma/i.test(lineOf(question));
-          return [id, { type: "noul", noul: shown ? 0.9 : 0.05 }];
+          const covered = id.endsWith("Covered") && /product design|figma/i.test(lineOf(question));
+          return [id, { type: "noul", noul: covered ? 0.9 : 0.05 }];
         }),
       );
       send(response, 200, { model: "jev-1.14.0", answers, usage: { input_tokens: 1000, output_tokens: 10 } });
@@ -227,6 +261,23 @@ createServer((request, response) => {
 
   if (url.pathname.startsWith("/adzuna/")) {
     return send(response, 200, { count: 1, results: [{ id: "e2e-adzuna", title: "Product Designer", description: "The start…", company: { display_name: "Ledgerly" }, location: { display_name: "Rotterdam" } }] });
+  }
+
+  // A portal added from a file in e2e/portals.spec.ts (E23-3).
+  if (url.pathname === "/e2e_board/jobs") {
+    return send(response, 200, { jobs: [{ id: "canal-1", title: "Service Designer", company: "Canal Works", city: "Rotterdam", link: "https://jobs.example/canal-1" }] });
+  }
+
+  // Companies' boards, asked one by one, in e2e/portals.spec.ts (E23): one board answers, any other isn't there.
+  const board = /^\/e2e_boards\/([^/]+)\/jobs$/.exec(url.pathname);
+  if (board) {
+    if (board[1] !== "harbour-works") return send(response, 404, { error: "No such board" });
+    return send(response, 200, {
+      jobs: [
+        { id: "hw-1", title: "Interaction Designer", location: "Rotterdam, Netherlands", link: "https://jobs.example/hw-1", text: "Design the harbour's apps." },
+        { id: "hw-2", title: "Interaction Designer", location: "Remote - USA", remote: true, link: "https://jobs.example/hw-2", text: "Design from the US." },
+      ],
+    });
   }
 
   if (url.pathname === "/arbeitsagentur/pc/v6/jobs") {

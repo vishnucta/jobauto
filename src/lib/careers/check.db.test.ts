@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { alertIfOn } from "@/lib/alerts";
+import { emit } from "@/lib/notifications/notify";
 import { loadSearch } from "@/lib/posting-searches";
 import { createTestClient, resetDatabase } from "@/test/db";
 
@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", async () => {
   return { prisma: db.client };
 });
 vi.mock("@/lib/env", () => ({ env: { DOSSIER_SECRET: "a".repeat(32) } }));
-vi.mock("@/lib/alerts", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/alerts")>()), alertIfOn: vi.fn(async () => {}) }));
+vi.mock("@/lib/notifications/notify", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/notifications/notify")>()), emit: vi.fn(async () => 0) }));
 const prisma = () => db.client!;
 
 const context = { step: async () => {}, signal: new AbortController().signal };
@@ -35,13 +35,13 @@ const ACME = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true"
 
 beforeEach(async () => {
   await resetDatabase(prisma());
-  vi.mocked(alertIfOn).mockClear();
+  vi.mocked(emit).mockClear();
 });
 afterEach(() => vi.unstubAllGlobals());
 afterAll(() => prisma().$disconnect());
 
 describe("checkCareersPages", () => {
-  it("adds the matching jobs new to Dossier as one search, once, and alerts about them", async () => {
+  it("adds the matching jobs new to Dossier to Positions as one search, once, and sends one notification", async () => {
     await createEmployer({ careersUrl: "https://boards.greenhouse.io/acme", keywords: "Reporting, Meldewesen", places: "Hamburg" });
     stubFeeds({
       [ACME]: greenhouse([
@@ -52,18 +52,25 @@ describe("checkCareersPages", () => {
       ]),
     });
     const first = await checkCareersPages({}, context, now);
-    expect(first).toMatchObject({ checked: 1, added: 2, problems: [], message: "2 new jobs added to Find jobs from 1 careers page." });
+    expect(first).toMatchObject({ checked: 1, added: 2, problems: [], message: "2 new jobs added to Positions from 1 careers page." });
     const search = await loadSearch(first.searchId!);
-    expect(search).toMatchObject({ sources: ["CAREERS"], addedBy: "Acme" });
-    expect(search!.postings.map((posting) => posting.title)).toEqual(["Regulatory Reporting Analyst", "Spezialist Meldewesen"]);
-    expect(alertIfOn).toHaveBeenCalledWith({ title: "2 new jobs on careers pages you follow", message: "Regulatory Reporting Analyst, Acme\nSpezialist Meldewesen, Acme", open: `/jobs?search=${first.searchId}` });
+    expect(search).toMatchObject({ source: "CAREERS", addedBy: "Acme" });
+    expect(search!.postings.map((posting) => [posting.title, posting.state.new])).toEqual([
+      ["Regulatory Reporting Analyst", true],
+      ["Spezialist Meldewesen", true],
+    ]);
+    expect(emit).toHaveBeenCalledWith(
+      "careers.new",
+      { postings: [expect.objectContaining({ title: "Regulatory Reporting Analyst", company: "Acme" }), expect.objectContaining({ title: "Spezialist Meldewesen", company: "Acme" })], path: `/jobs?found=${first.searchId}` },
+      now,
+    );
     expect((await listEmployers())[0]).toMatchObject({ name: "Acme", ats: "greenhouse", lastMatched: 2, lastNew: 2, problem: null, lastCheckedAt: now.toISOString() });
 
     // The next day, only what's new.
-    vi.mocked(alertIfOn).mockClear();
+    vi.mocked(emit).mockClear();
     const second = await checkCareersPages({}, context, now);
     expect(second).toMatchObject({ added: 0, searchId: null, message: "No new jobs from 1 careers page." });
-    expect(alertIfOn).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
     expect((await listEmployers())[0]).toMatchObject({ lastMatched: 2, lastNew: 0 });
   });
 
@@ -73,7 +80,7 @@ describe("checkCareersPages", () => {
     stubFeeds({ [ACME]: greenhouse([{ id: 1, title: "Analyst", place: "Hamburg" }]) });
     const result = await checkCareersPages({}, context, now);
     expect(result).toMatchObject({ checked: 2, added: 1, problems: ["Gone: The job system doesn't know this careers page. Check its address."] });
-    expect(result.message).toBe("1 new job added to Find jobs from 2 careers pages. 1 page couldn't be read.");
+    expect(result.message).toBe("1 new job added to Positions from 2 careers pages. 1 page couldn't be read.");
     await updateEmployer(gone.id, { name: "Gone", careersUrl: "https://boards.greenhouse.io/acme" });
     expect((await listEmployers()).find((employer) => employer.id === gone.id)).toMatchObject({ problem: null, lastCheckedAt: null });
   });

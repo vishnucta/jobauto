@@ -16,10 +16,13 @@ import { writeDocumentsJob } from "@/lib/jobs/write-documents";
 import { logServerError } from "@/lib/log";
 import { dismissPosting, storePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
+import { emit } from "@/lib/notifications/notify";
+import { profileIdOr } from "@/lib/profiles";
 import { loadSettings } from "@/lib/settings-data";
 
 import { DISMISSED_TRIM, stringsOf } from "./candidates";
 import { lockAgentSearches } from "./searches";
+import { bestProfileFor } from "@/lib/posting-scores";
 
 // A candidate's draft (E16-5): written the way New application writes one,
 // kept off Applications until it's approved (#195), and never sent.
@@ -29,7 +32,7 @@ import { lockAgentSearches } from "./searches";
 export const draftJobKey = (candidateId: string) => `agent-candidate:${candidateId}`;
 
 /** A candidate in the shape search results have. */
-export function foundFromCandidate(candidate: AgentCandidate): FoundPosting {
+function foundFromCandidate(candidate: AgentCandidate): FoundPosting {
   return {
     source: candidate.source,
     externalId: candidate.externalId,
@@ -82,12 +85,22 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
     if (!description.trim()) throw new ActionError("That posting has no text to write from. Open it and start an application by hand.");
     const posting = postingText({ ...found, description });
 
+    // Written from the profile of the search that found it first (E24-6), or the one that scored it best when that search scores against all (E25-5); the first profile's when that search is gone.
+    const foundBy = await prisma.agentCandidateSearch.findFirst({
+      where: { candidateId, search: { isNot: null } },
+      orderBy: { createdAt: "asc" },
+      select: { search: { select: { profileId: true, allProfiles: true } } },
+    });
+    const best = foundBy?.search?.allProfiles ? await bestProfileFor(candidate) : null;
+    const profileId = await profileIdOr(best ?? foundBy?.search?.profileId);
+
     await context.step(`Reading the posting from ${name}`);
-    const reading = await readPostingJob.run({ posting }, context);
+    // Its score for that profile, when the agent kept one, answers How you match with no new call (E25-7).
+    const reading = await readPostingJob.run({ posting, profileId, scored: { source: candidate.source, externalId: candidate.externalId } }, context);
     await context.step(`Writing the draft for ${name}`);
     const settings = await loadSettings();
     const documents = await writeDocumentsJob.run(
-      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: "both" },
+      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: "both", profileId },
       context,
     );
     // Keep the whole text, so a retry doesn't fetch it again.
@@ -104,6 +117,7 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
       tone: settings.defaultTone,
       note: "",
       claim: { kind: "agent", candidateId, score: candidate.score },
+      profileId,
     });
     // The job holds nothing of the draft, but goes with it all the same.
     await prisma.job.updateMany({ where: { id: context.id }, data: { applicationId } });
@@ -120,9 +134,22 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
 /** Prepares one candidate's draft in the background (E16-5): from Prepare draft, or a run with auto-draft on. */
 export const agentDraftJob = defineJob({
   type: "agent-draft",
-  input: z.object({ candidateId: z.string().min(1) }),
+  input: z.object({
+    candidateId: z.string().min(1),
+    /** Prepared by the agent on its own (auto-draft), which sends "A draft is ready" (E26-6); Prepare draft never does. */
+    auto: z.boolean().default(false),
+  }),
   result: z.object({ applicationId: z.string().min(1) }),
-  run: async ({ candidateId }, context) => ({ applicationId: await draftCandidate(candidateId, context) }),
+  run: async ({ candidateId, auto }, context) => {
+    const applicationId = await draftCandidate(candidateId, context);
+    if (auto) {
+      const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { title: true, company: true, covered: true, requirements: true } });
+      if (candidate) {
+        await emit("draft.ready", { applicationId, title: candidate.title, company: candidate.company, coverage: candidate.requirements > 0 ? { hit: candidate.covered, total: candidate.requirements } : null });
+      }
+    }
+    return { applicationId };
+  },
 });
 
 /**
@@ -137,7 +164,8 @@ export async function startCandidateDraft(candidateId: string): Promise<{ jobId:
   const [unfinished] = await findUnfinishedJobs(draftJobKey(candidateId));
   if (unfinished) return { jobId: unfinished.id, applicationId: null, started: false };
   if (candidate.status !== AgentCandidateStatus.SCORED) throw new ActionError("That posting is no longer waiting for a draft.");
-  const jobId = await startJob(agentDraftJob, { candidateId }, { key: draftJobKey(candidateId) });
+  // Asked for, so no "A draft is ready" message (E26-6).
+  const jobId = await startJob(agentDraftJob, { candidateId, auto: false }, { key: draftJobKey(candidateId) });
   return { jobId, applicationId: null, started: true };
 }
 
@@ -224,7 +252,12 @@ export async function restoreDismissedCandidate(candidateId: string): Promise<vo
   if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
   if (candidate.status !== AgentCandidateStatus.DISMISSED) throw new ActionError("That posting isn't dismissed.");
   const where = { source_externalId: { source: candidate.source, externalId: candidate.externalId } };
-  const [posting, score] = await Promise.all([prisma.posting.findUnique({ where }), prisma.postingScore.findUnique({ where })]);
+  // Scores are kept per profile (E25-5): the reasons of the one it fits best, as the candidate kept.
+  const profileId = await bestProfileFor(candidate);
+  const [posting, score] = await Promise.all([
+    prisma.posting.findUnique({ where }),
+    profileId ? prisma.postingScore.findUnique({ where: { source_externalId_profileId: { source: candidate.source, externalId: candidate.externalId, profileId } } }) : null,
+  ]);
   if (!posting) throw new ActionError("Dossier no longer keeps that posting's details, so it can't come back.");
   await restoreCandidate({
     id: candidateId,

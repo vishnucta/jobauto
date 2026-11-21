@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildExport } from "@/lib/data-export";
 import { importExport, parseExport } from "@/lib/data-import";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../../prisma/seed/demo";
@@ -68,25 +68,28 @@ describe("deleteEverything (E10-8)", () => {
   it("wipes all user data, the backups and the apply assistant's files, keeps the built-in themes, and lands on the dashboard", async () => {
     // A saved posting from Find jobs goes too (E14-9).
     await prisma().posting.create({ data: { source: "JSEARCH", externalId: "job-1", savedAt: new Date() } });
-    await prisma().postingSearch.create({ data: { sources: ["JSEARCH"], query: {}, postings: [] } });
+    await prisma().postingSearch.create({ data: { source: "JSEARCH", query: {}, postings: [] } });
     // And what the job agent found (E16).
     const candidate = await prisma().agentCandidate.create({ data: { source: "JSEARCH", externalId: "job-1", dedupeKey: "key-1" } });
     const search = await prisma().agentSearch.create({ data: { name: "Design", query: {} } });
     await prisma().agentCandidateSearch.create({ data: { candidateId: candidate.id, searchId: search.id, searchName: "Design" } });
-    await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "job-1", score: 80, reasons: [], redFlags: [], scoredWith: "score-posting@1" } });
+    await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "job-1", profileId: TEST_PROFILE_ID, score: 80, reasons: [], redFlags: [], scoredWith: "score-posting@1" } });
     // And Startups, with the fingerprints of ones removed for good (#222).
     await prisma().startup.create({ data: { source: "HN", externalId: "1", company: "Acme", roles: [], emails: [], links: [], reasons: [] } });
     await prisma().startupBlock.create({ data: { hash: "a".repeat(64) } });
     // And the recruiters, with their history.
     await prisma().recruiter.create({ data: { name: "Hays", events: { create: { text: "Added" } } } });
     await prisma().recruiterBlock.create({ data: { key: "adecco" } });
+    // And the careers pages followed, and the certificates kept to send (jobauto fork).
+    await prisma().employer.create({ data: { name: "Beispiel AG", careersUrl: "https://example.com/careers", ats: "personio" } });
+    await prisma().attachment.create({ data: { name: "Arbeitszeugnis", fileName: "zeugnis.pdf", size: 100 } });
     // A posting pasted for Claude chat, and the connector, which goes off (#221).
     await prisma().claudePaste.create({ data: { text: "A posting", expiresAt: new Date(Date.now() + 60_000) } });
     await prisma().setting.create({ data: { key: "connectorEnabledAt", value: "2026-10-23T09:00:00.000Z" } });
     // And the tokens AI requests used (#290).
     await prisma().aiUsage.create({ data: { task: "extract-posting", provider: "ANTHROPIC", model: "claude-sonnet-5", inputTokens: 900, outputTokens: 300 } });
     // And the sections the user made (#298).
-    await prisma().customSection.create({ data: { title: "Awards", items: { create: { title: "Best Paper" } } } });
+    await prisma().customSection.create({ data: { profileId: TEST_PROFILE_ID, title: "Awards", items: { create: { title: "Best Paper" } } } });
     await expect(deleteEverything({ confirm: "DELETE" })).rejects.toThrow("NEXT_REDIRECT");
     expect(redirected.to).toBe("/");
     // Profile entries Claude removed can't come back into the empty profile.
@@ -101,6 +104,8 @@ describe("deleteEverything (E10-8)", () => {
       prisma().recruiter.count(),
       prisma().recruiterEvent.count(),
       prisma().recruiterBlock.count(),
+      prisma().employer.count(),
+      prisma().attachment.count(),
       prisma().claudePaste.count(),
       prisma().application.count(),
       prisma().document.count(),
@@ -117,7 +122,7 @@ describe("deleteEverything (E10-8)", () => {
       prisma().aiUsage.count(),
       prisma().theme.count({ where: { builtIn: false } }),
     ]);
-    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(await prisma().agentSearch.count()).toBe(0);
     expect(await prisma().agentCandidateSearch.count()).toBe(0);
     expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(13);

@@ -7,6 +7,8 @@ import { updateDocuments, type DocumentUnits } from "@/lib/document-units";
 import { renderPdf } from "@/lib/pdf/render";
 import { prisma } from "@/lib/prisma";
 import { loadProfile, loadProfileName } from "@/lib/profile-data";
+import { profileSettingsFrom } from "@/lib/profile-settings";
+import { loadProfileSettings } from "@/lib/profiles";
 import { resumeContent, type ResumeContent } from "@/lib/resume-content";
 import { settingsFromRows } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
@@ -20,6 +22,8 @@ vi.mock("@/lib/pdf/render", () => ({ renderPdf: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { application: { findUnique: vi.fn() } } }));
 vi.mock("@/lib/profile-data", () => ({ loadProfile: vi.fn(), loadProfileName: vi.fn() }));
 vi.mock("@/lib/settings-data", () => ({ loadSettings: vi.fn() }));
+// Each profile has its own Base resume (E24-1): the first is "first" here.
+vi.mock("@/lib/profiles", () => ({ loadProfileSettings: vi.fn(), profileIdOr: async (id: string | null | undefined) => id || "first" }));
 vi.mock("@/lib/theme-data", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/theme-data")>()), loadTheme: vi.fn() }));
 vi.mock("@/lib/document-units", () => ({ updateDocuments: vi.fn() }));
 // What pdf.js reads from the PDF, when a test says so: the test PDF's Helvetica can't carry a ligature glyph or an invisible character.
@@ -59,6 +63,8 @@ const matchItem = (requirement: string, result: Match["items"][number]["result"]
 /** An application as the check's select and renderDocumentPdf's (company, role, documents) read it. */
 type Row = {
   id: string;
+  /** The profile it was written from (E24-6). */
+  profileId: string | null;
   company: string;
   role: string;
   location: string;
@@ -76,6 +82,7 @@ type Row = {
 };
 const row = (overrides: Partial<Row> = {}): Row => ({
   id: "app1",
+  profileId: "p2",
   company: "Ledgerly",
   role: "",
   location: "Amsterdam, Netherlands",
@@ -126,6 +133,7 @@ beforeEach(() => {
   vi.mocked(loadProfile).mockResolvedValue(profile);
   vi.mocked(loadProfileName).mockResolvedValue("Jane Doe");
   vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([]));
+  vi.mocked(loadProfileSettings).mockReset().mockResolvedValue(profileSettingsFrom({}));
   vi.mocked(loadTheme).mockResolvedValue(null);
   vi.mocked(prisma.application.findUnique).mockReset().mockResolvedValue(row() as never);
   vi.mocked(renderPdf).mockReset().mockResolvedValue(pdfWith(resumeLines(tailored)));
@@ -198,11 +206,25 @@ describe("checkResume", () => {
     vi.mocked(loadTheme).mockResolvedValue(modern);
     vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines(resumeContent(profile), ENGLISH_LABELS, true)));
     const base = await check("base");
-    expect(renderPdf).toHaveBeenLastCalledWith("/print/base");
+    expect(renderPdf).toHaveBeenLastCalledWith("/print/base?profile=first");
     expect(base).toMatchObject({ document: "base", fileName: "Jane Doe – Resume.pdf", requirements: null });
     expect(item(base, "columns")).toMatchObject({ level: "warn", fix: { kind: "theme" } });
     expect(item(base, "text-layer").level).toBe("ok");
     expect(base.text.map((entry) => entry.id)).toEqual(["characters", "dates"]);
+  });
+
+  it("checks the profile asked for: its own Base resume, or the one the application was written from (E24-1, E24-6)", async () => {
+    vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines(resumeContent(profile))));
+    const result = await checkResume("base", "", "p3");
+    if ("error" in result) throw new Error(result.error);
+    expect(renderPdf).toHaveBeenLastCalledWith("/print/base?profile=p3");
+    expect(loadProfile).toHaveBeenLastCalledWith("p3");
+    expect(loadProfileSettings).toHaveBeenCalledWith("p3");
+
+    vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines(tailored)));
+    await check();
+    expect(loadProfile).toHaveBeenLastCalledWith("p2");
+    expect(loadProfileSettings).toHaveBeenLastCalledWith("p2");
   });
 
   it("counts the pages, with no limit to hold them to (Resume length is gone, #83)", async () => {
@@ -225,8 +247,8 @@ describe("checkResume", () => {
     expect(item(report, "text-layer").level).toBe("ok");
     expect(item(report, "headings").detail).toBe("Profile, Relevant experience, Education, Certifications, Projects, Skills, Languages");
 
-    // The base resume follows the order in Settings.
-    vi.mocked(loadSettings).mockResolvedValue(settingsFromRows([{ key: "resumeSections", value: JSON.stringify({ order, off: ["publications"] }) }]));
+    // The base resume follows its profile's order (E24-1).
+    vi.mocked(loadProfileSettings).mockResolvedValue(profileSettingsFrom({ resumeSections: JSON.stringify({ order, off: ["publications"] }) }));
     vi.mocked(renderPdf).mockResolvedValue(pdfWith(resumeLines({ ...resumeContent(profile), publications: [] })));
     const base = await check("base");
     expect(item(base, "text-layer").level).toBe("ok");
@@ -319,6 +341,23 @@ describe("checkResume", () => {
       named: 3,
       total: 4,
     });
+  });
+
+  it("takes the match's answer by the requirement's text: 1.15's scoring lists requirements in its own order (E25-7)", async () => {
+    const extracted = extractedOf([
+      requirement("Strong prototyping skills in Figma", "skill", { skill: "Figma" }),
+      requirement("Experience with payments or fintech", "other"),
+    ]);
+    const match: Match = {
+      items: [matchItem("Experience with payments or fintech", "partial", "Stripe"), matchItem("Strong prototyping skills in Figma", "covered", "Figma Make")],
+    };
+    vi.mocked(prisma.application.findUnique).mockResolvedValue(row({ extracted, match }) as never);
+    const report = await check();
+    expect(report.requirements?.items.map(({ requirement, skill }) => [requirement, skill])).toEqual([
+      ["Senior Product Designer", null],
+      ["Strong prototyping skills in Figma", "Figma Make"],
+      ["Experience with payments or fintech", "Stripe"],
+    ]);
   });
 
   it("reads an application Claude saved, whose requirements are plain words without a match", async () => {
@@ -512,5 +551,28 @@ describe("cleanDocumentText", () => {
     expect(documents.RESUME!.map((unit) => unit.text)).toEqual(["Led the finance-portal team ", "1. Platz beim Hackathon\nBuilt it", "Doe, J. (2016). Of\uFB01ce work."]);
     expect(documents.COVER_LETTER![0].text).toBe("A first paragraph\n\nwith a gap");
     expect(documents.EMAIL![0].text).toBe("\u200Bkeep");
+  });
+
+  it("puts right the lines a part serves requirements with, so the Fit column still finds them (E30-4)", async () => {
+    const documents: DocumentUnits = {
+      RESUME: [
+        {
+          id: "experience:e1",
+          label: "Northwind Logistics role",
+          text: "\u2011 Led the \uFB01nance team\n- Built a portal",
+          serves: [
+            { line: "\u2011 Led the \uFB01nance team", requirements: ["Team lead"] },
+            { line: "Built a portal", requirements: ["Web"] },
+          ],
+        },
+      ],
+    };
+    vi.mocked(updateDocuments).mockImplementation((async (_id: string, change: (documents: DocumentUnits, tx: never) => Promise<unknown>) => change(documents, undefined as never)) as never);
+    await cleanDocumentText("app1");
+    expect(documents.RESUME![0].text).toBe("Led the finance team\n- Built a portal");
+    expect(documents.RESUME![0].serves).toEqual([
+      { line: "Led the finance team", requirements: ["Team lead"] },
+      { line: "Built a portal", requirements: ["Web"] },
+    ]);
   });
 });

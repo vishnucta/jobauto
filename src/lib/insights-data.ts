@@ -3,7 +3,7 @@ import "server-only";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { germanFit, profileGerman } from "@/lib/german-need";
 import { insights, type Insights } from "@/lib/insights";
-import { SOURCE_INFO } from "@/lib/job-search/sources";
+import { sourceInfo } from "@/lib/job-search/sources";
 import { prisma } from "@/lib/prisma";
 import { agencyOf } from "@/lib/recruiters/types";
 import { loadSettings } from "@/lib/settings-data";
@@ -54,7 +54,7 @@ export async function loadInsights(): Promise<Insights> {
         application.origin === "AGENT"
           ? "Job agent"
           : application.posting
-            ? SOURCE_INFO[application.posting.source].name
+            ? sourceInfo(application.posting.source).name
             : application.startup
               ? "Startups"
               : "Pasted or by hand",

@@ -6,11 +6,15 @@ import { z } from "zod";
 import { unitsSchema } from "@/lib/application-data";
 import { germanNeed, textForGerman, type GermanNeed } from "@/lib/german-need";
 import { fullText } from "@/lib/job-search/find";
-import { foundPostingSchema, postingText, type FoundPosting, type ShownPosting } from "@/lib/job-search/search";
+import { postingText, type FoundPosting, type ProfileFit, type SearchPortal, type ShownPosting } from "@/lib/job-search/search";
+import { sourceInfo } from "@/lib/job-search/sources";
 import { withoutPrivateParts } from "@/lib/letter-frame";
-import { fetchPosting } from "@/lib/posting-fetch";
+import { postingsOfSearch } from "@/lib/library";
+import { coverageOf, fitWords } from "@/lib/posting-coverage";
+import { FETCH_MESSAGES, fetchPosting } from "@/lib/posting-fetch";
 import { foundFromPosting, storePosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
+import { profileNamed, type ProfileSummary } from "@/lib/profiles";
 
 import { readPastedPosting } from "./handoff";
 
@@ -37,9 +41,48 @@ export const failure = (message: string): CallToolResult => ({ content: [{ type:
 export const started = (taskId: string, extra: Record<string, unknown> = {}): CallToolResult =>
   text({ task_id: taskId, status: "started", ...extra, next: "Call check_task with this task_id until it's done." });
 
+/** Which of the user's profiles a tool reads or writes (E24-6), by name or id. */
+export const profileInput = z.string().max(200).optional().describe("The profile's name, as get_profile lists them; the first profile when left out");
+
+/** The profile a tool was given by name or id (the first without one), or a failure saying which there are. */
+export async function chooseProfile(asked: string | undefined): Promise<ProfileSummary | { failure: CallToolResult }> {
+  const chosen = await profileNamed(asked);
+  return "error" in chosen ? { failure: failure(chosen.error) } : chosen;
+}
+
+/**
+ * A posting's score as Claude reads it (E32-2): how many of its requirements
+ * the profile covers, in words, and which profile when there are several.
+ */
+export function fitLine(fit: (Pick<ProfileFit, "breakdown"> & { profileName?: string }) | null | undefined) {
+  if (!fit) return undefined;
+  const coverage = coverageOf(fit);
+  return { covered: `${coverage.hit} of ${coverage.total}`, fit: fitWords(coverage), profile: fit.profileName || undefined };
+}
+
+/** The portals of a search that answered, by name. */
+export const portalsAnswered = (portals: readonly SearchPortal[]): string[] =>
+  portals.filter((portal) => portal.status === "done").map((portal) => sourceInfo(portal.id).name);
+
+/**
+ * The portals of a search that failed or were skipped, and why, as the
+ * search's bar on Positions says it: "Adzuna: The portal couldn't be reached."
+ */
+export function portalProblems(portals: readonly SearchPortal[]): string[] | undefined {
+  const problems = portals
+    .filter((portal) => portal.status === "failed" || portal.status === "skipped")
+    .map((portal) => `${sourceInfo(portal.id).name}: ${portal.message ?? (portal.status === "failed" ? "It didn't answer." : "Skipped.")}`);
+  return problems.length > 0 ? problems : undefined;
+}
+
+/** Whether Show more (more_jobs) has more to ask for: it asks every portal of the search that has a next page. */
+export const hasMore = (portals: readonly SearchPortal[]): boolean => portals.some((portal) => portal.next !== null);
+
 /** A posting as Claude sees it in a list: numbered, without its whole text. */
 export function postingLine(posting: ShownPosting | FoundPosting, number: number) {
   const state = "state" in posting ? posting.state : null;
+  // The other portals the same job was found on (E22-6); its own comes first.
+  const alsoOn = state?.foundOn.slice(1).map((found) => sourceInfo(found.portal).name) ?? [];
   return {
     number,
     title: posting.title,
@@ -49,11 +92,13 @@ export function postingLine(posting: ShownPosting | FoundPosting, number: number
     salary: posting.salary || undefined,
     posted: posting.postedAt?.slice(0, 10),
     via: posting.via || undefined,
-    also_on: posting.alsoOn?.length ? posting.alsoOn.map((source) => source.toLowerCase()) : undefined,
+    also_on: alsoOn.length > 0 ? [...new Set(alsoOn)] : undefined,
+    // The AI clients or careers pages that added it (add_found_jobs, careers pages).
+    added_by: state?.addedBy.length ? state.addedBy : undefined,
     url: posting.url || undefined,
     saved: state?.saved || undefined,
     applied: state?.applicationId ? true : undefined,
-    fit: state?.score ?? undefined,
+    fit: fitLine(state?.score),
     german: germanLine(germanNeed(textForGerman(posting))),
     snippet: posting.description.replace(/\s+/g, " ").slice(0, 280),
   };
@@ -94,7 +139,7 @@ export type ResolvedPosting = { text: string; url: string; postingId: string | n
 export async function resolvePosting(source: PostingSource): Promise<ResolvedPosting | { error: string }> {
   if (source.posting_id) {
     const row = await prisma.posting.findUnique({ where: { id: source.posting_id } });
-    if (!row) return { error: "That posting is no longer in Dossier. Open it again from Find jobs." };
+    if (!row) return { error: "That posting is no longer in Dossier. Open it again from Positions." };
     const found = foundFromPosting(row);
     const description = found.complete ? found.description : ((await fullText(found)) ?? found.description);
     if (!description.trim()) return { error: "That posting has no text to write from. Give its link as posting_url instead." };
@@ -106,8 +151,8 @@ export async function resolvePosting(source: PostingSource): Promise<ResolvedPos
     return { text: pasted.text, url: pasted.url, postingId: null };
   }
   if (source.search_id) {
-    const search = await prisma.postingSearch.findUnique({ where: { id: source.search_id }, select: { postings: true } });
-    const kept = foundPostingSchema.array().catch([]).parse(search?.postings ?? []);
+    // Numbered in the order the search found them, as search_jobs listed them (E22-5).
+    const kept = await postingsOfSearch(source.search_id);
     const found = source.number ? kept[source.number - 1] : undefined;
     if (!found) return { error: "There's no such posting in that search. Use a number from search_jobs." };
     const whole = await fullText(found);
@@ -116,7 +161,7 @@ export async function resolvePosting(source: PostingSource): Promise<ResolvedPos
     return {
       text: postingText({ ...found, description }),
       url: found.url,
-      // Kept with its whole text when the source gave it, as Find jobs keeps a posting it applies from.
+      // Kept with its whole text when the portal gave it, as Positions keeps a posting it applies from.
       postingId: (await storePosting(whole ? { ...found, description: whole, complete: true } : found)).id,
       title: found.title,
       company: found.company,
@@ -128,6 +173,8 @@ export async function resolvePosting(source: PostingSource): Promise<ResolvedPos
   if (source.posting_url) {
     const fetched = await fetchPosting(source.posting_url);
     if (!fetched.ok) return { error: `${fetched.error} Paste the posting's text as posting_text instead.` };
+    // Menus or links rather than a posting (#232): nothing to write from.
+    if (fetched.doubtful) return { error: `${FETCH_MESSAGES.doubtful} Paste the posting's text as posting_text instead.` };
     return { text: fetched.text, url: fetched.url, postingId: null };
   }
   return { error: "Give posting_id, paste_id, search_id and number, posting_url, or posting_text." };

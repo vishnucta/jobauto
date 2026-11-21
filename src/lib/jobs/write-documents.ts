@@ -11,6 +11,7 @@ import { letterAvailability } from "@/lib/letter-availability";
 import { loadProfile } from "@/lib/profile-data";
 import { withoutSectionsOff } from "@/lib/resume-sections";
 import { DOCUMENTS_TO_WRITE } from "@/lib/settings";
+import { loadProfileSettings } from "@/lib/profiles";
 import { loadSettings } from "@/lib/settings-data";
 
 import { WRITE_DOCUMENTS_STEPS } from "./application-steps";
@@ -39,13 +40,22 @@ export const writeDocumentsJob = defineJob({
     language: z.string().max(100).nullable().optional(),
     /** Which documents to write (#367); the job agent and the connector write both. */
     write: z.enum(DOCUMENTS_TO_WRITE).default("both"),
+    /** The profile it's tailored from (E24-6); the first when it's missing. */
+    profileId: z.string().min(1).optional(),
   }),
   result: z.object({ resume: unitsSchema, resumeWith: z.string(), letter: unitsSchema, letterWith: z.string() }),
-  async run({ posting, extracted, match, tone, note, language, write }, { step, signal }) {
+  async run({ posting, extracted, match, tone, note, language, write, profileId }, { step, signal }) {
     await step(write === "letter" ? WRITE_DOCUMENTS_STEPS[1] : WRITE_DOCUMENTS_STEPS[0]);
-    const [provider, options, fullProfile, settings] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(), loadSettings()]);
+    // The profile's own Base resume settings (E24-1); the standard answers are shared (jobauto fork).
+    const [provider, options, fullProfile, own, settings] = await Promise.all([
+      getAiProvider(),
+      loadTaskOptions(),
+      loadProfile(profileId),
+      loadProfileSettings(profileId),
+      loadSettings(),
+    ]);
     // A section that's off on the base resume isn't written about (#297).
-    const profile = withoutSectionsOff(fullProfile, settings.resumeSections);
+    const profile = withoutSectionsOff(fullProfile, own.resumeSections);
     // "Anything I should know?" is the application's first fact (APP-15).
     const facts = note.trim() ? [note.trim()] : [];
     const taskOptions = { ...options, ...(language === undefined ? {} : { language }), signal };
@@ -54,7 +64,7 @@ export const writeDocumentsJob = defineJob({
     const resume =
       write === "letter"
         ? skipped
-        : await tailorResume(provider, { profile, extracted, match, facts, posting, keepSkillOrder: settings.skillOrder === "manual" }, taskOptions);
+        : await tailorResume(provider, { profile, extracted, match, facts, posting, keepSkillOrder: own.skillOrder === "manual" }, taskOptions);
 
     if (write === "both") await step(WRITE_DOCUMENTS_STEPS[1]);
     // Salary and start date, when the posting asks for them, from the standard answers.
@@ -65,5 +75,4 @@ export const writeDocumentsJob = defineJob({
   },
 });
 
-export type WriteDocumentsInput = z.infer<typeof writeDocumentsJob.input>;
 export type WriteDocumentsResult = z.infer<typeof writeDocumentsJob.result>;

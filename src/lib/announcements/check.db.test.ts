@@ -5,7 +5,7 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { settingsFromRows } from "@/lib/settings";
 import { createTestClient, resetDatabase } from "@/test/db";
 
-import { askBackend, checkAnnouncements, checkAnnouncementsIfDue, checkDue, checkRuns, waitSeconds } from "./check";
+import { announcementsRun, askBackend, checkAnnouncements, checkAnnouncementsIfDue, checkDue, checkRuns, waitSeconds } from "./check";
 import type { AnnouncementFeed } from "./contract";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
@@ -89,12 +89,23 @@ describe("checkDue", () => {
 });
 
 describe("checkRuns", () => {
-  it("runs only when pointed at a backend, in production too (off in this fork)", () => {
+  it("runs in production, and elsewhere only when pointed at a backend (the portal catalog's rule)", () => {
     expect(checkRuns()).toBe(false);
-    vi.stubEnv("NODE_ENV", "production");
-    expect(checkRuns()).toBe(false);
-    config.DOSSIER_API_URL = "https://api.dossier.aien.me/v1";
+    config.DOSSIER_API_URL = "http://api.localhost:3000/v1";
     expect(checkRuns()).toBe(true);
+    config.DOSSIER_API_URL = undefined;
+    vi.stubEnv("NODE_ENV", "production");
+    expect(checkRuns()).toBe(true);
+  });
+});
+
+describe("announcementsRun", () => {
+  it("runs only when pointed at a backend, in production too (off in this fork)", () => {
+    expect(announcementsRun()).toBe(false);
+    vi.stubEnv("NODE_ENV", "production");
+    expect(announcementsRun()).toBe(false);
+    config.DOSSIER_API_URL = "https://api.dossier.aien.me/v1";
+    expect(announcementsRun()).toBe(true);
     config.DOSSIER_API_URL = undefined;
   });
 });
@@ -219,6 +230,10 @@ describe("checkAnnouncementsIfDue", () => {
     const fetch = answer({ announcements: [] });
     globalThis.fetch = fetch;
     await checkAnnouncementsIfDue({ announcementFeed: null });
+    // Off in this fork without DOSSIER_API_URL, even in production, where the portal catalog reads.
+    vi.stubEnv("NODE_ENV", "production");
+    await checkAnnouncementsIfDue({ announcementFeed: null });
+    vi.unstubAllEnvs();
     config.DOSSIER_API_URL = "https://backend.test/v1";
     await checkAnnouncementsIfDue({ announcementFeed: feed({ nextCheckAt: new Date(Date.now() + HOUR * 1000).toISOString() }) });
     expect(fetch).not.toHaveBeenCalled();

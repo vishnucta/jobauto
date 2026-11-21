@@ -123,8 +123,8 @@ export const translateDocumentsJob = defineJob({
   async run({ applicationId, language }, { step, signal }) {
     const application = await prisma.application.findUnique({ where: { id: applicationId }, include: { documents: true } });
     if (!application) return { language, rewritten: 0, left: [] };
-    // A sent application's own copy of the profile, as its resume is drawn from.
-    const [provider, options, profile] = await Promise.all([getAiProvider(), loadTaskOptions(), profileOfApplication(application.frozen)]);
+    // A sent application's own copy of the profile, as its resume is drawn from; else the profile it's written from (E24-6).
+    const [provider, options, profile] = await Promise.all([getAiProvider(), loadTaskOptions(), profileOfApplication(application.frozen, application.profileId)]);
 
     const asked: { kind: (typeof ORDER)[number]; units: Unit[]; texts: Map<string, string> }[] = [];
     const cut = new Map<string, Cut>();

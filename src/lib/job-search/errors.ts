@@ -1,6 +1,5 @@
 import { countryName } from "./countries";
-import type { JobSource } from "./search";
-import { SOURCE_INFO } from "./sources";
+import { sourceInfo } from "./sources";
 
 // What can go wrong when searching a job source, in words people can act on
 // (E14-1). A source's own error text never reaches the screen or the logs.
@@ -36,17 +35,26 @@ export class JobSearchError extends Error {
   }
 }
 
-/** The error for `problem` with `source`, worded for the screen. */
+/** How a portal is named in its errors: its name, when its quota comes back, and what its key is called ("app ID and key"). */
+export type ErrorInfo = { name: string; quotaPeriod: string | null; keyWords: string };
+
+/** The error for `problem` with `source`, worded for the screen; `info` for a portal that isn't listed (a config being tried). */
 export function jobSearchError(
   problem: JobSearchProblem,
-  source: JobSource,
-  { country = "", detail, text }: { country?: string; detail?: string; /** Worded for this case, instead of the problem's usual words. */ text?: string } = {},
+  source: string,
+  {
+    country = "",
+    detail,
+    info,
+    text,
+  }: { country?: string; detail?: string; info?: ErrorInfo; /** Worded for this case, instead of the problem's usual words. */ text?: string } = {},
 ) {
-  const { name, quotaPeriod } = SOURCE_INFO[source];
+  const { name, quotaPeriod } = info ?? sourceInfo(source);
+  const keyWords = info?.keyWords ?? (source === "ADZUNA" ? "app ID and key" : "key");
   const message = {
     off: `${name} isn't offered on this server. Choose another source in Settings → Job search.`,
     "not-accepted": `Read the note about ${name} and tick “I understand” before Dossier searches it.`,
-    "no-key": `Add your ${name} ${source === "ADZUNA" ? "app ID and key" : "key"} in Settings → Job search first.`,
+    "no-key": `Add your ${name} ${keyWords} in Settings → Job search first.`,
     key:
       source === "JOOBLE"
         ? "Jooble didn't accept your key. Check it in Settings → Job search: it must be the key for your country, and its 500 free searches may be used up."

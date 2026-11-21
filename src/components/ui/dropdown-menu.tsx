@@ -82,17 +82,14 @@ export function DropdownMenuRadioItem({
   );
 }
 
-/** A choice that can be on or off beside the others; ticked when it's on. Prevent `onSelect` to keep the menu open for more. */
+/** An on/off choice in a menu, e.g. "Photo"; ticked when on. Prevent `onSelect` to keep the menu open for more. */
 export function DropdownMenuCheckboxItem({
   className,
   children,
   ...props
 }: MenuPrimitive.DropdownMenuCheckboxItemProps) {
   return (
-    <MenuPrimitive.CheckboxItem
-      className={cn(itemClassName, "data-[state=checked]:bg-selected", className)}
-      {...props}
-    >
+    <MenuPrimitive.CheckboxItem className={cn(itemClassName, className)} {...props}>
       <span className="flex flex-1 items-center gap-2.5">{children}</span>
       <MenuPrimitive.ItemIndicator className="text-xs" aria-hidden="true">
         ✓

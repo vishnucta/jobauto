@@ -48,7 +48,7 @@ export function isPublicationUnit(unitId: string): boolean {
   return unitId.startsWith("publication:");
 }
 
-/** Whether a unit holds a certification (#293): its name as the user wrote it, which the AI never rewrites. */
+/** Whether a unit holds a certification (#293): its name as the user wrote it, which the AI never rewrites. The Claude connector names it (jobauto fork). */
 export function isCertificationUnit(unitId: string): boolean {
   return unitId.startsWith("certification:");
 }

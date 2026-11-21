@@ -2,13 +2,13 @@ import "server-only";
 
 import { jobSearchError } from "./errors";
 import type { JobSource } from "./search";
-import { SOURCE_INFO } from "./sources";
+import { sourceInfo } from "./sources";
 
 // Requests to job sources (E14-1). Each source has a fixed host, so unlike
 // fetching a posting (src/lib/posting-fetch.ts) there's no address to guard;
 // requests are still limited in time and size.
 
-export const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_BYTES = 5 * 1024 * 1024;
 
 /**
@@ -48,7 +48,7 @@ export async function requestJson(
   if (response.status === 403 && response.headers.get("cf-mitigated") === "challenge") {
     throw jobSearchError("unavailable", source, {
       detail: `${detail}, turned away by a bot check`,
-      text: `${SOURCE_INFO[source].name}'s site turned this request away with a bot check, so it can't be searched from this server for now. Choose another source in Settings → Job search.`,
+      text: `${sourceInfo(source).name}'s site turned this request away with a bot check, so it can't be searched from this server for now. Choose another source in Settings → Job search.`,
     });
   }
   if (response.status === 401 || response.status === 403) throw jobSearchError("key", source, { detail });
@@ -65,7 +65,7 @@ export async function requestJson(
 }
 
 /** The body as text, or null when it's bigger than `limit` bytes. */
-async function readLimited(response: Response, limit: number): Promise<string | null> {
+export async function readLimited(response: Response, limit: number): Promise<string | null> {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];

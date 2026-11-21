@@ -1,15 +1,14 @@
 "use client";
 
-import { ArrowUpRight, GitFork, Star } from "lucide-react";
-import type { ReactNode } from "react";
+import { ArrowUpRight, GitFork, Star, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { FORK_REPOSITORY_URL, REPOSITORY_URL } from "@/lib/releases";
 
 import { useSidebarCollapsed } from "./sidebar-frame";
 
-/** A link to a GitHub page in a new tab: its icon and label, and the label as a tooltip while the sidebar is collapsed. */
-function SidebarLink({ href, label, icon }: { href: string; label: string; icon: ReactNode }) {
+/** A sidebar link that opens outside Dossier, in a new tab; icon-only with a tooltip while collapsed. */
+function ExternalSidebarLink({ href, label, icon: Icon }: { href: string; label: string; icon: LucideIcon }) {
   const collapsed = useSidebarCollapsed();
   return (
     <a
@@ -22,7 +21,7 @@ function SidebarLink({ href, label, icon }: { href: string; label: string; icon:
         collapsed && "justify-center px-1.5",
       )}
     >
-      {icon}
+      <Icon size={16} aria-hidden="true" className="shrink-0" />
       <span className={cn(collapsed && "sr-only")}>{label}</span>{" "}
       <span className="sr-only">(opens in a new tab)</span>
       {!collapsed && <ArrowUpRight size={14} aria-hidden="true" className="ml-auto shrink-0" />}
@@ -32,10 +31,10 @@ function SidebarLink({ href, label, icon }: { href: string; label: string; icon:
 
 /** The sidebar's link to Dossier's repository, for credits and support. */
 export function RepositoryLink() {
-  return <SidebarLink href={REPOSITORY_URL} label="Star on GitHub" icon={<Star size={16} aria-hidden="true" className="shrink-0" />} />;
+  return <ExternalSidebarLink href={REPOSITORY_URL} label="Star on GitHub" icon={Star} />;
 }
 
 /** The sidebar's link to this fork's source, jobauto. */
 export function ForkLink() {
-  return <SidebarLink href={FORK_REPOSITORY_URL} label="jobauto on GitHub" icon={<GitFork size={16} aria-hidden="true" className="shrink-0" />} />;
+  return <ExternalSidebarLink href={FORK_REPOSITORY_URL} label="jobauto on GitHub" icon={GitFork} />;
 }

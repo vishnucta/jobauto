@@ -20,10 +20,10 @@ const LANGUAGES: { value: Language; label: string }[] = [
 ];
 
 /**
- * Search words for Find jobs, from the profile: click one to copy it, or
- * follow the arrow to Find jobs with it filled in (nothing is searched until
- * Search is pressed there). They are worked out from the profile as it is
- * now, so they change as it does.
+ * Search words for Positions, from the profile shown: click one to copy it,
+ * or follow the arrow to Positions with it filled in (nothing is searched
+ * until Search is pressed there). They are worked out from the profile as it
+ * is now, so they change as it does, and each profile has its own.
  */
 export function SearchWordsPanel({ profile }: { profile: Pick<ProfileData, "basics" | "skills" | "experience"> }) {
   const headingId = useId();
@@ -38,7 +38,7 @@ export function SearchWordsPanel({ profile }: { profile: Pick<ProfileData, "basi
   const place = profile.basics.city.trim();
   const where = [place, profile.basics.country.trim()].filter(Boolean).join(", ");
 
-  const copy = async (text: string, announce = `Copied “${text}”. Paste it into What on Find jobs.`) => {
+  const copy = async (text: string, announce = `Copied “${text}”. Paste it into What on Positions.`) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(text);
@@ -61,7 +61,7 @@ export function SearchWordsPanel({ profile }: { profile: Pick<ProfileData, "basi
           Search words
         </h2>
         <p className="text-meta text-muted">
-          For Find jobs{where ? `, ${where}` : ""}. Short on purpose: a long phrase finds nothing, a short one finds hundreds.
+          For searches in Positions{where ? `, ${where}` : ""}. Short on purpose: a long phrase finds nothing, a short one finds hundreds.
         </p>
       </div>
 
@@ -93,7 +93,7 @@ export function SearchWordsPanel({ profile }: { profile: Pick<ProfileData, "basi
                   <button type="button" title={word.why} onClick={() => void copy(word.text)} className="py-[3px] pr-1 pl-3 text-control">
                     {word.text}
                   </button>
-                  <Link href={href(word.text)} aria-label={`Search Find jobs for ${word.text}`} title="Open Find jobs with this filled in" className="py-[3px] pr-2.5 pl-1 text-xs text-muted hover:text-ink">
+                  <Link href={href(word.text)} aria-label={`Search Positions for ${word.text}`} title="Open Positions with this filled in" className="py-[3px] pr-2.5 pl-1 text-xs text-muted hover:text-ink">
                     ↗
                   </Link>
                 </li>

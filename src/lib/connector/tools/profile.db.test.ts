@@ -1,8 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { copyProfile, loadProfileSettings, saveProfileSettings } from "@/lib/profiles";
 import { BUILT_IN_SECTIONS } from "@/lib/resume-sections";
 import { saveSettings } from "@/lib/settings-data";
-import { createTestClient, resetDatabase } from "@/test/db";
+import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../../prisma/seed/demo";
@@ -35,6 +36,10 @@ import { POST } from "@/app/api/mcp/route";
 
 const prisma = () => db.client!;
 const CLAUDE = "https://claude.ai/api/mcp/auth_callback";
+/** The demo's one profile, named after its headline (prisma/seed/demo.ts). */
+const DEMO_PROFILE = "Senior Product Designer";
+/** The first profile's page, where the tools' links go when no profile is named (E24-1). */
+const PROFILE_PAGE = `https://dossier.example/profile?profile=${TEST_PROFILE_ID}`;
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 /** The start of a JPEG is enough for a photo Dossier keeps. */
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD";
@@ -111,7 +116,8 @@ describe("reading the profile", () => {
       skills: expect.arrayContaining(["Figma", "Design systems"]),
       languages: expect.arrayContaining([{ name: "German", level: "B1" }]),
       facts_about_me: [{ id: expect.any(String), text: expect.stringContaining("user research") }, expect.anything()],
-      link: "https://dossier.example/profile",
+      profile: DEMO_PROFILE,
+      link: PROFILE_PAGE,
     });
     const northwind = await prisma().experience.findFirstOrThrow({ where: { company: "Northwind Logistics" } });
     expect(json.experience).toContainEqual(
@@ -129,7 +135,8 @@ describe("reading the profile", () => {
   });
 
   it("names the sections off the base resume, and still lists their entries to edit by (#297)", async () => {
-    await saveSettings({ resumeSections: { order: [...BUILT_IN_SECTIONS], off: ["projects"] } });
+    // The base resume's sections are the profile's own (E24-1).
+    await saveProfileSettings(TEST_PROFILE_ID, { resumeSections: { order: [...BUILT_IN_SECTIONS], off: ["projects"] } });
     const { json } = await tool("get_profile");
     expect(json.sections_off_resumes).toEqual(["Projects"]);
     expect(json.projects).toEqual([expect.objectContaining({ name: "Tidewater design tokens" })]);
@@ -139,10 +146,11 @@ describe("reading the profile", () => {
 describe("changing the basics", () => {
   it("changes only the fields given and says which changed, without their values", async () => {
     const answer = await tool("update_profile_basics", { name: "Jane Doe", headline: "Lead Product Designer", email: "jane@new.example", phone: "", date_of_birth: "1992-04-19", show_age: true });
-    expect(answer.json).toEqual({ changed: ["headline", "email", "phone", "date_of_birth", "show_age"], link: "https://dossier.example/profile?section=basics" });
+    expect(answer.json).toEqual({ profile: DEMO_PROFILE, changed: ["headline", "email", "phone", "date_of_birth", "show_age"], link: `${PROFILE_PAGE}&section=basics` });
     expect(answer.text).not.toContain("jane@new.example");
-    // A cleared field's row goes, as on the screen.
-    expect(await fields()).toMatchObject({ name: "Jane Doe", headline: "Lead Product Designer", email: "jane@new.example", dob: "1992-04-19", showAge: "true", city: "Rotterdam" });
+    // A cleared field's row goes, as on the screen; the headline is the profile's own (E24-1).
+    expect(await fields()).toMatchObject({ name: "Jane Doe", email: "jane@new.example", dob: "1992-04-19", showAge: "true", city: "Rotterdam" });
+    expect(await prisma().profile.findUniqueOrThrow({ where: { id: TEST_PROFILE_ID } })).toMatchObject({ headline: "Lead Product Designer" });
     expect((await fields()).phone).toBeUndefined();
 
     expect(await tool("update_profile_basics", {})).toMatchObject({ isError: true, text: "Give at least one field to change." });
@@ -176,10 +184,11 @@ describe("skills, languages and facts", () => {
       add_facts: ["I have a German work permit."],
     });
     expect(answer.json).toEqual({
+      profile: DEMO_PROFILE,
       skills: { added: ["Accessibility"], already_there: ["Figma"], removed: ["Prototyping"], not_found: ["Cobol"] },
       languages: { added: ["Spanish"], changed: ["German"], removed: ["Dutch"], not_found: ["Klingon"] },
       facts: { added: [{ id: expect.any(String), text: "I have a German work permit." }] },
-      link: "https://dossier.example/profile?section=skills",
+      link: `${PROFILE_PAGE}&section=skills`,
     });
     const profile = await readProfile();
     expect(profile.skills).toContain("Accessibility");
@@ -202,8 +211,9 @@ describe("skills, languages and facts", () => {
     const theirs = await prisma().fact.create({ data: { applicationId: ledgerly.id, text: "For Ledgerly only" } });
     const answer = await tool("edit_profile_items", { change_facts: [{ id: first.id, text: "I can start in March." }], remove_facts: [second.id, theirs.id] });
     expect(answer.json).toEqual({
+      profile: DEMO_PROFILE,
       facts: { changed: [first.id], removed: [second.id], not_found: [theirs.id] },
-      link: "https://dossier.example/profile?section=facts",
+      link: `${PROFILE_PAGE}&section=facts`,
     });
     expect((await readProfile()).facts_about_me).toEqual([{ id: first.id, text: "I can start in March." }]);
     expect(await prisma().fact.count({ where: { id: theirs.id } })).toBe(1);
@@ -228,7 +238,7 @@ describe("saving entries", () => {
       created: true,
       entry: { role: "Design Lead", company: "Acme", start: "2024-01", end: null, current: true, bullets: ["Leads the design team", "Runs research"], skills: ["Figma", "Service design"] },
       new_skills: ["Service design"],
-      link: "https://dossier.example/profile?section=experience",
+      link: `${PROFILE_PAGE}&section=experience`,
     });
     const { id } = added.json.entry as Entry;
     // Newest first by date.
@@ -261,7 +271,7 @@ describe("saving entries", () => {
 
   it("saves projects, education, publications and references, never echoing links or a reference's email and phone", async () => {
     const project = await tool("save_profile_entry", { project: { name: "Calm payouts", link: "github.com/jane/payouts", start: "2023", bullets: ["Built a prototype"], skills: ["Prototyping"] } });
-    expect(project.json).toMatchObject({ saved: "project", entry: { name: "Calm payouts", has_link: true, start: "2023", skills: ["Prototyping"] }, link: "https://dossier.example/profile?section=projects" });
+    expect(project.json).toMatchObject({ saved: "project", entry: { name: "Calm payouts", has_link: true, start: "2023", skills: ["Prototyping"] }, link: `${PROFILE_PAGE}&section=projects` });
     expect(project.text).not.toContain("github.com/jane/payouts");
 
     const delft = await prisma().education.findFirstOrThrow({ where: { school: "TU Delft" } });
@@ -289,7 +299,7 @@ describe("removing entries", () => {
     await tool("sort_profile_entries", { section: "experience", ids: [brik, northwind, fieldnote] });
 
     const removed = await tool("remove_profile_entry", { kind: "experience", id: northwind });
-    expect(removed.json).toMatchObject({ removed: "experience", id: northwind, title: "Senior Product Designer at Northwind Logistics", link: "https://dossier.example/profile?section=experience" });
+    expect(removed.json).toMatchObject({ removed: "experience", id: northwind, title: "Senior Product Designer at Northwind Logistics", link: `${PROFILE_PAGE}&section=experience` });
     expect(await prisma().experience.count({ where: { id: northwind } })).toBe(0);
 
     await prisma().skill.deleteMany({ where: { name: "Workshop facilitation" } });
@@ -379,21 +389,49 @@ describe("removing entries", () => {
   });
 });
 
+describe("several profiles (E24-1)", () => {
+  it("reads and changes the profile named, and leaves the others' entries alone", async () => {
+    const backend = await copyProfile(TEST_PROFILE_ID, "Backend");
+    expect((await tool("get_profile")).json).toMatchObject({ profile: DEMO_PROFILE, profiles: [DEMO_PROFILE, "Backend"] });
+
+    const added = await tool("save_profile_entry", { profile: "Backend", experience: { role: "Backend Engineer", company: "Acme", skills: ["Go"] } });
+    expect(added.json).toMatchObject({ profile: "Backend", created: true, new_skills: ["Go"], link: `https://dossier.example/profile?profile=${backend}&section=experience` });
+    const { id } = added.json.entry as Entry;
+    expect(await prisma().experience.findUniqueOrThrow({ where: { id } })).toMatchObject({ profileId: backend });
+    expect(await prisma().skill.count({ where: { name: "Go", profileId: TEST_PROFILE_ID } })).toBe(0);
+    expect(ids((await readProfile()).experience)).not.toContain(id);
+
+    // An entry of one profile isn't changed or removed through another.
+    expect(await tool("save_profile_entry", { experience: { id, role: "Changed" } })).toMatchObject({ isError: true });
+    expect(await tool("remove_profile_entry", { kind: "experience", id })).toMatchObject({ isError: true });
+    expect(await prisma().experience.findUniqueOrThrow({ where: { id } })).toMatchObject({ role: "Backend Engineer" });
+
+    // Removed and put back, it goes back to its own profile.
+    await tool("remove_profile_entry", { profile: "Backend", kind: "experience", id });
+    expect((await tool("remove_profile_entry", { kind: "experience", id, restore: true })).json).toMatchObject({ restored: "experience" });
+    expect(await prisma().experience.findUniqueOrThrow({ where: { id } })).toMatchObject({ profileId: backend });
+
+    expect(await tool("get_profile", { profile: "Frontend" })).toMatchObject({ isError: true });
+  });
+});
+
 describe("ordering entries (E4-9)", () => {
   it("sets an order by hand, and goes back to date order", async () => {
     const [northwind, fieldnote, brik] = ids((await readProfile()).experience);
     const byHand = await tool("sort_profile_entries", { section: "experience", ids: [brik, fieldnote, northwind] });
     expect(byHand.json).toEqual({
+      profile: DEMO_PROFILE,
       section: "experience",
       order: "by hand",
       entries: ["UX Designer at Studio Brik", "Product Designer at Fieldnote", "Senior Product Designer at Northwind Logistics"],
-      link: "https://dossier.example/profile?section=experience",
+      link: `${PROFILE_PAGE}&section=experience`,
     });
-    expect((await prisma().setting.findUnique({ where: { key: "experienceOrder" } }))?.value).toBe("manual");
+    // The order is the profile's own setting (E24-1).
+    expect((await loadProfileSettings(TEST_PROFILE_ID)).experienceOrder).toBe("manual");
 
     const byDate = await tool("sort_profile_entries", { section: "experience", by_date: true });
     expect(byDate.json).toMatchObject({ order: "by date", entries: ["Senior Product Designer at Northwind Logistics", "Product Designer at Fieldnote", "UX Designer at Studio Brik"] });
-    expect((await prisma().setting.findUnique({ where: { key: "experienceOrder" } }))?.value).toBe("date");
+    expect((await loadProfileSettings(TEST_PROFILE_ID)).experienceOrder).toBe("date");
   });
 
   it("orders publications by hand only, and refuses a list that isn't every entry once", async () => {

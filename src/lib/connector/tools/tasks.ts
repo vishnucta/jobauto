@@ -9,28 +9,32 @@ import { careersCheckJob } from "@/lib/careers/check";
 import { englishCopyJob } from "@/lib/jobs/english-copy";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
 import { matchScore } from "@/lib/application-data";
-import { fitBand } from "@/lib/fit";
-import { searchRunHref, viewHref } from "@/lib/job-search/search";
+import { libraryHref } from "@/lib/job-search/search";
 import { applyJob, applyPageJob } from "@/lib/jobs/apply";
+import { checkRequirementsJob } from "@/lib/jobs/check-requirements";
 import { draftReplyJob } from "@/lib/jobs/draft-reply";
 import { importProfileJob } from "@/lib/jobs/import-profile";
+import { portalSearchJob } from "@/lib/jobs/portal-search";
+import { prepareInterviewJob } from "@/lib/jobs/prepare-interview";
 import { readPostingJob } from "@/lib/jobs/read-posting";
 import { refineJob } from "@/lib/jobs/refine";
 import { regenerateUnitJob } from "@/lib/jobs/regenerate-unit";
 import { translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { cancelJob, isFinished, JOB_MESSAGES, retryJob } from "@/lib/jobs/runner";
 import { scorePastedPostingJob, scorePostingJob } from "@/lib/jobs/score-posting";
-import { scoreResumeJob } from "@/lib/jobs/score-resume";
+import { scoreStartupJob } from "@/lib/jobs/score-startup";
+import { writeApplicationJob } from "@/lib/jobs/write-application";
 import { writeDocumentJob } from "@/lib/jobs/write-document";
 import { writeDocumentsJob } from "@/lib/jobs/write-documents";
 import { writeEmailJob } from "@/lib/jobs/write-email";
+import { writeMessageJob } from "@/lib/jobs/write-message";
 import { zipPdfsJob } from "@/lib/jobs/zip-pdfs";
 import { prisma } from "@/lib/prisma";
 import { refreshStartupsJob } from "@/lib/startups/refresh";
 import { STARTUP_SOURCE_INFO } from "@/lib/startups/types";
 
 import { connectorDraftJob } from "../draft";
-import { failure, started, text, type ToolContext } from "../kit";
+import { failure, fitLine, started, text, type ToolContext } from "../kit";
 
 // Background work started by other tools: its progress, cancelling and retrying (jobauto fork).
 // Any task, whether a tool or a button on Dossier's screens started it. What
@@ -48,7 +52,7 @@ type Tell = (task: Task, linkTo: (path: string) => string) => Told | Promise<Tol
 const TASK_FIELDS = { id: true, type: true, status: true, step: true, error: true, input: true, result: true, applicationId: true } as const;
 
 /** An unknown task, or one the retention sweep deleted (src/lib/jobs/retention.ts). */
-const NO_TASK = "There's no such task. Finished tasks are deleted after the time set in Settings → Your data.";
+const NO_TASK = "There's no such task. Finished tasks are deleted after the time set in Settings → Data and backups.";
 
 /** A reply draft that failed is drafted anew, not retried: no screen retries one, and the job saves its draft without checking the email. */
 const DRAFT_AGAIN = "Draft it again with draft_email_reply, which checks the email first.";
@@ -126,16 +130,67 @@ const KINDS: Record<string, Tell> = {
       next: task.status === JobStatus.DONE ? "Read it with get_document." : undefined,
     };
   },
-  [scoreResumeJob.type]: (task, linkTo) => {
-    const input = inputOf(scoreResumeJob, task);
-    const fit = resultOf(scoreResumeJob, task);
+  // New application writes on the server (1.15, E31-4).
+  [writeApplicationJob.type]: (task, linkTo) => {
+    const input = inputOf(writeApplicationJob, task);
+    const write = input?.write ?? "both";
     return {
-      task: "Scoring the application's tailored resume",
+      task: `Writing ${write === "resume" ? "the resume" : write === "letter" ? "the cover letter" : "the resume and cover letter"} for New application`,
       about: { application_id: input?.applicationId },
-      result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
-      link: input ? linkTo(`/applications/${input.applicationId}?tab=resume`) : undefined,
+      link: input ? linkTo(`/applications/${input.applicationId}`) : undefined,
+      next: task.status === JobStatus.DONE ? "Read them with get_document." : undefined,
     };
   },
+  // Check again: an application's requirements against its profile as it is now (1.15).
+  [checkRequirementsJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(checkRequirementsJob, task)?.applicationId;
+    const match = resultOf(checkRequirementsJob, task);
+    const matched = match && matchScore(match);
+    return {
+      task: "Checking an application's requirements against the profile",
+      about: { application_id: applicationId },
+      result: matched ? { matched: `${matched.hit} of ${matched.total} requirements` } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}`) : undefined,
+    };
+  },
+  // Getting ready for an interview round (1.15).
+  [prepareInterviewJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(prepareInterviewJob, task)?.applicationId;
+    const prep = resultOf(prepareInterviewJob, task);
+    return {
+      task: "Writing a Getting ready checklist for an interview",
+      about: { application_id: applicationId },
+      result: prep ? { items: prep.length } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}`) : undefined,
+    };
+  },
+  // An offer's or a follow-up's message, drafted on a click (1.15).
+  [writeMessageJob.type]: (task, linkTo) => {
+    const input = inputOf(writeMessageJob, task);
+    return {
+      task: "Drafting a message to the employer",
+      about: { application_id: input?.applicationId, kind: input?.kind },
+      link: input ? linkTo(`/applications/${input.applicationId}`) : undefined,
+    };
+  },
+  // A search asking its portals in the background (E22-4).
+  [portalSearchJob.type]: (task, linkTo) => {
+    const input = inputOf(portalSearchJob, task);
+    const done = resultOf(portalSearchJob, task);
+    return {
+      task: input?.more ? "Asking the portals for more postings" : "Asking the portals for postings",
+      about: { search_id: input?.searchId },
+      result: done ? { found: done.found } : undefined,
+      link: linkTo(input ? libraryHref({ found: input.searchId }) : "/jobs"),
+      next: done && input ? "list_postings with this search_id lists what it found." : undefined,
+    };
+  },
+  [scoreStartupJob.type]: (task, linkTo) => {
+    const score = resultOf(scoreStartupJob, task);
+    return { task: "Scoring a startup", about: { startup_id: inputOf(scoreStartupJob, task)?.id }, result: score ? { score: score.score } : undefined, link: linkTo("/startups") };
+  },
+  // One try at a notification (1.15, src/lib/notifications/notify.ts, whose job isn't exported): what it says stays out.
+  "notification-delivery": () => ({ task: "Sending a notification" }),
   [refineJob.type]: (task, linkTo) => {
     const input = inputOf(refineJob, task);
     const reply = resultOf(refineJob, task);
@@ -205,7 +260,7 @@ const KINDS: Record<string, Tell> = {
     return {
       task: "Checking the careers pages followed",
       result: checked ? { added: checked.added, search_id: checked.searchId ?? undefined, problems: checked.problems.length ? checked.problems : undefined, message: checked.message } : undefined,
-      link: linkTo(checked?.searchId ? searchRunHref(checked.searchId) : "/careers"),
+      link: linkTo(checked?.searchId ? libraryHref({ found: checked.searchId }) : "/careers"),
       next: checked?.searchId ? "list_postings with this search_id lists the jobs it added." : undefined,
     };
   },
@@ -224,11 +279,19 @@ const KINDS: Record<string, Tell> = {
     const kept = posting
       ? await prisma.posting.findUnique({ where: { source_externalId: { source: posting.source, externalId: posting.externalId } }, select: { savedAt: true, dismissedAt: true } })
       : null;
+    // How many requirements each profile covers (E32-2, E25-5), with the reasons.
     return {
       task: "Scoring a posting",
       about: { posting: posting ? [posting.title, posting.company].filter(Boolean).join(" at ") : undefined },
-      result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
-      link: linkTo(kept?.savedAt ? viewHref("saved") : kept?.dismissedAt ? viewHref("dismissed") : "/jobs"),
+      result: fit
+        ? {
+            best: fitLine(fit.score),
+            profiles: fit.scores.length > 1 ? fit.scores.map(fitLine) : undefined,
+            reasons: fit.score?.reasons.length ? fit.score.reasons : undefined,
+            red_flags: fit.score?.redFlags.length ? fit.score.redFlags : undefined,
+          }
+        : undefined,
+      link: linkTo(libraryHref({ show: kept?.savedAt ? "saved" : kept?.dismissedAt ? "dismissed" : "open" })),
     };
   },
   [scorePastedPostingJob.type]: (task, linkTo) => {
@@ -237,7 +300,7 @@ const KINDS: Record<string, Tell> = {
     return {
       task: "Scoring a pasted posting for New application",
       about: { posting: input ? [input.title, input.company].filter(Boolean).join(" at ") || undefined : undefined },
-      result: fit ? { score: fit.score, band: fitBand(fit.score), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
+      result: fit ? { ...fitLine(fit), reasons: fit.reasons, red_flags: fit.redFlags } : undefined,
       link: linkTo("/new"),
     };
   },

@@ -15,16 +15,23 @@ describe("sqliteSchema", () => {
     expect(() => sqliteSchema(schema)).toThrow("SQLite has no @db.Uuid");
   });
 
+  // The schema has no list of values since the fork's PostingSearch.sources
+  // went into upstream's `portals` (1.15 merge), so these add some to a copy.
+  const ADDED_BY = '  addedBy         String        @default("")\n';
+  const postgres = () => readFileSync(POSTGRES_SCHEMA, "utf8").replace(/\r\n/g, "\n");
+
   it("makes a list of values that starts empty a JSON array, and leaves relations alone", () => {
-    const schema = sqliteSchema(readFileSync(POSTGRES_SCHEMA, "utf8"));
-    expect(schema).toContain('  sources   Json            @default("[]")\n');
+    expect(postgres()).toContain(ADDED_BY);
+    const schema = sqliteSchema(postgres().replace(ADDED_BY, `${ADDED_BY}  kinds           ContactKind[] @default([])\n  words           String[]      @default([])\n`));
+    expect(schema).toContain('  kinds           Json          @default("[]")\n');
+    expect(schema).toContain('  words           Json          @default("[]")\n');
     expect(schema).toContain("  events      RecruiterEvent[]\n");
-    expect(schema).not.toMatch(/^ +\w+ +(String|PostingSource)\[\]/m);
+    expect(schema).not.toMatch(/^ +\w+ +(String|ContactKind)\[\]/m);
   });
 
   it("refuses a list of values it can't make a JSON array", () => {
-    const schema = readFileSync(POSTGRES_SCHEMA, "utf8").replace("sources   PostingSource[] @default([])", "sources   PostingSource[]");
-    expect(() => sqliteSchema(schema)).toThrow('SQLite has no lists of values: say in prisma/sqlite/derive.ts what "sources   PostingSource[]" becomes.');
+    const schema = postgres().replace(ADDED_BY, `${ADDED_BY}  kinds           ContactKind[]\n`);
+    expect(() => sqliteSchema(schema)).toThrow('SQLite has no lists of values: say in prisma/sqlite/derive.ts what "kinds           ContactKind[]" becomes.');
   });
 });
 

@@ -198,12 +198,13 @@ export function registerApplicationTools({ server, linkTo }: ToolContext): void 
   );
 
   server.registerTool(
-    "update_application",
+    "update_application_details",
     {
-      title: "Update an application",
+      title: "Update an application's details",
       description:
         "Archives an application or brings it back, sets or removes its next interview (in Google Calendar too when Dossier keeps interviews there), " +
-        "changes the facts Dossier's AI is told for it, or links it to the startup it's written to. Give only what changes. When facts change, the answer lists them all with their fact_id.",
+        "changes the facts Dossier's AI is told for it, or links it to the startup it's written to. Give only what changes. When facts change, the answer lists them all with their fact_id. " +
+        "To change a Draft's resume, cover letter or match, use update_application instead.",
       inputSchema: z.object({
         id: applicationId,
         archived: z.boolean().optional().describe("true takes it off the board, where it still counts on the dashboard; false brings it back"),
@@ -291,7 +292,7 @@ export function registerApplicationTools({ server, linkTo }: ToolContext): void 
       title: "Delete an application",
       description:
         "Deletes an application with its tailored documents, chat, notes, facts, history, Gmail mail and apply runs. " +
-        "It can't be undone: call it only when the user asked to delete this application. To keep one out of the way, archive it with update_application instead.",
+        "It can't be undone: call it only when the user asked to delete this application. To keep one out of the way, archive it with update_application_details instead.",
       inputSchema: z.object({ id: applicationId }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },

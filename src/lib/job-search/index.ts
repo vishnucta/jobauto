@@ -1,18 +1,18 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { logServerError } from "@/lib/log";
 
-import type { JobSourceAdapter, RequestContext, SourceCredentials } from "./adapter";
+import { adapterFor as portalAdapterFor, portalVersion } from "@/lib/portals/adapters";
+
+import type { PortalFields } from "@/lib/portals/engine";
+
+import type { RequestContext } from "./adapter";
 import { cached, remember } from "./cache";
 import { JobSearchError, jobSearchError } from "./errors";
 import { fitsExperience } from "./experience";
-import { adzuna } from "./adzuna";
-import { arbeitsagentur } from "./arbeitsagentur";
-import { freehire } from "./freehire";
-import { jooble } from "./jooble";
-import { jsearch } from "./jsearch";
 import { postingKey, type FoundPosting, type JobSource, type SearchPage, type SearchQuery } from "./search";
-import { serpapi } from "./serpapi";
 import { sourceCovers } from "./sources";
 
 // Searching the chosen job source from the server (E14-1). Results are
@@ -20,19 +20,15 @@ import { sourceCovers } from "./sources";
 // message for the screen, and the ones that point at a problem with the
 // source are logged, without the search.
 
-export type { JSearchHost, RequestContext, SourceCredentials } from "./adapter";
+export type { RequestContext } from "./adapter";
 export { JobSearchError } from "./errors";
 
-const ADAPTERS: { [S in JobSource]: JobSourceAdapter<S> } = {
-  JSEARCH: jsearch,
-  SERPAPI: serpapi,
-  ADZUNA: adzuna,
-  JOOBLE: jooble,
-  ARBEITSAGENTUR: arbeitsagentur,
-  FREEHIRE: freehire,
-};
-
-const adapterFor = <S extends JobSource>(source: S) => ADAPTERS[source] as JobSourceAdapter<S>;
+/** Every portal runs on the portal engine (E22-2), a built-in or one the user added (E23-3); its credentials are its fields' values. */
+function adapterFor(source: JobSource) {
+  const adapter = portalAdapterFor(source);
+  if (!adapter) throw jobSearchError("off", source);
+  return adapter;
+}
 
 /** Logs failures that say something about the source; a wrong key or a used-up quota is the user's to fix. */
 async function logged<T>(work: () => Promise<T>): Promise<T> {
@@ -47,16 +43,18 @@ async function logged<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /** One page of postings for `query` from `source`, from the cache when it was asked for in the last half hour. */
-export async function searchPostings<S extends JobSource>(
-  source: S,
-  credentials: SourceCredentials[S],
+export async function searchPostings(
+  source: JobSource,
+  credentials: PortalFields,
   query: SearchQuery,
   next: string | null = null,
   context: RequestContext = {},
 ): Promise<SearchPage> {
   if (!sourceCovers(source, query.country)) throw jobSearchError("country", source, { country: query.country });
   const adapter = adapterFor(source);
-  const key = `search:${source}:${JSON.stringify(query)}:${next ?? ""}`;
+  // The fields are in the key as a digest, so a changed list of boards asks again.
+  const fieldsDigest = createHash("sha256").update(JSON.stringify(credentials)).digest("hex").slice(0, 16);
+  const key = `search:${source}@${portalVersion(source)}:${fieldsDigest}:${JSON.stringify(query)}:${next ?? ""}`;
   const hit = cached<SearchPage>(key);
   if (hit) return hit;
   const found = await logged(() => adapter.search(query, credentials, next, context));
@@ -67,9 +65,9 @@ export async function searchPostings<S extends JobSource>(
 }
 
 /** The whole text of a posting: its own description when that's complete, else fetched; null when it can't be had. */
-export async function postingDetails<S extends JobSource>(
-  source: S,
-  credentials: SourceCredentials[S],
+export async function postingDetails(
+  source: JobSource,
+  credentials: PortalFields,
   posting: FoundPosting,
   context: RequestContext = {},
 ): Promise<string | null> {
@@ -83,6 +81,6 @@ export async function postingDetails<S extends JobSource>(
 }
 
 /** "Test connection" in Settings → Job search: throws a JobSearchError when the source or the key doesn't work. */
-export async function testSource<S extends JobSource>(source: S, credentials: SourceCredentials[S], context: RequestContext = {}): Promise<void> {
+export async function testSource(source: JobSource, credentials: PortalFields, context: RequestContext = {}): Promise<void> {
   await logged(() => adapterFor(source).test(credentials, context));
 }

@@ -33,14 +33,16 @@ import {
   type RecruiterView,
 } from "@/lib/recruiters/types";
 
-import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
+import { FindWorkLinks, type JobsCounts } from "../jobs/find-work-links";
 import { addRecruiter, addSuggestedRecruiters, deleteRecruiter, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
 
 export type RecruitersScreenProps = {
   recruiters: RecruiterView[];
   /** What a message may say about the user, from the profile. */
   facts: OutreachFacts;
-  /** The Find jobs tabs' counts, since Recruiters is one of them. */
+  /** The profile the messages are written from, whose Base resume goes with them (E24-1); the first without one. */
+  profileId?: string;
+  /** How many recruiters and careers pages there are, for the links beside Positions. */
   counts: JobsCounts;
   today: string;
 };
@@ -64,9 +66,10 @@ const TONE = {
  * Recruiters: the agencies and recruiters the user keeps track of, where each
  * conversation stands, when a follow-up is due, and the message to write
  * next, drafted from the profile. Dossier sends nothing: the message opens in
- * the user's own Gmail, and "I wrote to them" is the user's word.
+ * the user's own Gmail, and "I wrote to them" is the user's word. A screen
+ * of its own under Positions (jobauto fork), which Find jobs had as a tab.
  */
-export function RecruitersScreen({ recruiters, facts, counts, today }: RecruitersScreenProps) {
+export function RecruitersScreen({ recruiters, facts, profileId, counts, today }: RecruitersScreenProps) {
   const router = useRouter();
   const now = new Date(today);
   const [filter, setFilter] = useState<RecruiterFilter>("ALL");
@@ -88,10 +91,12 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
   return (
     <>
       <PageHeader
-        title="Find jobs"
-        description="Recruiters: agencies and recruiters who place people in your field, and the people you write to directly: hiring managers, and former colleagues or alumni who could refer you. Agencies that show up in your searches or jobs are added here. Keep track of whom you wrote to, see when a follow-up is due, and send each a message drafted from your profile. You send everything yourself."
+        title="Recruiters"
+        breadcrumb={[{ label: "Positions", href: "/jobs" }, { label: "Recruiters" }]}
+        description="Agencies and recruiters who place people in your field, and the people you write to directly: hiring managers, and former colleagues or alumni who could refer you. Agencies that show up in your searches or jobs are added here. Keep track of whom you wrote to, see when a follow-up is due, and send each a message drafted from your profile. You send everything yourself."
         actions={
           <>
+            <FindWorkLinks counts={counts} current="recruiters" />
             {missingStarters && (
               <Button variant="secondary" aria-disabled={busy || undefined} onClick={() => !busy && addSuggested()}>
                 Add suggested agencies
@@ -101,7 +106,6 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
           </>
         }
       />
-      <JobsTabs view="recruiters" counts={counts} />
       <div className="flex flex-col gap-6 px-10 pb-20">
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Summary">
           <Stat label="on your list" value={recruiters.length} />
@@ -166,6 +170,7 @@ export function RecruitersScreen({ recruiters, facts, counts, today }: Recruiter
                 key={current.id}
                 recruiter={current}
                 facts={facts}
+                profileId={profileId}
                 now={now}
                 onChanged={refresh}
                 onGone={() => {
@@ -220,7 +225,21 @@ function RecruiterRow({ recruiter, now, selected, onSelect }: { recruiter: Recru
   );
 }
 
-function RecruiterDetail({ recruiter, facts, now, onChanged, onGone }: { recruiter: RecruiterView; facts: OutreachFacts; now: Date; onChanged: () => void; onGone: () => void }) {
+function RecruiterDetail({
+  recruiter,
+  facts,
+  profileId,
+  now,
+  onChanged,
+  onGone,
+}: {
+  recruiter: RecruiterView;
+  facts: OutreachFacts;
+  profileId?: string;
+  now: Date;
+  onChanged: () => void;
+  onGone: () => void;
+}) {
   const headingId = useId();
   const [pending, startTransition] = useTransition();
   const [removing, setRemoving] = useState(false);
@@ -273,6 +292,7 @@ function RecruiterDetail({ recruiter, facts, now, onChanged, onGone }: { recruit
           recruiter={recruiter}
           kind={kind}
           facts={facts}
+          profileId={profileId}
         />
       ) : recruiter.status === "REPLIED" ? (
         <p className="text-sm text-muted">They replied. Write back from your own mail, then press “I wrote again” to start the next follow-up.</p>
@@ -313,7 +333,7 @@ function RecruiterDetail({ recruiter, facts, now, onChanged, onGone }: { recruit
 }
 
 /** The message to write next, drafted from the profile and open to edits; it goes out from the user's own Gmail. */
-function Draft({ recruiter, kind, facts }: { recruiter: RecruiterView; kind: "first" | "follow-up"; facts: OutreachFacts }) {
+function Draft({ recruiter, kind, facts, profileId }: { recruiter: RecruiterView; kind: "first" | "follow-up"; facts: OutreachFacts; profileId?: string }) {
   const initial = outreachDraft(recruiter, kind, facts);
   const [subject, setSubject] = useState(initial.subject);
   const [body, setBody] = useState(initial.body);
@@ -338,7 +358,8 @@ function Draft({ recruiter, kind, facts }: { recruiter: RecruiterView; kind: "fi
         <Button variant="secondary" size="md" onClick={() => void copy()}>
           Copy message
         </Button>
-        <DownloadPdfButton href="/api/pdf?doc=base" variant="secondary">
+        {/* The Base resume of the profile the message is written from (E24-2). */}
+        <DownloadPdfButton href={profileId ? `/api/pdf?doc=base&profile=${encodeURIComponent(profileId)}` : "/api/pdf?doc=base"} variant="secondary">
           Download your resume
         </DownloadPdfButton>
       </div>

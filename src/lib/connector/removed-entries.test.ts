@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { forgetRemoved, forgetRemovedProfileEntries, keepRemoved, KEEP_REMOVED_MS, keptRemoved, type Removed } from "./removed-entries";
 
 const CONNECTION = "2026-10-23T09:00:00.000Z";
-const photo: Removed = { kind: "photo", entry: { src: "data:image/png;base64,iVBORw0KGgo", onResumes: true }, position: 0, title: "The photo" };
+const photo: Removed = { kind: "photo", entry: { src: "data:image/png;base64,iVBORw0KGgo", onResumes: true }, position: 0, title: "The photo", profileId: "profile-1" };
 
 beforeEach(() => forgetRemovedProfileEntries());
 

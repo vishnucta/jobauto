@@ -280,13 +280,13 @@ Remove-NetFirewallRule -DisplayName "Chrome for Apply"
 ## First steps in the app
 
 1. **Settings → AI provider**: choose **Groq** and paste a free API key from [console.groq.com](https://console.groq.com), **DeepSeek** with a key from [platform.deepseek.com](https://platform.deepseek.com/api_keys) (pay per use, a few euros go a long way), **Gemini** with a key from [Google AI Studio](https://aistudio.google.com/api-keys) (set up billing there first, so Google doesn't use what it's sent), or **Anthropic** with a key from [platform.claude.com](https://platform.claude.com). Press **Test connection**.
-2. **Settings → Job search**: choose **Bundesagentur für Arbeit**, which is free and needs no key, and tick **I understand, and choose this source myself**.
-3. **Profile → Import from a resume**: upload your CV and check what it read. Moving over from another computer instead? There, use **Settings → Your data → Export everything** with **Include my API keys** ticked. Here, use **Import** in **Settings → Your data** and choose that file. Delete the file afterwards: it holds your profile and your keys in plain text.
-4. **Find jobs**, open a posting and create an application. On its **Apply** tab, **Open and fill it in** opens the employer's form in a browser window and fills it in. Check everything in that window, and press Send yourself.
+2. **Settings → Job search**: switch on **Bundesagentur für Arbeit**, which is free and needs no key, and tick **I understand, and choose this source myself**.
+3. **Profile → Import from a resume**: upload your CV and check what it read. Moving over from another computer instead? There, use **Settings → Data and backups → Export everything** with **Include my API keys** ticked. Here, use **Import** in **Settings → Data and backups** and choose that file. Delete the file afterwards: it holds your profile and your keys in plain text.
+4. **Positions**: search, open a posting and create an application. On its **Apply** tab, **Open and fill it in** opens the employer's form in a browser window and fills it in. Check everything in that window, and press Send yourself.
 
 ## Use it from Claude (optional)
 
-The app is also an MCP server, so Claude, Gemini CLI or another MCP client can work in it for you: search one or several job sources, add jobs it found on the web, change your profile, write, ATS-check and send applications, fill in forms on the Apply tab, and more.
+The app is also an MCP server, so Claude, Gemini CLI or another MCP client can work in it for you: search the job portals you switched on, add jobs it found on the web, change your profile, write, ATS-check and send applications, fill in forms on the Apply tab, and more.
 
 1. In the app, open **Settings → MCP connector** and turn it on.
 2. In Claude Code on this laptop, run this once, then type `/mcp` in Claude Code and sign in when the browser opens:

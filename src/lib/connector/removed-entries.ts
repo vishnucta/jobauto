@@ -17,8 +17,8 @@ export const KEEP_REMOVED_MS = 60 * 60_000;
 /** The most removals kept; the oldest go first. */
 const MAX_KEPT = 50;
 
-/** A removed entry, with its place in its section. */
-export type Removed = { title: string; position: number } & (
+/** A removed entry, with its place in its section and the profile it was in (E24-1). */
+export type Removed = { title: string; position: number; profileId: string } & (
   | { kind: "experience"; entry: ExperienceItem }
   | { kind: "project"; entry: ProjectItem }
   | { kind: "education"; entry: EducationItem }

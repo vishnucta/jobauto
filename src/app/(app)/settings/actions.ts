@@ -7,44 +7,49 @@ import { z } from "zod";
 import { AiProvider, JobStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
 import { lockAgentSearches } from "@/lib/agent/searches";
-import { AiError } from "@/lib/ai";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
-import { ntfyTarget } from "@/lib/alert-address";
-import { AlertError, sendAlert } from "@/lib/alerts";
 import { deleteAllAttachments, removeAttachment as deleteAttachment, updateAttachment } from "@/lib/attachments";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
 import { AI_TIMEOUT_LIMITS } from "@/lib/ai/provider-options";
 import { deleteAllBackups } from "@/lib/backups";
+import { loadJobSearchConfig, portalSetup, savePortals } from "@/lib/job-search/config";
+import { BUILT_IN_PORTALS } from "@/lib/portals/built-in";
+import { catalogView, isReviewed, loadCatalog, readCatalog } from "@/lib/portals/catalog";
+import { updateFor } from "@/lib/portals/updates";
+import { fetchConfigText, installPortal, loadInstalledPortals, MAX_CONFIG_BYTES, previewConfig, removeInstalledPortal } from "@/lib/portals/installed";
 import { cancelJob } from "@/lib/jobs/runner";
 import { checkForUpdate } from "@/lib/update-check";
 import { redirectProblem } from "@/lib/connector/oauth";
 import { deleteAllDownloads } from "@/lib/jobs/zip-pdfs";
 import { disconnectGoogle } from "@/lib/google/account";
 import { prisma } from "@/lib/prisma";
-import { jevKey, loadScoringConfig, scoringView } from "@/lib/scoring/config";
-import { SCORERS } from "@/lib/scoring/scorers";
-import { askJev } from "@/lib/scoring/typesafe";
-import { applySecretChange, JOB_SOURCE_KEY, TYPESAFE_KEY } from "@/lib/secrets";
+import { loadScoringConfig, SCORER_KEY_CONTEXT, scoringView } from "@/lib/scoring/config";
+import { testScorer } from "@/lib/scoring";
+import { SCORER_INFO, SCORERS } from "@/lib/scoring/scorers";
+import { applySecretChange, JOB_SOURCE_KEY } from "@/lib/secrets";
 import {
   aiChoiceSchema,
+  aiKeyEnding,
   aiKeyState,
   availableAiModels,
-  chooseJobSource,
-  jobSearchDetailsSchema,
-  jobSourceChoiceSchema,
   loadJobSearchView,
+  offeredPortal,
   pickDocumentLanguage,
+  portalIdSchema,
   saveAiChoice,
-  saveJobSourceDetails,
+  savePortalFieldValue,
   settingChoicesSchema,
   startPdfZip,
+  switchPortal,
   TEST_TIMEOUT_MS,
   testAiProvider,
-  testJobSourceConnection,
+  testPortalConnection,
+  type PortalChange,
 } from "@/lib/settings-changes";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
+import { firstProfileId } from "@/lib/profiles";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 
 // Settings → AI provider (E6-3). Every field saves on its own, so a test
@@ -53,8 +58,8 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 
 /** Saves the provider, server address and model (SET-1); another provider, or an address on another host (public PR 107), removes the key. */
 export const saveAiProvider = action(aiChoiceSchema, async (choice) => {
-  const { keyState, keyRemoved } = await saveAiChoice(choice);
-  return { keyState, ...(keyRemoved ? { keyRemoved } : {}) };
+  const { keyState, keyEnding, keyRemoved } = await saveAiChoice(choice);
+  return { keyState, keyEnding, ...(keyRemoved ? { keyRemoved } : {}) };
 });
 
 /** Saves a new API key, encrypted (E6-2), or removes it. The key never comes back to the browser. */
@@ -73,7 +78,7 @@ export const saveApiKey = action(
       // Until now the provider came from DOSSIER_AI_*; the key makes it a saved choice.
       ...(current.provider ? {} : { provider }),
     });
-    return { keyState: await aiKeyState() };
+    return { keyState: await aiKeyState(), keyEnding: await aiKeyEnding() };
   },
 );
 
@@ -93,94 +98,191 @@ export const saveAiTimeout = action(
 /** The models the saved server offers, for the model select. */
 export const listAiModels = action(z.object({}), () => availableAiModels());
 
-/** "Test connection" (SET-2): a short prompt to the saved provider, timed. */
+/** "Test connection" (SET-2): a short prompt to the saved provider, timed, and kept for the section and the overview (E34-1). */
 export const testAiConnection = action(z.object({}), () => testAiProvider());
 
-// Settings → Job search (E14-4). Every field saves on its own; each returns
-// what the section shows, never a key.
+// Settings → Job search (E14-4, E22-3). Every field saves on its own; each
+// returns what the section shows, never a key.
+
+/** What the section shows after a portal change, or the reason it wasn't made, as the action's error. */
+function viewOf(change: PortalChange) {
+  if ("problem" in change) throw new ActionError(change.problem);
+  return change.view;
+}
 
 /**
- * Picks the source to search, or Off. The Bundesagentur für Arbeit only with
- * its note accepted, now (`accepted`) or before, and only while the server
- * offers it (#223).
+ * Switches a portal on or off; any number can be on. One with a note (the
+ * Bundesagentur für Arbeit's, #223) only goes on with it accepted, now
+ * (`accepted`) or before.
  */
-export const saveJobSource = action(
-  z.object({ source: jobSourceChoiceSchema, accepted: z.literal(true).optional() }),
-  async ({ source, accepted }) => {
-    const view = await chooseJobSource(source, accepted === true);
-    if (view === "not-offered") throw new ActionError("The Bundesagentur für Arbeit isn't offered on this server.");
-    if (view === "not-accepted") throw new ActionError("Tick “I understand” under the note about the Bundesagentur für Arbeit first.");
-    return view;
-  },
+export const setPortalOn = action(z.object({ portal: portalIdSchema, on: z.boolean(), accepted: z.literal(true).optional() }), async ({ portal, on, accepted }) =>
+  viewOf(await switchPortal(portal, on, accepted === true)),
 );
 
-/** Saves where the JSearch key is from, or the Adzuna app ID, which isn't a secret. */
-export const saveJobSearchDetails = action(jobSearchDetailsSchema, (details) => saveJobSourceDetails(details));
+/** Saves one of a portal's text, choice or list fields (the Adzuna app ID, the JSearch host, companies' boards), which aren't secrets. */
+export const savePortalField = action(z.object({ portal: portalIdSchema, field: z.string().min(1).max(40), value: z.string().trim().max(5000) }), async ({ portal, field, value }) =>
+  viewOf(await savePortalFieldValue(portal, field, value)),
+);
 
-/** Where each keyed job source's key is saved. */
-const JOB_KEY_FIELDS = { JSEARCH: "jsearchKeyEnc", SERPAPI: "serpapiKeyEnc", ADZUNA: "adzunaKeyEnc", JOOBLE: "joobleKeyEnc" } as const;
-
-/** Saves a source's key, encrypted for job sources only, or removes it. The key never comes back to the browser. */
-export const saveJobSourceKey = action(
+/** Saves a portal's key, encrypted for job sources only, or removes it. The key never comes back to the browser. */
+export const savePortalKey = action(
   z.object({
-    source: z.enum(["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE"]),
+    portal: portalIdSchema,
+    field: z.string().min(1).max(40),
     change: z.discriminatedUnion("action", [
       z.object({ action: z.literal("set"), value: z.string().trim().min(1).max(1000) }),
       z.object({ action: z.literal("clear") }),
     ]),
   }),
-  async ({ source, change }) => {
-    const field = JOB_KEY_FIELDS[source];
-    const current = await loadSettings();
-    await saveSettings({ [field]: applySecretChange(JOB_SOURCE_KEY, current[field], change) });
+  async ({ portal, field, change }) => {
+    const offered = await offeredPortal(portal);
+    if ("problem" in offered) throw new ActionError(offered.problem);
+    if (offered.setup.config.fields.find((entry) => entry.name === field)?.type !== "secret") throw new ActionError("That isn't a key.");
+    await savePortals(({ portals, keys }) => {
+      const own = { ...keys[portal] };
+      const stored = applySecretChange(JOB_SOURCE_KEY, own[field] ?? null, change);
+      if (stored) own[field] = stored;
+      else delete own[field];
+      return { portals: { ...portals, [portal]: portals[portal] ?? { on: false, fields: {}, acceptedAt: null } }, keys: { ...keys, [portal]: own } };
+    });
     return loadJobSearchView();
   },
 );
 
-/** "Test connection": the smallest request the chosen source takes, timed. */
-export const testJobSource = action(z.object({}), () => testJobSourceConnection());
+/**
+ * Add portal (E23-3): a config from a file's text or a link, shown before
+ * it's installed, or what's wrong with it in words.
+ */
+export const previewPortal = action(
+  z.union([z.object({ text: z.string().max(2 * MAX_CONFIG_BYTES) }), z.object({ url: z.string().trim().max(2000) })]),
+  async (input) => {
+    await loadInstalledPortals();
+    const read = "url" in input ? await fetchConfigText(input.url) : ({ ok: true, text: input.text } as const);
+    if (!read.ok) return { ok: false as const, problems: [read.problem] };
+    const result = previewConfig(read.text);
+    if (!result.ok) return { ok: false as const, problems: result.problems };
+    // A file or link with exactly what the catalog reviewed counts as reviewed (E23-2).
+    return { ok: true as const, preview: { ...result.preview, reviewed: await isReviewed(result.config) } };
+  },
+);
+
+/** Installs a config as it was previewed: a pinned copy, which nothing changes until an update is installed (E23-3). */
+export const installPortalConfig = action(
+  z.object({ text: z.string().max(2 * MAX_CONFIG_BYTES), origin: z.enum(["file", "link"]), originUrl: z.url({ protocol: /^https$/ }).max(2000).nullable() }),
+  async ({ text, origin, originUrl }, { toast }) => {
+    await loadInstalledPortals();
+    const result = previewConfig(text);
+    if (!result.ok) throw new ActionError(result.problems[0]);
+    await installPortal(result.config, { origin, originUrl: origin === "link" ? originUrl : null, reviewed: await isReviewed(result.config) });
+    toast(`${result.config.name} added. Switch it on to search it.`);
+    revalidatePath("/", "layout");
+    return loadJobSearchView();
+  },
+);
+
+/** The catalog for Browse portals (E23-4), read again now (at most once a minute), each entry with where it stands here. */
+async function loadCatalogView() {
+  const installed = await loadInstalledPortals();
+  return catalogView(new Map(installed.map((portal) => [portal.config.id, portal.config.version])), new Set(BUILT_IN_PORTALS.map((config) => config.id)));
+}
+
+export const browsePortals = action(z.object({}), async () => {
+  await readCatalog({ force: true });
+  return loadCatalogView();
+});
+
+/** Adds a portal from the catalog, as reviewed (E23-4), after the same preview as Add portal. */
+export const installFromCatalog = action(z.object({ portal: portalIdSchema }), async ({ portal }, { toast }) => {
+  const entry = (await loadCatalog()).portals.find((candidate) => candidate.id === portal);
+  if (!entry) throw new ActionError("That portal isn't in the catalog any more.");
+  if (BUILT_IN_PORTALS.some((config) => config.id === portal)) throw new ActionError(`${entry.name} comes with Dossier already.`);
+  await installPortal(entry.config, { origin: "catalog", reviewed: true });
+  toast(`${entry.name} added. Switch it on to search it.`);
+  revalidatePath("/", "layout");
+  return { view: await loadJobSearchView(), catalog: await loadCatalogView() };
+});
+
+/** Removes a portal the user added, with its switch and key. What it found stays in Positions. */
+export const removePortal = action(z.object({ portal: portalIdSchema }), async ({ portal }, { toast }) => {
+  const setup = portalSetup(await loadJobSearchConfig(), portal);
+  if (!setup?.installed) throw new ActionError("Only a portal you added can be removed.");
+  await removeInstalledPortal(portal);
+  await savePortals(({ portals, keys }) => ({
+    portals: Object.fromEntries(Object.entries(portals).filter(([id]) => id !== portal)),
+    keys: Object.fromEntries(Object.entries(keys).filter(([id]) => id !== portal)),
+  }));
+  toast(`${setup.config.name} removed. What it found stays in Positions.`);
+  revalidatePath("/", "layout");
+  return loadJobSearchView();
+});
+
+/**
+ * Installs a portal's update from the catalog (E23-5), a built-in's too. A
+ * version that reaches a new host needs the user's approval of each.
+ */
+export const updatePortal = action(z.object({ portal: portalIdSchema, approvedHosts: z.array(z.string().max(253)).max(10) }), async ({ portal, approvedHosts }, { toast }) => {
+  const setup = portalSetup(await loadJobSearchConfig(), portal);
+  const entry = (await loadCatalog()).portals.find((candidate) => candidate.id === portal);
+  const update = setup && !setup.withdrawal ? updateFor(setup.config, entry) : null;
+  if (!setup || !entry || !update) throw new ActionError("There's no update for that portal right now.");
+  const unapproved = update.newHosts.filter((host) => !approvedHosts.includes(host));
+  if (unapproved.length > 0) throw new ActionError(`Approve ${unapproved.join(" and ")} first: the new version reaches ${unapproved.length === 1 ? "it" : "them"}.`);
+  await installPortal(entry.config, { origin: "catalog", reviewed: true });
+  toast(`${entry.name} updated to version ${entry.version}.`);
+  revalidatePath("/", "layout");
+  return loadJobSearchView();
+});
+
+/** "Keep searching it": a portal the catalog withdrew goes on being searched, as the user decided (E23-5). */
+export const keepWithdrawnPortal = action(z.object({ portal: portalIdSchema }), async ({ portal }, { toast }) => {
+  const setup = portalSetup(await loadJobSearchConfig(), portal);
+  if (!setup?.withdrawal) throw new ActionError("That portal isn't withdrawn.");
+  const { portalWithdrawalsKept } = await loadSettings();
+  await saveSettings({ portalWithdrawalsKept: { ...portalWithdrawalsKept, [portal]: setup.withdrawal.withdrawnAt } });
+  toast(`${setup.config.name} is searched again.`);
+  return loadJobSearchView();
+});
+
+/** "Test connection": the smallest request a portal takes, timed. */
+export const testPortal = action(z.object({ portal: portalIdSchema }), ({ portal }) => testPortalConnection(portal));
 
 // Settings → Scoring (#274). Each returns what the section shows, never the key.
 
 const loadScoringView = async () => scoringView(await loadScoringConfig());
 
-/** What scores postings: the AI model, or Jev. */
+/** Which scoring model scores postings (E25-2). */
 export const saveScorer = action(z.object({ scorer: z.enum(SCORERS) }), async ({ scorer }) => {
   await saveSettings({ scorer });
   return loadScoringView();
 });
 
-/** Saves the TypeSafe key, encrypted for it only, or removes it. */
-export const saveTypesafeKey = action(
+/** Saves a scoring model's key, encrypted for it only, or removes it (E25-2). */
+export const saveScoringKey = action(
   z.object({
+    scorer: z.enum(SCORERS),
     change: z.discriminatedUnion("action", [
       z.object({ action: z.literal("set"), value: z.string().trim().min(1).max(1000) }),
       z.object({ action: z.literal("clear") }),
     ]),
   }),
-  async ({ change }) => {
+  async ({ scorer, change }) => {
+    const key = SCORER_INFO[scorer].key;
+    const context = SCORER_KEY_CONTEXT[scorer];
+    if (!key || !context) throw new ActionError(`${SCORER_INFO[scorer].name} needs no key.`);
     const current = await loadSettings();
-    await saveSettings({ typesafeKeyEnc: applySecretChange(TYPESAFE_KEY, current.typesafeKeyEnc, change) });
+    await saveSettings({ [key.setting]: applySecretChange(context, current[key.setting], change) });
     return loadScoringView();
   },
 );
 
-/** "Test connection": one yes-or-no question to Jev about a sentence, timed. It costs a few dozen tokens. */
-export const testJev = action(z.object({}), async () => {
-  const jev = jevKey(await loadScoringConfig());
-  if (jev.problem !== null) return { connected: false as const, message: jev.problem };
-  const started = performance.now();
-  try {
-    const { model } = await askJev(
-      { state: "Dossier is checking that it can reach Jev.", questions: { check: { type: "noul", instructions: "Is this text about checking a connection?" } } },
-      { key: jev.key, timeoutMs: TEST_TIMEOUT_MS, retryDelaysMs: [] },
-    );
-    return { connected: true as const, model, seconds: Math.round((performance.now() - started) / 100) / 10 };
-  } catch (error) {
-    if (error instanceof AiError) return { connected: false as const, message: error.message };
-    throw error;
-  }
+/** The OpenRouter model that scores (E25-4); empty for the default. */
+export const saveOpenRouterScoringModel = action(z.object({ model: z.string().trim().max(200) }), async ({ model }) => {
+  await saveSettings({ openrouterScoringModel: model || null });
+  return loadScoringView();
 });
+
+/** "Test connection" for a scoring model: one short question, timed. It costs a few dozen tokens. */
+export const testScoringModel = action(z.object({ scorer: z.enum(SCORERS) }), async ({ scorer }) => testScorer(scorer, TEST_TIMEOUT_MS));
 
 /**
  * Saves the settings that are a plain choice or switch, each as it changes
@@ -202,7 +304,7 @@ export const startZippingPdfs = action(z.object({}), async () => {
 });
 
 /**
- * "Delete for good" (E10-8, SET-11): removes the profile, every application
+ * "Delete for good" (E10-8, SET-11): removes every profile, every application
  * with its documents, custom themes, settings, background jobs, the
  * backup and download files and the apply assistant's runs and browser
  * profile, then puts back what a new install has. The
@@ -224,6 +326,10 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     await tx.postingSearch.deleteMany();
     // Postings pasted for Claude chat (#221); the connector goes off with the settings.
     await tx.claudePaste.deleteMany();
+    // The portals the user added (E23-3).
+    await tx.installedPortal.deleteMany();
+    // Notification channels, their secrets and their delivery log (E26).
+    await tx.notificationChannel.deleteMany();
     // What the job agent found (E16).
     await tx.agentCandidate.deleteMany();
     await tx.agentSearch.deleteMany();
@@ -249,13 +355,17 @@ export const deleteEverything = action(z.object({ confirm: z.literal("DELETE") }
     await tx.publication.deleteMany();
     await tx.reference.deleteMany();
     await tx.customSection.deleteMany();
+    // Every profile, with whatever is left of its own (E24-1).
+    await tx.profile.deleteMany();
     await tx.fact.deleteMany();
     await tx.profileField.deleteMany();
     await tx.theme.deleteMany({ where: { builtIn: false } });
     await tx.setting.deleteMany();
   });
-  // An empty profile and default settings need no rows; the built-in themes do.
+  // Default settings need no rows; the built-in themes and one empty profile do.
   await seedBuiltIns(prisma);
+  await firstProfileId();
+  await loadInstalledPortals();
   await Promise.all([deleteAllBackups(), deleteAllDownloads(), deleteAllApplyData(), deleteAllAttachments()]);
   // Profile entries Claude removed can't be put back into the new, empty profile.
   forgetRemovedProfileEntries();
@@ -310,30 +420,6 @@ export const removeConnectorRedirect = action(z.object({ uri: z.string().max(200
   const redirects = (await loadSettings()).connectorRedirects.filter((entry) => entry !== uri);
   await saveSettings({ connectorRedirects: redirects });
   return { redirects };
-});
-
-// Phone alerts (alerts.ts): an ntfy topic for strong new matches and new jobs on careers pages.
-
-/** Sends alerts to this ntfy topic, or turns them off with null. */
-export const saveAlertAddress = action(z.object({ address: z.string().trim().max(500).nullable() }), async ({ address }) => {
-  if (address && !ntfyTarget(address)) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/your-topic.");
-  await saveSettings({ alertAddress: address || null, alertProblem: null });
-  return { address: address || null };
-});
-
-/** "Send a test": an alert to the saved topic now, so the phone shows whether it arrives. */
-export const testAlert = action(z.object({}), async (_input, { toast }) => {
-  const { alertAddress } = await loadSettings();
-  if (!alertAddress) throw new ActionError("Save a topic address first.");
-  try {
-    await sendAlert(alertAddress, { title: "Test from jobauto", message: "Alerts arrive here: strong new matches and new jobs on the careers pages you follow.", open: "/agent" });
-  } catch (error) {
-    if (error instanceof AlertError) throw new ActionError(error.message);
-    throw error;
-  }
-  await saveSettings({ alertProblem: null });
-  toast("Sent. It should be on your phone in a few seconds.");
-  return null;
 });
 
 // Anlagen (attachments.ts): uploads go through /api/attachments; these change one.

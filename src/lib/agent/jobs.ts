@@ -7,9 +7,8 @@ import { defineJob, findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { loadSettings } from "@/lib/settings-data";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
-import { agentScanResultSchema, agentSetupProblem, runAgentScan } from "./run";
+import { agentScanResultSchema, agentSetupProblem, agentSlots, runAgentScan } from "./run";
 import { runLimitProblem } from "./runs";
-import { listAgentSearches } from "./searches";
 
 /** Keyed so the schedule and Run now find a run that's queued or running. */
 export const AGENT_JOB_KEY = "agent";
@@ -35,8 +34,8 @@ export async function startAgentRun(now = new Date()): Promise<{ jobId: string; 
   if (setup) throw new ActionError(setup);
   const [unfinished] = await findUnfinishedJobs(AGENT_JOB_KEY);
   if (unfinished) return { jobId: unfinished.id, reused: true };
-  const requests = (await listAgentSearches()).filter((search) => search.enabled).length;
-  const limit = runLimitProblem(settings.agentRuns, now, { manual: true, requests, timeZone: await lastKnownTimeZone() });
+  // Each portal's own three a day (E22-8).
+  const limit = runLimitProblem(settings.agentRuns, now, { manual: true, slots: await agentSlots(), timeZone: await lastKnownTimeZone() });
   if (limit) throw new ActionError(limit);
   return { jobId: await startJob(agentScanJob, { manual: true }, { key: AGENT_JOB_KEY }), reused: false };
 }

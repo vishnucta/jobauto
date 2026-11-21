@@ -3,36 +3,16 @@ import "server-only";
 import { z } from "zod";
 
 import type { PrismaClient } from "@/generated/prisma/client";
-import {
-  AgentCandidateStatus,
-  ApplicationOrigin,
-  ApplicationStatus,
-  ChatRole,
-  CustomSectionFormat,
-  DateStyle,
-  Density,
-  DocumentKind,
-  FunnelStage,
-  HeaderStyle,
-  HeadingStyle,
-  LanguageLevel,
-  PhotoPosition,
-  PhotoShape,
-  PostingSource,
-  SidebarStyle,
-  RecruiterStatus,
-  ContactKind,
-  StartupStatus,
-  ThemeAlign,
-  ThemeFont,
-  ThemeLayout,
-  Tone,
-  VersionCause,
-} from "@/generated/prisma/enums";
+import { AgentCandidateStatus, ApplicationOrigin, ApplicationStatus, ChatRole, ContactKind, CustomSectionCountsAs, CustomSectionFormat, DateStyle, Density, DocumentKind, FunnelStage, HeaderStyle, HeadingStyle, LanguageLevel, NotificationChannelType, PhotoPosition, PhotoShape, RecruiterStatus, SentVia, SidebarStyle, StartupStatus, ThemeAlign, ThemeFont, ThemeLayout, Tone, VersionCause } from "@/generated/prisma/enums";
+import { SCORER_KEY_SETTINGS } from "@/lib/scoring/scorers";
 import { decryptApiKey } from "@/lib/ai/api-key";
 import { agentSearchInputSchema, MAX_AGENT_SEARCHES } from "@/lib/agent/search";
+import { sourceIdSchema } from "@/lib/job-search/search";
+import { savedPortalKeys } from "@/lib/job-search/config";
 import { decryptSecret, JOB_SOURCE_KEY } from "@/lib/secrets";
+import { settingsFromRows } from "@/lib/settings";
 import { appVersion } from "@/lib/version";
+import { workplaceFrom } from "@/lib/profile-workplace";
 
 // Everything a user keeps in Dossier as one JSON file (E10-4, SET-10): the
 // profile, custom themes, settings and applications with their history,
@@ -44,19 +24,21 @@ import { appVersion } from "@/lib/version";
 // behind: they belong to the server or the mailbox, not the user's data.
 
 export const EXPORT_FORMAT = "dossier-export";
-/** Bump when the file's shape changes; imports refuse versions they don't know. 2 added Find jobs' postings and keys (E14-9), 3 projects (PRO-13) and the job agent (E16), 4 facts (PRO-14, APP-15), 5 publications (#218), the profile photo's theme and application options (#224) and Startups (#222), 6 the line about a role's company (#257), 7 skill groups (#280), 8 certifications (#293) and volunteering (#294), 9 resume section order (#297), custom sections (#298) and what sent applications were sent with (#299), and the board's order (public issue 60), 10 the tailored resume's score (#370), 11 the job agent's recurring searches and which found each candidate (public PR 61), 12 (bewerbung fork) Recruiters and searches of several sources on top of 11. The fork's files from before 12 say 6 for those two, without upstream's 6 to 11; every field either side added is optional, so a 6 of either kind reads the same way. */
-export const EXPORT_SCHEMA_VERSION = 12;
+/** Bump when the file's shape changes; imports refuse versions they don't know. 2 added Find jobs' postings and keys (E14-9), 3 projects (PRO-13) and the job agent (E16), 4 facts (PRO-14, APP-15), 5 publications (#218), the profile photo's theme and application options (#224) and Startups (#222), 6 the line about a role's company (#257), 7 skill groups (#280), 8 certifications (#293) and volunteering (#294), 9 resume section order (#297), custom sections (#298) and what sent applications were sent with (#299), and the board's order (public issue 60), 10 the tailored resume's score (#370), 11 the job agent's recurring searches and which found each candidate (public PR 61), 12 the positions library and the portals (E22, E23), 13 several profiles (E24-1), 14 the gaps the user doesn't have (E30-5), 15 interview rounds, offers and drafted messages (E30-6, E30-7, E30-8), 16 the job agent's coverage per candidate and why it skipped one (E32-2, E32-5), 17 (jobauto fork) upstream's 16 with the fork's Recruiters, careers pages, call prep and who added a search, so Dossier itself refuses the file rather than drop them. The fork's own numbers came before: its 6 was upstream's 5 with Recruiters and searches of several sources (`sources`, `cursors`, `problems`, no `source`), its 12 upstream's 11 with those, careers pages and call prep. Every field either side added is optional and read by what the file holds, not by its number, so a 6 or 12 of either kind reads the right way. */
+export const EXPORT_SCHEMA_VERSION = 17;
 /** The versions imports can read. */
-export const EXPORT_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+export const EXPORT_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
 /** The setting that holds the encrypted API key, which only this server can read. */
 const API_KEY_SETTING = "apiKeyEnc";
-/** The settings that hold encrypted keys, which only this server can read: never exported as they are. */
-export const SECRET_SETTINGS: readonly string[] = [API_KEY_SETTING, "jsearchKeyEnc", "adzunaKeyEnc", "typesafeKeyEnc"];
+/** The settings that hold encrypted keys, which only this server can read: never exported as they are. The fork's SerpApi and Jooble keys from before the portals (jobauto fork) too. */
+export const SECRET_SETTINGS: readonly string[] = [API_KEY_SETTING, "jsearchKeyEnc", "adzunaKeyEnc", "serpapiKeyEnc", "joobleKeyEnc", "portalKeysEnc", ...SCORER_KEY_SETTINGS];
 /** The settings that belong to this install rather than its data (the update check's, the Google client and the browser's time zone): never exported, and kept by an import. */
 export const INSTALL_SETTINGS: readonly string[] = [
   // Whether this install's setup guide was opened, and where it was left (E21).
   "setupGuide",
+  // Today's note on the dashboard (E28-6): gone tomorrow anyway.
+  "dailyNote",
   // The job agent's runs count against this server's job source key (E16).
   "agentRuns",
   // When Startups was last opened and what its last refresh found (#222).
@@ -64,6 +46,8 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "startupsLastRefresh",
   "latestVersion",
   "latestVersionUrl",
+  // The AI connection test's last result (E34-1): this server's, against its own provider.
+  "aiTest",
   "updateCheckDay",
   "updateDismissed",
   "announcementFeed",
@@ -71,6 +55,10 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "googleClientId",
   "googleClientSecretEnc",
   "browserTimeZone",
+  "lastOrigin",
+  "portalNotices",
+  "notificationsDay",
+  "notifiedVersion",
   // A phone alert topic is as good as a password (alerts.ts).
   "alertAddress",
   "alertProblem",
@@ -88,8 +76,10 @@ const optionalDate = date.nullable();
 const int = z.number().int();
 const text = z.string();
 
+/** The profile a row belongs to (E24-1); absent in files before version 13, whose rows all go to one profile. */
+const profileId = text.optional();
 // Groups came in version 7 (#280); older files have none.
-const skill = z.object({ id: text, name: text, sort: int, group: text.default(""), createdAt: date });
+const skill = z.object({ id: text, profileId, name: text, sort: int, group: text.default(""), createdAt: date });
 const language = z.object({ id: text, name: text, level: z.enum(LanguageLevel), sort: int, createdAt: date });
 const span = {
   startYear: int.nullable(),
@@ -100,6 +90,7 @@ const span = {
 };
 const experience = z.object({
   id: text,
+  profileId,
   role: text,
   company: text,
   location: text,
@@ -117,6 +108,7 @@ const experience = z.object({
 });
 const project = z.object({
   id: text,
+  profileId,
   name: text,
   link: text,
   ...span,
@@ -127,10 +119,11 @@ const project = z.object({
   createdAt: date,
   updatedAt: date,
 });
-const education = z.object({ id: text, degree: text, school: text, ...span, notes: text, sort: int, createdAt: date, updatedAt: date });
+const education = z.object({ id: text, profileId, degree: text, school: text, ...span, notes: text, sort: int, createdAt: date, updatedAt: date });
 /** A certification (#293), with when it was obtained and when it runs out. */
 const certification = z.object({
   id: text,
+  profileId,
   name: text,
   issuer: text,
   year: int.nullable(),
@@ -145,12 +138,15 @@ const certification = z.object({
   updatedAt: date,
 });
 /** A publication (#218): its citation as written, with **bold** and *italic*. */
-const publication = z.object({ id: text, citation: text, link: text, onResumes: z.boolean(), sort: int, createdAt: date, updatedAt: date });
+const publication = z.object({ id: text, profileId, citation: text, link: text, onResumes: z.boolean(), sort: int, createdAt: date, updatedAt: date });
 /** A section the user made (#298), with its items. */
 const customSection = z.object({
   id: text,
+  profileId,
   title: text,
   format: z.enum(CustomSectionFormat),
+  /** What it counts as (E24-5); absent in files before version 13, where every one is Extra activities. */
+  countsAs: z.enum(CustomSectionCountsAs).default("EXTRA_ACTIVITIES"),
   items: z.array(
     z.object({
       id: text,
@@ -170,12 +166,30 @@ const customSection = z.object({
 });
 const reference = z.object({
   id: text,
+  profileId,
   name: text,
   relation: text,
   company: text,
   email: text,
   phone: text,
   sort: int,
+  createdAt: date,
+  updatedAt: date,
+});
+/** A profile (E24-1): its name, headline, summary and own settings (src/lib/profile-settings.ts), as stored. */
+const profileRow = z.object({
+  id: text.min(1),
+  name: text,
+  sort: int,
+  headline: text,
+  summary: text,
+  /** The levels it's for (E24-3), null until chosen. */
+  levelFrom: text.nullable().default(null),
+  levelTo: text.nullable().default(null),
+  /** Where it wants to work (E24-4, src/lib/profile-workplace.ts), and when the user first looked at it. */
+  workplace: z.record(text, z.unknown()).optional(),
+  workplaceSeenAt: optionalDate.optional(),
+  settings: z.record(text, text),
   createdAt: date,
   updatedAt: date,
 });
@@ -241,6 +255,8 @@ const chatMessage = z.object({
 const note = z.object({ id: text, body: text, createdAt: date, updatedAt: date });
 const application = z.object({
   id: text,
+  /** The profile it was made from (E24-6); absent in files before version 13, which read the first. */
+  profileId: text.nullable().optional(),
   title: text,
   company: text,
   role: text,
@@ -259,6 +275,11 @@ const application = z.object({
   boardSort: int.nullable().optional(),
   furthestStage: z.enum(FunnelStage).nullable(),
   sentAt: optionalDate,
+  /** How it was sent (E29-7); absent in files from before 1.15. */
+  sentVia: z.enum(SentVia).nullable().optional(),
+  /** A follow-up or answer to the offer waiting to be sent, and "I sent it" (E30-7, E30-8); absent before version 15. */
+  messageDraft: z.unknown().nullable().optional(),
+  contactedAt: date.nullable().optional(),
   /** The next interview (E9-9); absent in older files. */
   nextInterviewAt: optionalDate.optional(),
   tone: z.enum(Tone),
@@ -290,12 +311,47 @@ const application = z.object({
   notes: z.array(note),
   /** Absent in files before version 4. */
   facts: z.array(fact).default([]),
+  /** "I don't have this" (E30-5); absent in files before version 14. */
+  knownGaps: z.array(z.object({ id: text, requirement: text, createdAt: date })).default([]),
+  /** Its offer (E30-7); absent in files before version 15. */
+  offer: z
+    .object({
+      id: text,
+      salary: text,
+      decideBy: date.nullable(),
+      startDate: date.nullable(),
+      holidays: text,
+      office: text,
+      fromEmailId: text.nullable(),
+      createdAt: date,
+      updatedAt: date,
+    })
+    .nullable()
+    .optional(),
+  /** Its interview rounds (E30-6); absent in files before version 15. */
+  interviews: z
+    .array(
+      z.object({
+        id: text,
+        round: z.number().int().min(1),
+        at: date.nullable(),
+        minutes: z.number().int().nullable(),
+        place: text,
+        people: text,
+        notes: text,
+        prep: z.unknown().nullable().optional(),
+        prepWrittenWith: text.nullable(),
+        createdAt: date,
+        updatedAt: date,
+      }),
+    )
+    .default([]),
 });
 
 /** A posting the job agent found (E16). */
 const agentCandidate = z.object({
   id: text,
-  source: z.enum(PostingSource),
+  source: sourceIdSchema,
   externalId: text,
   title: text,
   company: text,
@@ -308,6 +364,12 @@ const agentCandidate = z.object({
   description: text,
   complete: z.boolean(),
   score: int,
+  // Coverage (E32-2, version 16); 0 of 0 in files from before.
+  covered: int.default(0),
+  requirements: int.default(0),
+  mustMissing: int.default(0),
+  // Why a run skipped it (E32-5); null in files from before.
+  skipReason: text.nullable().default(null),
   reasons: z.unknown().nullable(),
   redFlags: z.unknown().nullable(),
   status: z.enum(AgentCandidateStatus),
@@ -380,6 +442,8 @@ const startup = z.object({
   postedAt: optionalDate,
   score: int,
   reasons: z.unknown().nullable(),
+  /** The profile it fits best (E24-6); absent in files before version 13. */
+  profileId: text.nullable().optional(),
   scoredWith: text,
   status: z.enum(StartupStatus),
   noApplicationsFrom: text,
@@ -395,7 +459,7 @@ const startup = z.object({
 /** A posting kept from Find jobs (E14-5). */
 const posting = z.object({
   id: text,
-  source: z.enum(PostingSource),
+  source: sourceIdSchema,
   externalId: text,
   title: text,
   company: text,
@@ -410,25 +474,42 @@ const posting = z.object({
   savedAt: optionalDate,
   dismissedAt: optionalDate,
   applicationId: text.nullable(),
+  /** From version 12 (E22-5); before, every posting in a file was kept, so seen, and last found when it was kept. */
+  lastFoundAt: optionalDate.optional(),
+  seenAt: optionalDate.optional(),
+  /** From version 12 (E22-6): the posting it shows as, the same job found on another portal. */
+  mergedIntoId: text.nullable().optional(),
+  /** From version 12 (E22-7): in the Archive since, moved back from it, removed from it. */
+  archivedAt: optionalDate.optional(),
+  movedBackAt: optionalDate.optional(),
+  removedAt: optionalDate.optional(),
   createdAt: date,
   updatedAt: date,
 });
 
 /**
- * A search kept with what it found (E14-10); its search and postings are
- * checked when it's opened. Files from before searches of several sources
- * have one `source` and its `next` page, read into `sources` and `cursors`.
+ * A search kept (E14-10). Before version 12 it held what it found as JSON,
+ * moved into the library on import. The fork's files from its version 12
+ * (jobauto fork) have no `source`: the sources it asked, each one's next
+ * page and what went wrong, read into `source` and `portals` on import.
  */
 const postingSearch = z.object({
   id: text,
-  sources: z.array(z.enum(PostingSource)).optional(),
-  source: z.enum(PostingSource).optional(),
+  source: sourceIdSchema.nullable().optional(),
+  sources: z.array(sourceIdSchema).optional(),
   query: z.unknown(),
-  postings: z.unknown(),
+  postings: z.unknown().optional(),
+  /** From version 12: each portal it asked (searchPortalSchema), checked when it's opened. */
+  portals: z.unknown().optional(),
   found: int,
   cursors: z.unknown().optional(),
   problems: z.unknown().optional(),
   next: text.nullable().optional(),
+  /** For a CLIENT search, the AI client that added it; for a CAREERS one, the employers (jobauto fork). */
+  addedBy: text.default(""),
+  /** From version 12 (E22-8): the job agent's search it ran for, and that search's name then. */
+  agentSearchId: text.nullable().optional(),
+  agentSearchName: text.nullable().optional(),
   createdAt: date,
   updatedAt: date,
 });
@@ -436,9 +517,12 @@ const postingSearch = z.object({
 /** An export file as read back (E10-6). */
 export const exportSchema = z.object({
   format: z.literal(EXPORT_FORMAT),
-  schemaVersion: z.literal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+  schemaVersion: z.literal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
   appVersion: text,
   exportedAt: date,
+  /** From version 13 (E24-1): every profile; the rows below say whose they are. Before, one profile, made from the headline, summary and Base resume settings. */
+  profiles: z.array(profileRow).optional(),
+  /** The shared basics, languages and facts, and every profile's rows. */
   profile: z.object({
     fields: z.array(keyValue),
     skills: z.array(skill),
@@ -462,12 +546,17 @@ export const exportSchema = z.object({
   /** The AI provider's key in plain text, only when the user asked for it. */
   apiKey: text.optional(),
   /** The job sources' keys in plain text, likewise (E14-9). */
+  /** Before version 12: the JSearch and Adzuna keys. */
   jobSourceKeys: z.object({ jsearch: text.optional(), adzuna: text.optional() }).optional(),
+  /** From version 12 (E22-3): each portal's secret fields, by portal and field, when keys are included. */
+  portalKeys: z.record(z.string().max(40), z.record(z.string().max(40), text)).optional(),
   applications: z.array(application),
   /** Saved and dismissed postings (E14-9); absent in version 1 files. */
   postings: z.array(posting).default([]),
   /** Past searches with what they found (E14-10); absent in version 1 files. */
   searches: z.array(postingSearch).default([]),
+  /** From version 12 (E22-5): which search found which posting, on which portal. */
+  postingFinds: z.array(z.object({ id: text, postingId: text, searchId: text, portal: sourceIdSchema, foundAt: date })).default([]),
   /** The job agent's candidates (E16); absent in older files. */
   agentCandidates: z.array(agentCandidate).default([]),
   agentSearches: z.array(agentSearch).max(MAX_AGENT_SEARCHES, "Keep at most three Agent searches.").default([]),
@@ -480,6 +569,26 @@ export const exportSchema = z.object({
   recruiterBlocks: z.array(z.object({ key: text, createdAt: date })).default([]),
   /** The careers pages followed (jobauto fork); absent in files from before them. */
   employers: z.array(employer).default([]),
+  /** From version 12 (E23-3): the portals the user added, each config as installed. A config that no longer reads is skipped on import. */
+  installedPortals: z
+    .array(z.object({ id: text, config: z.unknown(), version: text, origin: z.enum(["file", "link", "catalog"]), originUrl: text.nullable(), reviewed: z.boolean(), installedAt: date, updatedAt: date }))
+    .default([]),
+  /** Notification channels and which events each gets (E26-2, E26-3), never their secrets; absent before version 13. */
+  notificationChannels: z
+    .array(
+      z.object({
+        id: text,
+        type: z.enum(NotificationChannelType),
+        name: text,
+        config: z.unknown(),
+        events: z.record(z.string(), z.boolean()).default({}),
+        onlyNew: z.boolean().default(true),
+        sort: int.default(0),
+        createdAt: date,
+        updatedAt: date,
+      }),
+    )
+    .default([]),
 });
 export type DossierExport = z.infer<typeof exportSchema>;
 
@@ -501,9 +610,10 @@ export async function buildExport(
   { includeApiKey = false, now = new Date() }: { includeApiKey?: boolean; now?: Date } = {},
 ): Promise<DossierExport> {
   return db.$transaction(async (tx) => {
-    const [fields, skills, languages, experience, projects, education, certifications, customSections, publications, references, facts, themes, settings, applications, postings, searches, agentCandidates, agentSearches, agentCandidateSearches, startups, startupBlocks, recruiters, recruiterBlocks, employers] = await Promise.all([
+    const [profiles, fields, skills, languages, experience, projects, education, certifications, customSections, publications, references, facts, themes, settings, applications, postings, searches, postingFinds, agentCandidates, agentSearches, agentCandidateSearches, startups, startupBlocks, recruiters, recruiterBlocks, employers] = await Promise.all([
+      tx.profile.findMany({ orderBy: [{ sort: "asc" }, { createdAt: "asc" }] }),
       tx.profileField.findMany({ select: { key: true, value: true }, orderBy: { key: "asc" } }),
-      tx.skill.findMany({ select: { id: true, name: true, sort: true, group: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      tx.skill.findMany({ select: { id: true, profileId: true, name: true, sort: true, group: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
       tx.language.findMany({ select: { id: true, name: true, level: true, sort: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
       tx.experience.findMany({ include: { skills: { select: { skillId: true } } }, orderBy: { createdAt: "asc" } }),
       tx.project.findMany({ include: { skills: { select: { skillId: true } } }, orderBy: { createdAt: "asc" } }),
@@ -529,10 +639,15 @@ export async function buildExport(
           messages: { omit: { applicationId: true }, orderBy: { createdAt: "asc" } },
           notes: { omit: { applicationId: true }, orderBy: { createdAt: "asc" } },
           facts: { omit: { applicationId: true }, orderBy: [{ sort: "asc" }, { createdAt: "asc" }] },
+          knownGaps: { omit: { applicationId: true }, orderBy: { createdAt: "asc" } },
+          interviews: { omit: { applicationId: true }, orderBy: { round: "asc" } },
+          offer: { omit: { applicationId: true } },
         },
       }),
-      tx.posting.findMany({ orderBy: { createdAt: "asc" } }),
+      // Its company key is worked out again on import (fillMatchKeys).
+      tx.posting.findMany({ orderBy: { createdAt: "asc" }, omit: { matchCompany: true } }),
       tx.postingSearch.findMany({ orderBy: { createdAt: "asc" } }),
+      tx.postingFind.findMany({ orderBy: [{ foundAt: "asc" }, { id: "asc" }] }),
       tx.agentCandidate.findMany({ orderBy: { createdAt: "asc" } }),
       tx.agentSearch.findMany({ orderBy: [{ sort: "asc" }, { createdAt: "asc" }] }),
       tx.agentCandidateSearch.findMany({ orderBy: { createdAt: "asc" } }),
@@ -542,6 +657,12 @@ export async function buildExport(
       tx.recruiterBlock.findMany({ orderBy: { createdAt: "asc" } }),
       tx.employer.findMany({ orderBy: { createdAt: "asc" } }),
     ]);
+    const installedPortals = await tx.installedPortal.findMany({ orderBy: { installedAt: "asc" } });
+    // Without their secrets, their failures or whether they're paused: those belong to this install.
+    const notificationChannels = await tx.notificationChannel.findMany({
+      orderBy: [{ sort: "asc" }, { createdAt: "asc" }],
+      select: { id: true, type: true, name: true, config: true, events: true, onlyNew: true, sort: true, createdAt: true, updatedAt: true },
+    });
 
     // Keys only when asked for, decrypted; one that's unreadable here too (DOSSIER_SECRET changed) has nothing to export.
     const stored = (key: string) => (includeApiKey ? settings.find((setting) => setting.key === key)?.value : undefined);
@@ -553,11 +674,18 @@ export async function buildExport(
       }
     };
     const apiKey = readable(stored(API_KEY_SETTING), (value) => decryptApiKey(value));
-    const jobSourceKeys = Object.fromEntries(
-      Object.entries({
-        jsearch: readable(stored("jsearchKeyEnc"), (value) => decryptSecret(JOB_SOURCE_KEY, value)),
-        adzuna: readable(stored("adzunaKeyEnc"), (value) => decryptSecret(JOB_SOURCE_KEY, value)),
-      }).filter(([, value]) => value),
+    const portalKeys = Object.fromEntries(
+      includeApiKey
+        ? Object.entries(savedPortalKeys(settingsFromRows(settings)))
+            .map(([portal, fields]) => [
+              portal,
+              Object.fromEntries(Object.entries(fields).flatMap(([field, value]) => {
+                const plain = readable(value, (stored) => decryptSecret(JOB_SOURCE_KEY, stored));
+                return plain ? [[field, plain]] : [];
+              })),
+            ] as const)
+            .filter(([, fields]) => Object.keys(fields).length > 0)
+        : [],
     );
 
     return {
@@ -565,6 +693,7 @@ export async function buildExport(
       schemaVersion: EXPORT_SCHEMA_VERSION,
       appVersion,
       exportedAt: now,
+      profiles: profiles.map((entry) => ({ ...entry, settings: storedSettings(entry.settings), workplace: workplaceFrom(entry.workplace) })),
       profile: {
         fields,
         skills,
@@ -581,10 +710,11 @@ export async function buildExport(
       themes,
       settings: settings.filter((setting) => setting.key !== "agentQuery" && !SECRET_SETTINGS.includes(setting.key) && !INSTALL_SETTINGS.includes(setting.key)),
       ...(apiKey ? { apiKey } : {}),
-      ...(Object.keys(jobSourceKeys).length > 0 ? { jobSourceKeys } : {}),
+      ...(Object.keys(portalKeys).length > 0 ? { portalKeys } : {}),
       applications,
       postings,
       searches,
+      postingFinds,
       agentCandidates,
       agentSearches: agentSearches.map((search) => ({ ...search, ...agentSearchInputSchema.parse(search) })),
       agentCandidateSearches,
@@ -593,6 +723,20 @@ export async function buildExport(
       recruiters,
       recruiterBlocks,
       employers,
+      installedPortals: installedPortals.map((portal) => ({ ...portal, origin: portal.origin as "file" | "link" | "catalog" })),
+      notificationChannels: notificationChannels.map((channel) => ({ ...channel, events: channelEventsOf(channel.events) })),
     };
   });
+}
+
+/** A channel's events column as on or off by name; anything else in it is left out. */
+function channelEventsOf(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
+}
+
+/** A profile's `settings` column as text by key; anything else in it is left out. */
+function storedSettings(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }

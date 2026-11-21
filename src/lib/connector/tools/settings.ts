@@ -10,24 +10,27 @@ import { buildExport, exportFileName } from "@/lib/data-export";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { FILE_NAME_TOKENS } from "@/lib/file-name";
 import { googleConnection } from "@/lib/google/account";
-import { JobSearchError } from "@/lib/job-search";
-import { credentialsFor, jobSearchView, loadJobSearchConfig, type JobSearchConfig } from "@/lib/job-search/config";
+import { sourceInfo, type JobSearchSettingsView } from "@/lib/job-search/sources";
 import { prisma } from "@/lib/prisma";
+import { loadProfileSettings, saveProfileSettings } from "@/lib/profiles";
 import { UPGRADE_GUIDE_URL } from "@/lib/releases";
-import { DOCUMENTS_TO_WRITE, DOCUMENTS_TO_WRITE_LABELS, JOB_RETENTION_OPTIONS } from "@/lib/settings";
+import { loadScoringConfig } from "@/lib/scoring/config";
+import { SCORER_INFO } from "@/lib/scoring/scorers";
+import { ARCHIVE_DAYS, DOCUMENTS_TO_WRITE, DOCUMENTS_TO_WRITE_LABELS, JOB_RETENTION_OPTIONS } from "@/lib/settings";
 import {
   aiChoiceSchema,
   availableAiModels,
-  chooseJobSource,
-  jobSearchDetailsSchema,
-  jobSourceChoiceSchema,
+  loadJobSearchView,
+  offeredPortal,
   pickDocumentLanguage,
+  portalIdSchema,
   saveAiChoice,
-  saveJobSourceDetails,
+  savePortalFieldValue,
   settingChoicesSchema,
   startPdfZip,
+  switchPortal,
   testAiProvider,
-  testJobSourceConnection,
+  testPortalConnection,
   type AiChoice,
   type SettingChoices,
 } from "@/lib/settings-changes";
@@ -39,7 +42,7 @@ import type { ThemeData } from "@/lib/themes";
 import { availableUpdate, checkForUpdate } from "@/lib/update-check";
 import { appVersion } from "@/lib/version";
 
-import { failure, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, profileInput, started, text, type ToolContext } from "../kit";
 
 // Themes, settings without secrets, and exports (jobauto fork): what the
 // resume screen's themes and Settings do, through the same functions
@@ -47,8 +50,9 @@ import { failure, started, text, type ToolContext } from "../kit";
 // Settings: no tool takes one or gives one back, and get_settings only says
 // whether one is saved. Moving the AI to another server, which its key and
 // everything it reads would go to, deleting everything, importing an export,
-// the connector itself and the Bundesagentur für Arbeit's "I understand"
-// stay on the screen.
+// the connector itself, adding or updating a portal, and the Bundesagentur
+// für Arbeit's "I understand" stay on the screen. The Base resume's theme
+// and language are each profile's own (E24-1).
 
 const THEME_GONE = "There's no theme with that id. list_themes shows them all.";
 const BUILT_IN = "Built-in themes can't be changed. Give its id as based_on to make a new theme from it.";
@@ -133,16 +137,23 @@ const changesFrom = (look: LookInput): Partial<ThemeFields> =>
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
-/** What the chosen job source still needs before it can be searched, in plain words; undefined when nothing. */
-function jobSourceProblem(config: JobSearchConfig): string | undefined {
-  if (!config.source) return undefined;
-  try {
-    credentialsFor(config, config.source);
-    return undefined;
-  } catch (error) {
-    if (error instanceof JobSearchError) return error.message;
-    throw error;
-  }
+/**
+ * The portals as Settings → Job search lists them (E22-3): each with its
+ * switch and its fields, a key only by its state. A portal from the catalog
+ * says whether it's reviewed, and one withdrawn or with an update says so.
+ */
+function portalsView(view: JobSearchSettingsView) {
+  return view.portals.map((portal) => ({
+    id: portal.id,
+    name: portal.name,
+    on: portal.on,
+    countries: portal.countries ?? "all",
+    fields: Object.fromEntries(portal.fields.map((field) => [field.name, field.type === "secret" ? `key: ${field.keyState}` : field.value])),
+    added: portal.installed ? { from: portal.installed.origin, reviewed: portal.installed.reviewed } : undefined,
+    note_accepted: portal.consent ? portal.acceptedAt !== null : undefined,
+    withdrawn: portal.withdrawal ? { reason: portal.withdrawal.reason, paused: portal.withdrawal.paused } : undefined,
+    update: portal.update ? { to: portal.update.to, new_hosts: portal.update.newHosts.length > 0 ? portal.update.newHosts : undefined } : undefined,
+  }));
 }
 
 /**
@@ -151,16 +162,17 @@ function jobSourceProblem(config: JobSearchConfig): string | undefined {
  * again) or env (from the server's environment). The connected Google
  * account's address stays out like other contact details.
  */
-async function settingsView() {
-  const [settings, ai, aiReady, jobSearch, google, lastBackup] = await Promise.all([
+async function settingsView(profileId: string) {
+  const [settings, ai, aiReady, jobs, scoring, google, lastBackup, own] = await Promise.all([
     loadSettings(),
     loadAiSettingsView(),
     isAiUsable(),
-    loadJobSearchConfig(),
+    loadJobSearchView(),
+    loadScoringConfig(),
     googleConnection(),
     lastNightlyBackup(),
+    loadProfileSettings(profileId),
   ]);
-  const jobs = jobSearchView(jobSearch);
   return {
     ai: {
       ai_provider: ai.provider,
@@ -172,26 +184,24 @@ async function settingsView() {
       creativity: settings.creativity,
       never_invent_experience: settings.strict,
       show_what_changed: settings.showDiff,
+      daily_note_by_ai: settings.dailyNoteAi,
     },
+    // Settings → Scoring (E25): what scores postings; its keys stay there.
+    scoring: { scorer: SCORER_INFO[scoring.scorer].name },
     job_search: {
-      job_source: jobs.source,
-      problem: jobSourceProblem(jobSearch),
-      jsearch_host: jobs.jsearch.host,
-      jsearch_key: jobs.jsearch.keyState,
-      serpapi_key: jobs.serpapi.keyState,
-      adzuna_app_id: jobs.adzuna.appId || null,
-      adzuna_key: jobs.adzuna.keyState,
-      jooble_key: jobs.jooble.keyState,
+      // Every portal, any number switched on (E22-3).
+      portals: portalsView(jobs),
       // FreeHire needs no key: where it's searched, its own server or DOSSIER_FREEHIRE_URL.
       freehire_host: jobs.freehire.host,
-      arbeitsagentur: { offered: jobs.arbeitsagentur.offered, understood: jobs.arbeitsagentur.acceptedAt !== null },
+      archive_after_days: settings.archiveAfterDays,
     },
     documents: {
       paper: settings.paper,
       date_format: settings.dateFormat,
       default_tone: settings.defaultTone,
       document_language: settings.docLanguage,
-      resume_language: settings.resumeLanguage ?? "English",
+      // The profile's own Base resume's (E24-1).
+      resume_language: own.resumeLanguage ?? "English",
       languages: [...DOCUMENT_LANGUAGES.map((language) => language.name), ...settings.customLanguages],
       file_name_pattern: settings.fileNamePattern,
       include_references: settings.includeRefs,
@@ -236,8 +246,8 @@ async function settingsView() {
 
 /** Where each setting update_settings changes is: its section in get_settings, and in Settings (?section=). */
 const SECTIONS = [
-  { name: "ai", id: "ai", fields: ["ai_provider", "ai_address", "ai_model", "creativity", "never_invent_experience", "show_what_changed"] },
-  { name: "job_search", id: "jobs", fields: ["job_source", "jsearch_host", "adzuna_app_id"] },
+  { name: "ai", id: "ai", fields: ["ai_provider", "ai_address", "ai_model", "creativity", "never_invent_experience", "show_what_changed", "daily_note_by_ai"] },
+  { name: "job_search", id: "jobs", fields: ["portals", "archive_after_days"] },
   { name: "documents", id: "documents", fields: ["paper", "date_format", "default_tone", "document_language", "resume_language", "file_name_pattern", "include_references", "documents_to_write"] },
   { name: "your_data", id: "data", fields: ["nightly_backup", "keep_task_data_hours"] },
   { name: "about", id: "about", fields: ["check_for_updates_daily"] },
@@ -282,25 +292,42 @@ async function aiChoiceFrom(input: { ai_provider?: AiChoice["provider"]; ai_addr
 
 const choice = settingChoicesSchema.shape;
 
+/** A portal update_settings changes: its switch, and its fields that aren't keys (the JSearch host, the Adzuna app ID, companies' boards). */
+const portalChange = z.object({
+  id: portalIdSchema.describe("The portal's id from get_settings, e.g. JSEARCH, SERPAPI, ADZUNA, JOOBLE, FREEHIRE"),
+  on: z.boolean().optional(),
+  fields: z.record(z.string().max(100), z.string().max(5000)).optional().describe("A field's new value by its name from get_settings; '' empties it. Keys stay with the user in Settings."),
+});
+
 /** Registers these tools on the connector's server. */
 export function registerSettingsTools({ server, linkTo }: ToolContext): void {
-  /** A theme saved, copied or imported, which is the base theme now. */
-  const themeSaved = (theme: ThemeData, verb: "Saved" | "Made" | "Imported") =>
-    text({ message: `${verb} “${theme.name}”. It's now your base resume theme.`, theme: { id: theme.id, name: theme.name, ...lookOf(theme) }, link: linkTo("/resume") });
+  const resumeLink = (profileId: string) => linkTo(`/resume?profile=${profileId}`);
+  /** A theme saved, copied or imported, which is the profile's base theme now. */
+  const themeSaved = (theme: ThemeData, verb: "Saved" | "Made" | "Imported", profile: { id: string; name: string }) =>
+    text({
+      message: `${verb} “${theme.name}”. It's now the base resume theme of ${profile.name}.`,
+      profile: profile.name,
+      theme: { id: theme.id, name: theme.name, ...lookOf(theme) },
+      link: resumeLink(profile.id),
+    });
 
   server.registerTool(
     "list_themes",
     {
       title: "List the resume themes",
-      description: "Every resume theme, built-in and custom, with its look and how many applications use it, and which one is the base theme.",
+      description: "Every resume theme, built-in and custom, with its look and how many applications use it, and which one is a profile's base theme.",
+      inputSchema: z.object({ profile: profileInput }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => {
-      const [themes, usage, { baseThemeId }] = await Promise.all([loadThemes(), loadThemeUsage(), loadSettings()]);
+    async ({ profile }) => {
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
+      const [themes, usage, { baseThemeId }] = await Promise.all([loadThemes(), loadThemeUsage(), loadProfileSettings(chosen.id)]);
       return text({
+        profile: chosen.name,
         base_theme_id: baseThemeId,
         themes: themes.map((theme) => ({ id: theme.id, name: theme.name, built_in: theme.builtIn, applications: usage[theme.id] ?? 0, ...lookOf(theme) })),
-        link: linkTo("/resume"),
+        link: resumeLink(chosen.id),
       });
     },
   );
@@ -309,14 +336,16 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
     "set_base_theme",
     {
       title: "Set the base resume theme",
-      description: "Makes a theme from list_themes the base resume theme, which the resume and every document without a theme of its own use.",
-      inputSchema: z.object({ id: z.string().min(1).max(100) }),
+      description: "Makes a theme from list_themes a profile's base resume theme, which its Base resume and every document without a theme of its own written from it use.",
+      inputSchema: z.object({ id: z.string().min(1).max(100), profile: profileInput }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ id }) => {
-      const theme = await makeBaseTheme(id);
+    async ({ id, profile }) => {
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
+      const theme = await makeBaseTheme(chosen.id, id);
       if (!theme) return failure(THEME_GONE);
-      return text({ base_theme: { id: theme.id, name: theme.name }, link: linkTo("/resume") });
+      return text({ profile: chosen.name, base_theme: { id: theme.id, name: theme.name }, link: resumeLink(chosen.id) });
     },
   );
 
@@ -325,9 +354,10 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
     {
       title: "Save a resume theme",
       description:
-        "Saves a resume theme and makes it the base theme: changes the fields given on a custom theme by id, or makes a new one from based_on (else the base theme). " +
+        "Saves a resume theme and makes it a profile's base theme: changes the fields given on a custom theme by id, or makes a new one from based_on (else the base theme). " +
         "based_on alone copies a theme, theme_file imports a theme file's JSON text, and delete: true deletes the custom theme id. Built-in themes never change.",
       inputSchema: z.object({
+        profile: profileInput.describe("The profile whose base theme it becomes; the first when left out"),
         id: z.string().min(1).max(100).optional().describe("A custom theme to change or delete; leave out for a new theme"),
         based_on: z.string().min(1).max(100).optional().describe("The theme a new one starts from, built-in or custom"),
         theme_file: z.string().max(20_000).optional().describe("A .dossier-theme.json file's text, imported as a new theme"),
@@ -336,24 +366,26 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
-    async ({ id, based_on, theme_file, delete: remove, ...look }) => {
+    async ({ profile, id, based_on, theme_file, delete: remove, ...look }) => {
       const changes = changesFrom(look);
       const changing = Object.keys(changes).length > 0;
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
 
       if (remove) {
         if (!id || based_on || theme_file !== undefined || changing) return failure("To delete a theme, give only its id and delete: true.");
-        const deleted = await deleteCustomTheme(id);
+        const deleted = await deleteCustomTheme(chosen.id, id);
         if (deleted === "not-found") return failure(THEME_GONE);
         if (deleted === "built-in") return failure("Built-in themes can't be deleted.");
         const base = await loadTheme(deleted.baseThemeId);
-        return text({ message: `Deleted “${deleted.name}”.`, base_theme: { id: deleted.baseThemeId, name: base?.name }, link: linkTo("/resume") });
+        return text({ message: `Deleted “${deleted.name}”.`, profile: chosen.name, base_theme: { id: deleted.baseThemeId, name: base?.name }, link: resumeLink(chosen.id) });
       }
 
       if (theme_file !== undefined) {
         if (id || based_on || changing) return failure("Import a theme file on its own, then change the new theme by its id.");
         const read = parseThemeFile(parseJson(theme_file));
         if (!read.ok) return failure(read.error);
-        return themeSaved(await createTheme(read.theme), "Imported");
+        return themeSaved(await createTheme(chosen.id, read.theme), "Imported", chosen);
       }
 
       if (id && based_on) return failure("Give id to change a custom theme, or based_on for a new one, not both.");
@@ -364,23 +396,23 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
         if (current.builtIn) return failure(BUILT_IN);
         const fields = themeFieldsSchema.safeParse({ ...current, ...changes });
         if (!fields.success) return failure(fields.error.issues[0].message);
-        const theme = await updateCustomTheme(id, fields.data);
+        const theme = await updateCustomTheme(chosen.id, id, fields.data);
         if (theme === "not-found") return failure(THEME_GONE);
         if (theme === "built-in") return failure(BUILT_IN);
-        return themeSaved(theme, "Saved");
+        return themeSaved(theme, "Saved", chosen);
       }
 
       // A copy as Duplicate makes it, "Modern copy"; with changes, a new theme as the builder starts one, "My theme".
       if (based_on && !changing) {
-        const copy = await copyTheme(based_on);
-        return copy ? themeSaved(copy, "Made") : failure(THEME_GONE);
+        const copy = await copyTheme(chosen.id, based_on);
+        return copy ? themeSaved(copy, "Made", chosen) : failure(THEME_GONE);
       }
       if (!changing) return failure("Say how the new theme looks, for example accent and head_font, or give based_on to copy a theme.");
-      const start = await loadTheme(based_on ?? (await loadSettings()).baseThemeId);
+      const start = await loadTheme(based_on ?? (await loadProfileSettings(chosen.id)).baseThemeId);
       if (!start) return failure(THEME_GONE);
       const fields = themeFieldsSchema.safeParse({ ...start, name: "My theme", ...changes });
       if (!fields.success) return failure(fields.error.issues[0].message);
-      return themeSaved(await createTheme(fields.data), "Saved");
+      return themeSaved(await createTheme(chosen.id, fields.data), "Saved", chosen);
     },
   );
 
@@ -389,11 +421,16 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
     {
       title: "Read the settings",
       description:
-        "Dossier's settings by Settings' sections: the AI provider and model, the job source, document defaults and languages, backups and task data, Google, and the version. " +
-        "Keys are never shown, only whether one is saved.",
+        "Dossier's settings by Settings' sections: the AI provider and model, the scoring model, the job portals, document defaults and languages, backups and task data, Google, and the version. " +
+        "Keys are never shown, only whether one is saved. The base resume's language is a profile's own.",
+      inputSchema: z.object({ profile: profileInput.describe("The profile whose base resume language to show; the first when left out") }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => text({ ...(await settingsView()), link: linkTo("/settings") }),
+    async ({ profile }) => {
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
+      return text({ ...(await settingsView(chosen.id)), link: linkTo("/settings") });
+    },
   );
 
   server.registerTool(
@@ -402,22 +439,23 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       title: "Change settings",
       description:
         "Changes the settings given, as Settings saves them, and answers with their sections as get_settings shows them. " +
-        "Keys, and moving the AI to another server, stay with the user in Settings. Google and the job agent have update_google_settings and update_job_agent.",
+        "Keys, moving the AI to another server, adding a portal and accepting a portal's note stay with the user in Settings. Google and the job agent have update_google_settings and update_job_agent.",
       inputSchema: z.object({
+        profile: profileInput.describe("For resume_language: the profile whose base resume it is; the first when left out"),
         ai_provider: aiChoiceSchema.shape.provider.optional().describe("Switching starts at its usual server and model, and removes the saved API key; the user enters the new one in Settings"),
         ai_address: aiChoiceSchema.shape.baseUrl.optional().describe("A new path on the same server only"),
         ai_model: aiChoiceSchema.shape.model.optional().describe("One from list_ai_models"),
         creativity: choice.creativity,
         never_invent_experience: choice.strict,
         show_what_changed: choice.showDiff.describe("Mark what the AI changed in a document"),
-        job_source: jobSourceChoiceSchema.optional(),
-        jsearch_host: jobSearchDetailsSchema.shape.jsearchHost.describe("Where the JSearch key is from"),
-        adzuna_app_id: jobSearchDetailsSchema.shape.adzunaAppId,
+        daily_note_by_ai: choice.dailyNoteAi.describe("Have the AI write the dashboard's daily note"),
+        portals: z.array(portalChange).min(1).max(30).optional().describe("Switch portals on or off, any number at once, and change their fields that aren't keys"),
+        archive_after_days: choice.archiveAfterDays.describe(`Days before a posting left untouched moves to the Archive: ${ARCHIVE_DAYS.join(", ")}`),
         paper: choice.paper,
         date_format: choice.dateFormat,
         default_tone: choice.defaultTone,
         document_language: choice.docLanguage.describe("The language documents are written in, added to the list when it's new; null for each posting's own"),
-        resume_language: choice.resumeLanguage.describe("The base resume's language, one of Dossier's own, e.g. German"),
+        resume_language: z.string().trim().min(1).max(60).optional().describe("The profile's base resume's language, one of Dossier's own, e.g. German"),
         file_name_pattern: choice.fileNamePattern.describe(`PDF file names, from ${FILE_NAME_TOKENS.map(({ token }) => token).join(", ")}`),
         include_references: choice.includeRefs,
         documents_to_write: choice.documentsToWrite.describe(
@@ -429,46 +467,61 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => {
+    async ({ profile, ...input }) => {
       const changed = Object.keys(given(input));
       if (changed.length === 0) return failure("Give at least one setting to change. get_settings shows them all.");
       const aiChanged = AI_FIELDS.some((name) => changed.includes(name));
+      const chosen = await chooseProfile(profile);
+      if ("failure" in chosen) return chosen.failure;
+      if (input.resume_language !== undefined && !DOCUMENT_LANGUAGES.some((language) => language.name === input.resume_language)) {
+        return failure(`The base resume's language is one of ${DOCUMENT_LANGUAGES.map((language) => language.name).join(", ")}.`);
+      }
 
-      // What can be refused comes first, and then nothing changes: the AI's server, then the source.
+      // What can be refused comes first, and then nothing changes: the AI's server, then the portals.
       const ai = aiChanged ? await aiChoiceFrom(input) : null;
       if (ai === "another-server") return failure(ANOTHER_SERVER);
-      if (input.job_source) {
-        const source = await chooseJobSource(input.job_source);
-        if (source === "not-offered") return failure("The Bundesagentur für Arbeit isn't offered on this server.");
-        if (source === "not-accepted") {
-          return failure("The Bundesagentur für Arbeit is only searched once the user ticks “I understand” under its note in Settings → Job search. Only the user can do that.");
+      for (const portal of input.portals ?? []) {
+        const offered = await offeredPortal(portal.id);
+        if ("problem" in offered) return failure(offered.problem);
+        // A portal's note, the Bundesagentur für Arbeit's (#223), is the user's to accept, on the screen.
+        if (portal.on && offered.setup.config.consent && !offered.setup.acceptedAt) {
+          return failure(`${sourceInfo(portal.id).name} is only searched once the user ticks “I understand” under its note in Settings → Job search. Only the user can do that.`);
+        }
+      }
+      for (const portal of input.portals ?? []) {
+        if (portal.on !== undefined) {
+          const switched = await switchPortal(portal.id, portal.on);
+          if ("problem" in switched) return failure(switched.problem);
+        }
+        for (const [name, value] of Object.entries(portal.fields ?? {})) {
+          const saved = await savePortalFieldValue(portal.id, name, value.trim());
+          if ("problem" in saved) return failure(`${portal.id} ${name}: ${saved.problem}`);
         }
       }
       const keyRemoved = ai ? (await saveAiChoice(ai)).keyRemoved : false;
-      if (input.jsearch_host !== undefined || input.adzuna_app_id !== undefined) {
-        await saveJobSourceDetails({ jsearchHost: input.jsearch_host, adzunaAppId: input.adzuna_app_id });
-      }
+      // As the screen saves it: English as null, which reads the writing direction from the profile.
+      if (input.resume_language !== undefined) await saveProfileSettings(chosen.id, { resumeLanguage: input.resume_language === "English" ? null : input.resume_language });
       await saveSettings({
         creativity: input.creativity,
         strict: input.never_invent_experience,
         showDiff: input.show_what_changed,
+        dailyNoteAi: input.daily_note_by_ai,
         paper: input.paper,
         dateFormat: input.date_format,
         defaultTone: input.default_tone,
-        // As the screen saves it: English as null, which reads the writing direction from the profile.
-        resumeLanguage: input.resume_language === "English" ? null : input.resume_language,
         fileNamePattern: input.file_name_pattern,
         includeRefs: input.include_references,
         documentsToWrite: input.documents_to_write,
         nightlyBackup: input.nightly_backup,
         jobRetentionHours: input.keep_task_data_hours,
         updateCheck: input.check_for_updates_daily,
+        archiveAfterDays: input.archive_after_days,
       } satisfies SettingChoices);
       // A language goes on the list as "Other language…" adds it; null is each posting's own.
       if (input.document_language === null) await saveSettings({ docLanguage: null });
       else if (input.document_language !== undefined) await pickDocumentLanguage(input.document_language);
 
-      const view = await settingsView();
+      const view = await settingsView(chosen.id);
       const sections = SECTIONS.filter((section) => section.fields.some((name) => changed.includes(name)));
       const aiNotReady = aiChanged && !view.ai.ready;
       return text({
@@ -504,20 +557,26 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
     {
       title: "Test a connection",
       description:
-        "Tests the AI provider or the job source in Dossier's settings, as their Test connection buttons do: whether it answered and how fast, or what's wrong. " +
-        "Testing JSearch, SerpApi or Jooble uses one search from the user's plan (Jooble's free plan has 500 in all).",
-      inputSchema: z.object({ connection: z.enum(["ai_provider", "job_source"]) }),
+        "Tests the AI provider or a job portal in Dossier's settings, as their Test connection buttons do: whether it answered and how fast, or what's wrong. " +
+        "Testing a portal that limits searches, such as JSearch, SerpApi or Jooble, uses one search from the user's plan (Jooble's free plan has 500 in all).",
+      inputSchema: z.object({
+        connection: z.enum(["ai_provider", "portal"]),
+        portal: portalIdSchema.optional().describe("For portal: its id from get_settings, e.g. JSEARCH"),
+      }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ connection }) => {
+    async ({ connection, portal }) => {
       if (connection === "ai_provider") {
         const test = await testAiProvider();
         const outcome = test.connected ? { connected: true, model: test.model, seconds: test.seconds } : { connected: false, problem: test.message };
         return text({ connection, ...outcome, link: linkTo("/settings?section=ai") });
       }
-      const test = await testJobSourceConnection();
+      if (!portal) return failure("Say which portal to test, by its id from get_settings.");
+      const listed = (await loadJobSearchView()).portals.find((entry) => entry.id === portal);
+      if (!listed) return failure("There's no such portal on this server. get_settings lists them.");
+      const test = await testPortalConnection(listed.id);
       const outcome = test.connected ? { connected: true, seconds: test.seconds } : { connected: false, problem: test.message };
-      return text({ connection, job_source: jobSearchView(await loadJobSearchConfig()).source, ...outcome, link: linkTo("/settings?section=jobs") });
+      return text({ connection, portal: listed.name, ...outcome, link: linkTo("/settings?section=jobs") });
     },
   );
 
@@ -555,7 +614,7 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       const name = exportFileName(now);
       const bytes = Buffer.byteLength(json);
       const about = { file: name, size: sizeOf(bytes), bytes, applications: data.applications.length, link: linkTo("/settings?section=data") };
-      if (bytes > EXPORT_MAX_BYTES) return text({ ...about, next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Your data." });
+      if (bytes > EXPORT_MAX_BYTES) return text({ ...about, next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Data and backups." });
       return {
         content: [
           { type: "text", text: JSON.stringify(about, null, 2) },

@@ -6,6 +6,7 @@ import { documentLabels, ENGLISH_LABELS, languagesLine, type DocumentLabels } fr
 import { customSectionUnits } from "@/lib/custom-section-units";
 import { detectLanguageName, knownLanguage } from "@/lib/document-language";
 import { certificationLabel, resumeCertifications, resumeCustomSections, resumePublications, sameName, type ProfileData } from "@/lib/profile";
+import { lineText } from "@/lib/changed-lines";
 import { inEditorOrder, skillsText } from "@/lib/skill-groups";
 import { plainText } from "@/lib/unit-text";
 
@@ -20,20 +21,29 @@ import {
   languageRule,
   NO_EM_DASHES,
   profileForPrompt,
+  requirementTexts,
+  servedRequirements,
+  SERVES_RULE,
   system,
   truthfulness,
   UNTRUSTED_POSTING,
   type Task,
 } from "./prompt-parts";
 
-export const TAILOR_RESUME_VERSION = "tailor-resume@9";
+const TAILOR_RESUME_VERSION = "tailor-resume@10";
+
+/** A bullet, and which requirements it serves (E30-4); a plain line from a model that leaves them out. */
+// Nullable as well as optional: strict JSON schemas (zodResponseFormat) refuse a field that's only optional.
+const bulletSchema = z.union([z.string(), z.object({ text: z.string(), serves: z.array(z.number().int()).nullable().optional() })]);
 
 type Answer = z.infer<typeof answerSchema>;
 
 const answerSchema = z.object({
   summary: z.string(),
-  roles: z.array(z.object({ id: z.string(), bullets: z.array(z.string()) })),
-  projects: z.array(z.object({ id: z.string(), bullets: z.array(z.string()) })),
+  /** The requirements the summary serves (E30-4). */
+  summaryServes: z.array(z.number().int()).nullable().optional(),
+  roles: z.array(z.object({ id: z.string(), bullets: z.array(bulletSchema) })),
+  projects: z.array(z.object({ id: z.string(), bullets: z.array(bulletSchema) })),
   /** The profile's skills, most relevant first; leave out ones that don't help. */
   skills: z.array(z.string()),
   education: z.array(z.object({ id: z.string(), notes: z.string() })),
@@ -46,7 +56,8 @@ const INSTRUCTIONS = `You tailor a candidate's resume to one job, as JSON.
 - projects: every project from the profile, by id, with 1–3 bullets each, written like the roles' bullets: what was built and what it shows that this job cares about.
 - skills: the candidate's own skills, most relevant to this job first. Copy their names exactly as the profile spells them, even when everything else is in another language; you may leave out ones that don't help.
 - education: every entry by id, with its notes shortened or left empty.
-- The profile's certifications, publications and otherSections go on the resume word for word, so don't answer with them; the summary may mention them.`;
+- The profile's certifications, publications and otherSections go on the resume word for word, so don't answer with them; the summary may mention them.
+- Each bullet is {"text", "serves"}, and summaryServes is the summary's serves.`;
 
 /**
  * Said last, after the long profile, where a model weighs it most. The profile
@@ -88,6 +99,7 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
     task: "tailor-resume",
     system: system(
       INSTRUCTIONS,
+      SERVES_RULE,
       truthfulness(options.strict),
       candidateFacts(profile, facts),
       CREATIVITY[options.creativity],
@@ -100,7 +112,7 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
         role: "user",
         content: [
           `The candidate's profile:\n${profileForPrompt(profile)}`,
-          `The job:\n${jobForPrompt(extracted, match)}`,
+          `The job:\n${jobForPrompt(extracted, match, { numbered: true })}`,
           applicationFacts(facts),
           languageReminder(language),
         ]
@@ -115,8 +127,10 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
   };
   // The answer's type is named, so this is the structured-output call, not the plain-text one.
   const answer = await provider.complete<Answer>(request);
+  // What the posting asks for, numbered as the model saw it, so each line can say which it serves (E30-4).
+  const requirements = requirementTexts(extracted, match);
   // The languages line in the resume's language: the chosen one, or the posting's.
-  let units = resumeUnits(profile, answer, labels, { keepSkillOrder });
+  let units = resumeUnits(profile, answer, labels, { keepSkillOrder, requirements });
 
   // A profile in another language pulls hard. When what the model wrote is clearly in a different one (a text that is too short or mixed says nothing), it is asked once more, with that said; if that fails, the first answer stands.
   const target = knownLanguage(language)?.name;
@@ -134,7 +148,7 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
           },
         ],
       });
-      units = resumeUnits(profile, again, labels, { keepSkillOrder });
+      units = resumeUnits(profile, again, labels, { keepSkillOrder, requirements });
     } catch (error) {
       if (options.signal?.aborted) throw error;
     }
@@ -153,25 +167,45 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
  * custom sections and languages come from the profile, all but the languages word for word (#293, #218, #298),
  * and languages with their levels in the words of `labels`.
  */
-export function resumeUnits(profile: ProfileData, answer: z.infer<typeof answerSchema>, labels: DocumentLabels = ENGLISH_LABELS, { keepSkillOrder = false } = {}): Unit[] {
+export function resumeUnits(
+  profile: ProfileData,
+  answer: z.infer<typeof answerSchema>,
+  labels: DocumentLabels = ENGLISH_LABELS,
+  { keepSkillOrder = false, requirements = [] }: { keepSkillOrder?: boolean; requirements?: readonly string[] } = {},
+): Unit[] {
   // What the model wrote goes through the character normaliser; the profile's own text (a skipped role's bullets, the citations) stays as it is.
-  const roles = new Map(answer.roles.map((role) => [role.id, role.bullets.map(plainText)]));
-  const projects = new Map(answer.projects.map((project) => [project.id, project.bullets.map(plainText)]));
+  const plainBullet = (bullet: z.infer<typeof bulletSchema>) => (typeof bullet === "string" ? plainText(bullet) : { ...bullet, text: plainText(bullet.text) });
+  const roles = new Map(answer.roles.map((role) => [role.id, role.bullets.map(plainBullet)]));
+  const projects = new Map(answer.projects.map((project) => [project.id, project.bullets.map(plainBullet)]));
+  // A role's or project's lines, and which requirements each serves (E30-4).
+  const lines = (bullets: z.infer<typeof bulletSchema>[] | undefined, fallback: string) => {
+    const kept = (bullets ?? fallback.split("\n")).map((bullet) => (typeof bullet === "string" ? { text: bullet.trim() } : { text: bullet.text.trim(), serves: bullet.serves })).filter((bullet) => bullet.text);
+    const serves = kept.flatMap((bullet) => {
+      const served = servedRequirements("serves" in bullet ? bullet.serves : undefined, requirements);
+      return served.length > 0 ? [{ line: lineText(bullet.text), requirements: served }] : [];
+    });
+    return { text: kept.map((bullet) => bullet.text).join("\n"), ...(serves.length > 0 ? { serves } : {}) };
+  };
+  const summary = plainText(answer.summary).trim();
+  const summaryServes = servedRequirements(answer.summaryServes, requirements);
   const notes = new Map(answer.education.map((entry) => [entry.id, plainText(entry.notes)]));
   // Both names normalised for the comparison, so a skill the profile spells with a non-breaking hyphen still matches; the profile's spelling is what prints.
   const kept = [...new Set(answer.skills.flatMap((name) => profile.skills.find((skill) => sameName(plainText(skill.name), plainText(name))) ?? []))];
   // In the profile's order when the user set one (public issue 62), else as the model ranked them.
   const skills = keepSkillOrder ? inEditorOrder(profile.skills).filter((skill) => kept.includes(skill)) : kept;
   const units: Unit[] = [
-    { id: "summary", label: "Summary", text: plainText(answer.summary).trim() },
-    ...profile.experience.map((entry) => {
-      const bullets = (roles.get(entry.id) ?? entry.bullets.split("\n")).map((line) => line.trim()).filter(Boolean);
-      return { id: `experience:${entry.id}`, label: `${entry.company || entry.role} ${entry.volunteering ? "volunteering" : "role"}`, text: bullets.join("\n") };
-    }),
-    ...profile.projects.map((entry) => {
-      const bullets = (projects.get(entry.id) ?? entry.bullets.split("\n")).map((line) => line.trim()).filter(Boolean);
-      return { id: `project:${entry.id}`, label: `${entry.name || "Untitled"} project`, text: bullets.join("\n") };
-    }),
+    {
+      id: "summary",
+      label: "Summary",
+      text: summary,
+      ...(summaryServes.length > 0 ? { serves: [{ line: lineText(summary), requirements: summaryServes }] } : {}),
+    },
+    ...profile.experience.map((entry) => ({
+      id: `experience:${entry.id}`,
+      label: `${entry.company || entry.role} ${entry.volunteering ? "volunteering" : "role"}`,
+      ...lines(roles.get(entry.id), entry.bullets),
+    })),
+    ...profile.projects.map((entry) => ({ id: `project:${entry.id}`, label: `${entry.name || "Untitled"} project`, ...lines(projects.get(entry.id), entry.bullets) })),
     // Most relevant first, a line per group where its first skill comes (#280).
     { id: "skills", label: "Skills", text: skillsText(skills) },
     ...profile.education.map((entry) => ({

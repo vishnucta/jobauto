@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "id": "SERPAPI",
+  "name": "SerpApi",
+  "version": "1.0.0",
+  "description": "Google for Jobs through SerpApi: postings from LinkedIn, Indeed, company sites and more, with their whole text.",
+  "tag": "Most countries · free key with 250 searches a month",
+  "termsUrl": "https://serpapi.com/legal",
+  "keyUrl": "https://serpapi.com/manage-api-key",
+  "countries": null,
+  "kinds": [
+    "any"
+  ],
+  "radius": true,
+  "hosts": [
+    "serpapi.com"
+  ],
+  "base": "https://serpapi.com",
+  "fields": [
+    {
+      "name": "key",
+      "type": "secret",
+      "label": "API key"
+    }
+  ],
+  "quota": {
+    "period": "this month"
+  },
+  "kind": "json",
+  "search": {
+    "url": "{base}/search.json",
+    "params": [
+      {
+        "name": "engine",
+        "value": "google_jobs"
+      },
+      {
+        "name": "q",
+        "value": "{keywords} in {place}",
+        "when": "place"
+      },
+      {
+        "name": "q",
+        "value": "{keywords}",
+        "when": "!place"
+      },
+      {
+        "name": "gl",
+        "value": "{country|default:us}"
+      },
+      {
+        "name": "lrad",
+        "value": "{radiusKm}",
+        "when": [
+          "place",
+          "radiusKm"
+        ]
+      },
+      {
+        "name": "next_page_token",
+        "value": "{cursor}"
+      },
+      {
+        "name": "api_key",
+        "value": "{fields.key}"
+      }
+    ],
+    "paging": {
+      "type": "cursor",
+      "path": "serpapi_pagination.next_page_token"
+    },
+    "items": "jobs_results",
+    "itemsMayBeMissing": true,
+    "posting": {
+      "id": "job_id",
+      "title": "title",
+      "company": "company_name",
+      "place": {
+        "path": "location",
+        "squash": true
+      },
+      "salary": {
+        "text": "detected_extensions.salary"
+      },
+      "url": {
+        "first": [
+          {
+            "path": "apply_options.0.link",
+            "link": true
+          },
+          {
+            "path": "share_link",
+            "link": true
+          }
+        ]
+      },
+      "via": "via",
+      "description": "description",
+      "complete": "description"
+    }
+  },
+  "details": {
+    "type": "none"
+  },
+  "test": {
+    "keywords": "developer",
+    "country": "us"
+  }
+}

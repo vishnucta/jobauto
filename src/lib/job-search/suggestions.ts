@@ -114,7 +114,16 @@ function unique(words: SearchWord[], seen = new Set<string>()): SearchWord[] {
   });
 }
 
-export function searchWords(profile: Pick<ProfileData, "basics" | "skills" | "experience">, today: Date, { senior: withSenior = true }: { senior?: boolean } = {}): SearchWords {
+/**
+ * The search words for one profile (each profile has its own headline,
+ * roles and skills since E24-1). Its own sections that count as Work
+ * experience (E24-5) count toward the years, as everywhere else.
+ */
+export function searchWords(
+  profile: Pick<ProfileData, "basics" | "skills" | "experience"> & Partial<Pick<ProfileData, "customSections">>,
+  today: Date,
+  { senior: withSenior = true }: { senior?: boolean } = {},
+): SearchWords {
   const german = DACH.includes(countryCodeFor(profile.basics.country));
   const months = experienceMonths(profile, today);
   const years = Math.floor(months / 12);

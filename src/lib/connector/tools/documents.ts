@@ -29,13 +29,14 @@ import { countPdfPages } from "@/lib/pdf/pages";
 import type { ProfilePhoto } from "@/lib/photo";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
+import { applicationProfileId, loadProfileSettings } from "@/lib/profiles";
 import { checkResume, type CheckItem } from "@/lib/resume-check";
 import { loadSettings } from "@/lib/settings-data";
 import { loadThemes } from "@/lib/theme-data";
 import { BUILT_IN_THEMES, hasSidebar, type ThemeData } from "@/lib/themes";
 import { cleanUnitText, isCertificationUnit, isPublicationUnit, isVerbatimUnit, unitName } from "@/lib/unit-text";
 
-import { failure, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, profileInput, started, text, type ToolContext } from "../kit";
 
 // A tailored resume, cover letter and email: their parts, rewrites, versions, looks, PDFs and the ATS check (jobauto fork).
 // What the application's Resume, Cover letter and Email tabs do, and the
@@ -93,10 +94,11 @@ async function refusalsAsFailures(work: () => Promise<CallToolResult>): Promise<
  * (E8-11), but never its sender and signature.
  */
 async function loadDocument(id: string, kind: DocumentKind) {
-  const [application, profile, settings] = await Promise.all([
+  const [application, settings] = await Promise.all([
     prisma.application.findUnique({
       where: { id },
       select: {
+        profileId: true,
         id: true,
         title: true,
         company: true,
@@ -113,10 +115,11 @@ async function loadDocument(id: string, kind: DocumentKind) {
         documents: { where: { kind }, select: { units: true, trimmed: true, themeId: true } },
       },
     }),
-    loadProfile(),
     loadSettings(),
   ]);
   if (!application) return GONE;
+  // The profile it was written from (E24-6), the first once that one is deleted: its facts check the text, its Base resume theme is the default look.
+  const [profile, own] = await Promise.all([loadProfile(application.profileId), loadProfileSettings(application.profileId)]);
   const row = application.documents[0];
   const units = row && readJson(unitsSchema, row.units);
   if (!row || !units) return MISSING[kind];
@@ -134,7 +137,7 @@ async function loadDocument(id: string, kind: DocumentKind) {
           }),
         )
       : units;
-  return { application, row, units, parts: withoutPrivateParts(shown), profile, settings };
+  return { application, row, units, parts: withoutPrivateParts(shown), profile, settings, own };
 }
 
 type DocumentView = Exclude<Awaited<ReturnType<typeof loadDocument>>, string>;
@@ -421,7 +424,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         }),
       ]);
       const leftOut = kind === DocumentKind.RESUME ? (readJson(trimmedSchema, view.row.trimmed) ?? []) : [];
-      const { application, row, profile, settings } = view;
+      const { application, row, profile, own } = view;
       return text({
         application_id,
         document,
@@ -439,7 +442,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
           kind === DocumentKind.EMAIL
             ? undefined
             : {
-                ...lookOf(kind, { themeId: row.themeId, showPhoto: application.showPhoto, followThemeLayout: application.followThemeLayout }, { themes, baseThemeId: settings.baseThemeId, photo: profile.photo }),
+                ...lookOf(kind, { themeId: row.themeId, showPhoto: application.showPhoto, followThemeLayout: application.followThemeLayout }, { themes, baseThemeId: own.baseThemeId, photo: profile.photo }),
                 themes: themes.map((theme) => theme.name),
               },
         versions: versions.map(versionLine),
@@ -574,7 +577,8 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         if (theme === undefined && photo === undefined && sidebar_layout === undefined && language === undefined) {
           return failure("Say what to change: theme, photo, sidebar_layout or language.");
         }
-        const [themes, profile, settings] = await Promise.all([loadThemes(), loadProfile(), loadSettings()]);
+        // The photo is every profile's; the Base resume's theme, the default look, is the application's profile's (E24-1).
+        const [themes, profile, own] = await Promise.all([loadThemes(), loadProfile(), applicationProfileId(application_id).then((id) => loadProfileSettings(id))]);
         const picked =
           theme === undefined ? undefined : (themes.find((entry) => entry.id === theme) ?? themes.find((entry) => entry.name.trim().toLowerCase() === theme.toLowerCase()));
         if (theme !== undefined && !picked) return failure(`There's no theme called "${theme}". The themes are ${themes.map((entry) => entry.name).join(", ")}.`);
@@ -595,7 +599,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         const look = lookOf(
           DocumentKind.RESUME,
           { themeId, showPhoto: application.showPhoto, followThemeLayout: application.followThemeLayout },
-          { themes, baseThemeId: settings.baseThemeId, photo: profile.photo },
+          { themes, baseThemeId: own.baseThemeId, photo: profile.photo },
         );
         return text({
           ...look,
@@ -652,28 +656,32 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
     {
       title: "Make a PDF",
       description:
-        "Renders an application's tailored resume or cover letter, or the base resume, as a PDF, exactly as Download PDF does, and returns the file with its name. " +
+        "Renders an application's tailored resume or cover letter, or a profile's base resume, as a PDF, exactly as Download PDF does, and returns the file with its name. " +
         "bewerbungsmappe is the application's letter, resume and the Anlagen from Settings → Documents in one PDF, for job portals that take a single file.",
       inputSchema: z.object({
         application_id: applicationId.optional().describe("For resume, cover_letter and bewerbungsmappe: the application"),
         document: z.enum(["resume", "cover_letter", "base_resume", "bewerbungsmappe"]).describe("base_resume is the one on the Base resume screen, built from the profile"),
+        profile: profileInput.describe("For base_resume: the profile whose base resume it is; the first when left out"),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ application_id = "", document }) => {
+    async ({ application_id = "", document, profile }) => {
       const doc = PDF_DOCS[document];
       if (doc !== "base" && !application_id) return failure("Give the application_id of the application whose resume or cover letter to make.");
+      // Each profile has its own Base resume (E24-2).
+      const chosen = doc === "base" ? await chooseProfile(profile) : null;
+      if (chosen && "failure" in chosen) return chosen.failure;
       let rendered: Awaited<ReturnType<typeof renderDocumentPdf>>;
       try {
-        rendered = await renderDocumentPdf(doc, application_id);
+        rendered = await renderDocumentPdf(doc, application_id, chosen?.id);
       } catch (error) {
         logServerError("Claude connector export_pdf", error);
         return failure(`The PDF couldn't be made just now. Try again in a moment, or use Download PDF on ${doc === "base" ? "the Base resume screen" : "the application's page"}.`);
       }
       if ("error" in rendered) return failure(rendered.error);
       // Where the signed-in user downloads it again, as the page's button does.
-      const download = linkTo(doc === "base" ? "/api/pdf?doc=base" : `/api/pdf?doc=${doc}&application=${encodeURIComponent(application_id)}`);
-      const link = document === "base_resume" ? linkTo("/resume") : documentLink(application_id, KINDS[document === "bewerbungsmappe" ? "cover_letter" : document]);
+      const download = linkTo(chosen ? `/api/pdf?doc=base&profile=${encodeURIComponent(chosen.id)}` : `/api/pdf?doc=${doc}&application=${encodeURIComponent(application_id)}`);
+      const link = chosen ? linkTo(`/resume?profile=${chosen.id}`) : documentLink(application_id, KINDS[document === "bewerbungsmappe" ? "cover_letter" : document === "base_resume" ? "resume" : document]);
       const answer = text({ file_name: rendered.fileName, document, pages: countPdfPages(rendered.pdf), download, link });
       return {
         content: [...answer.content, { type: "resource", resource: { uri: download, mimeType: "application/pdf", blob: Buffer.from(rendered.pdf).toString("base64") } }],
@@ -699,16 +707,20 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
           .enum(["resume", "base_resume"])
           .default("resume")
           .describe("resume is an application's tailored one, which needs application_id; base_resume the one on the Base resume screen, built from the profile"),
+        profile: profileInput.describe("For base_resume: the profile whose base resume it is; the first when left out"),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ application_id = "", document }) =>
+    async ({ application_id = "", document, profile }) =>
       refusalsAsFailures(async () => {
         const doc = document === "base_resume" ? "base" : "resume";
         if (doc === "resume" && !application_id) return failure("Give the application_id of the application whose resume to check.");
+        // Each profile has its own Base resume (E24-2); a tailored one is checked against its application's profile.
+        const chosen = doc === "base" ? await chooseProfile(profile) : null;
+        if (chosen && "failure" in chosen) return chosen.failure;
         let report: Awaited<ReturnType<typeof checkResume>>;
         try {
-          report = await checkResume(doc, application_id);
+          report = await checkResume(doc, application_id, chosen?.id);
         } catch (error) {
           // A refusal written for the user goes to Claude as it is; anything else is unexpected.
           if (error instanceof ActionError) throw error;
@@ -731,7 +743,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
             : null,
           text: report.text.map(checkLine),
           checked_at: report.checkedAt,
-          link: doc === "base" ? linkTo("/resume") : documentLink(application_id, DocumentKind.RESUME),
+          link: chosen ? linkTo(`/resume?profile=${chosen.id}`) : documentLink(application_id, DocumentKind.RESUME),
         });
       }),
   );

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { BrowserContext, Page } from "playwright-core";
 import type { Prisma } from "@/generated/prisma/client";
-import { AgentCandidateStatus, ApplicationStatus, ApplyAttemptStatus, DocumentKind } from "@/generated/prisma/enums";
+import { AgentCandidateStatus, ApplicationStatus, ApplyAttemptStatus, DocumentKind, SentVia } from "@/generated/prisma/enums";
 import { approveCandidate } from "@/lib/agent/draft";
 import { getAiProvider } from "@/lib/ai";
 import { isAiConfigured } from "@/lib/ai/config";
@@ -108,7 +108,7 @@ async function stillBlocked(page: Page): Promise<boolean> {
   return true;
 }
 
-/** Marks the application sent, once: a draft moves to Sent, anything further along stays. */
+/** Marks the application sent, once, on their site: a draft moves to Sent, anything further along stays. */
 async function markSent(applicationId: string): Promise<void> {
   const application = await prisma.application.findUnique({ where: { id: applicationId }, select: { status: true } });
   if (application?.status !== ApplicationStatus.DRAFT) return;
@@ -118,7 +118,7 @@ async function markSent(applicationId: string): Promise<void> {
     select: { id: true },
   });
   if (pending) await approveCandidate(pending.id);
-  await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT);
+  await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT, new Date(), { sentVia: SentVia.PORTAL });
 }
 
 async function finishSubmitted(attemptId: string, applicationId: string, page: Page | null): Promise<ApplyOutcome> {
@@ -225,7 +225,8 @@ export async function runApplyAttempt(attemptId: string, { step, signal }: JobCo
   let page: Page | null = null;
   try {
     await step(APPLY_STEPS[0]);
-    const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+    // The profile it was written from (the first, once that's deleted): the model's answers come from its sections; name, contact and address are shared.
+    const [profile, settings] = await Promise.all([loadProfile(application.profileId), loadSettings()]);
     const files = await printDocuments(attemptId, application, profile.basics.name, settings.fileNamePattern);
     const letter = unitsSchema.safeParse(application.documents.find((document) => document.kind === DocumentKind.COVER_LETTER)?.units);
     const letterParagraphs = letter.success ? letter.data.filter(isParagraph).map((unit) => unit.text) : [];
@@ -348,7 +349,8 @@ export async function runFillThisPage(attemptId: string, { step, signal }: JobCo
     if (!hasForm(controls)) return say(NOTES.noFormHere);
     signal.throwIfAborted();
 
-    const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+    // The profile it was written from (the first, once that's deleted): the model's answers come from its sections; name, contact and address are shared.
+    const [profile, settings] = await Promise.all([loadProfile(application.profileId), loadSettings()]);
     const files = await printDocuments(attemptId, application, profile.basics.name, settings.fileNamePattern);
     const letter = unitsSchema.safeParse(application.documents.find((document) => document.kind === DocumentKind.COVER_LETTER)?.units);
     const letterParagraphs = letter.success ? letter.data.filter(isParagraph).map((unit) => unit.text) : [];

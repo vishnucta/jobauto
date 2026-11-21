@@ -4,13 +4,17 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import type { JobSourceAdapter, RequestContext, SourceCredentials } from "./adapter";
+import type { PortalAdapter, PortalFields } from "@/lib/portals/engine";
+
+import type { RequestContext } from "./adapter";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
 import { normalText, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
 
 // SerpApi: Google for Jobs through serpapi.com's google_jobs engine, which
-// gives each posting's whole text. A page of ten is one search from the plan
+// gives each posting's whole text. A built-in portal with code of its own
+// (jobauto fork; see src/lib/portals/built-in.ts), its key the "key" field.
+// A page of ten is one search from the plan
 // (250 a month free, 50 an hour); the same search again within the hour comes
 // from SerpApi's cache and costs nothing. The key goes in the query string,
 // as SerpApi takes it; requestJson only ever logs the path.
@@ -189,14 +193,15 @@ function searchUrl(query: SearchQuery, key: string, next: string | null, baseUrl
   // Without a country, Google searches the US.
   url.searchParams.set("gl", query.country || "us");
   url.searchParams.set("hl", languageFor(query.country));
-  if (query.place) url.searchParams.set("lrad", String(query.radiusKm));
+  // Any distance sends none (public #138).
+  if (query.place && query.radiusKm !== null) url.searchParams.set("lrad", String(query.radiusKm));
   if (next) url.searchParams.set("next_page_token", next);
   url.searchParams.set("api_key", key);
   return url;
 }
 
-async function searchPage(query: SearchQuery, { key }: SourceCredentials["SERPAPI"], next: string | null, context: RequestContext = {}): Promise<SearchPage> {
-  const url = searchUrl(query, key, next, context.baseUrl);
+async function searchPage(query: SearchQuery, fields: PortalFields, next: string | null, context: RequestContext = {}): Promise<SearchPage> {
+  const url = searchUrl(query, fields.key ?? "", next, context.baseUrl);
   const answer = responseSchema.safeParse(await requestJson("SERPAPI", url, { signal: context.signal }));
   if (!answer.success) throw jobSearchError("changed", "SERPAPI", { detail: `${SEARCH_PATH}: unexpected answer` });
 
@@ -229,13 +234,13 @@ async function searchPage(query: SearchQuery, { key }: SourceCredentials["SERPAP
   return { postings, next: pagination?.next_page_token || null };
 }
 
-export const serpapi: JobSourceAdapter<"SERPAPI"> = {
-  source: "SERPAPI",
+export const serpapi: PortalAdapter = {
+  id: "SERPAPI",
   search: searchPage,
   // Search results carry the whole description.
   details: async (posting) => (posting.description ? posting.description : null),
-  test: async (credentials, context) => {
-    const page = await searchPage({ keywords: "developer", place: "", country: "us", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, credentials, null, context);
+  test: async (fields, context) => {
+    const page = await searchPage({ keywords: "developer", place: "", country: "us", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, fields, null, context);
     // Google has developer jobs in the US every day: none means the request isn't what it expects any more.
     if (page.postings.length === 0) throw jobSearchError("changed", "SERPAPI", { detail: `${SEARCH_PATH}: nothing for the test search` });
   },

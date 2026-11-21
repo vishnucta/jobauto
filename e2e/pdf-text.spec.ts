@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { extractText } from "unpdf";
 
-import { resetData, sql } from "./support";
+import { resetData, setProfileSetting, sql } from "./support";
 
 // The PDF's text layer, as a parser reads it: every word and the dates come
 // back as the characters they were written with. That takes
@@ -27,10 +27,8 @@ for (const [theme, font] of [
   ["atlas", "Inter"],
 ] as const) {
   test(`keeps words and dates as text in the PDF (${theme}, ${font})`, async ({ page }) => {
-    await sql(
-      `INSERT INTO "Setting" (key, value, "updatedAt") VALUES ('baseThemeId', $1, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = now()`,
-      [theme],
-    );
+    // The first profile's Base resume (E24-1), which /api/pdf?doc=base prints without `&profile=`.
+    await setProfileSetting("baseThemeId", theme);
     const text = await pdfText(page);
     expect(text).toContain("Refit the financial workflow for the office");
     expect(text).toContain("Mar 2021 – Present");

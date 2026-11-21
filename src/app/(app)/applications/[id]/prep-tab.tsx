@@ -60,7 +60,7 @@ export function PrepTab({ applicationId, data, aiReady, company }: { application
 
   if (!pack) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-10 py-8">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-10 pt-8 pb-[var(--composer-space,2rem)]">
         <div className="flex max-w-[640px] flex-col gap-3 rounded-panel border border-line-card bg-card p-7">
           <h2 className="font-serif text-section">Prepare for the call</h2>
           <p className="text-sm text-pretty text-muted">
@@ -76,7 +76,7 @@ export function PrepTab({ applicationId, data, aiReady, company }: { application
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-10 py-8">
+    <div className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-10 pt-8 pb-[var(--composer-space,2rem)]">
       <style>{PRINT_CSS}</style>
       <div data-prep-screen className="flex flex-wrap items-center gap-2">
         <Button size="sm" aria-pressed={practising} onClick={() => setPractising(!practising)}>

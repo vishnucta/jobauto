@@ -1,11 +1,13 @@
 import { z } from "zod";
 
-import { PostingSource } from "@/generated/prisma/enums";
 import { daysBetween, formatShortCalendarDate } from "@/lib/dates";
 import type { PostingFit } from "@/lib/fit";
+import { byBestFit, COVERS, coverageOf, type Covers } from "@/lib/posting-coverage";
 
 import { countryCodeFor } from "./countries";
-import { searchesWithin } from "./sources";
+import { sourceInfo } from "./sources";
+
+export { isAddedSource, isJobSource } from "./sources";
 
 // Job search (E14): what a search asks for and what a posting looks like,
 // whichever source answers. Shared by the server and the Find jobs screen.
@@ -13,18 +15,19 @@ import { searchesWithin } from "./sources";
 // job ad is a "posting".
 
 /** The job sources Dossier can search (E14-1 to E14-3, FreeHire), in the order Settings lists them; one is chosen there. */
-export const JOB_SOURCES = [PostingSource.JSEARCH, PostingSource.SERPAPI, PostingSource.ADZUNA, PostingSource.JOOBLE, PostingSource.FREEHIRE, PostingSource.ARBEITSAGENTUR] as const;
-export type JobSource = (typeof JOB_SOURCES)[number];
+/** The built-in portals' ids; SerpApi and Jooble are the jobauto fork's. */
+export const JOB_SOURCES = ["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE", "FREEHIRE", "ARBEITSAGENTUR"] as const;
+/** A portal's id: a built-in's, or one the user added (E23-3). */
+export type JobSource = string;
 
-/** Where a posting can come from: a job source, an AI client that found it itself (add_found_jobs), or a careers page the user follows. */
-export const POSTING_SOURCES = [...JOB_SOURCES, PostingSource.CLIENT, PostingSource.CAREERS] as const;
-export type PostingOrigin = PostingSource;
+/** Where a posting came from: a portal's id, or CLIENT, CAREERS or PASTED, which no portal searches (src/lib/job-search/sources.ts). */
+export type PostingOrigin = string;
 
-/** Whether postings from here can be searched again, paged or fetched through a job source. */
-export const isJobSource = (source: PostingOrigin): source is JobSource => source !== PostingSource.CLIENT && source !== PostingSource.CAREERS;
-
-/** The sources whose searches Dossier didn't run but were added to it: by an AI client, or from careers pages. */
-export const isAddedSource = (source: PostingOrigin) => source === PostingSource.CLIENT || source === PostingSource.CAREERS;
+/**
+ * A source's id as rows store it (#269): text, so a source that's no longer
+ * listed still has its past searches and saved postings, under the same id.
+ */
+export const sourceIdSchema = z.string().regex(/^[A-Z][A-Z0-9_]{1,39}$/);
 
 /** Where a JSearch key comes from: OpenWeb Ninja directly, or the RapidAPI marketplace. */
 export const JSEARCH_HOSTS = ["openwebninja", "rapidapi"] as const;
@@ -69,17 +72,30 @@ export const searchQuerySchema = z.object({
     .trim()
     .toLowerCase()
     .regex(/^([a-z]{2})?$/),
-  radiusKm: z.literal(RADII_KM),
+  /** Null for any distance: no radius is sent, for a portal where one breaks the search (public #138). */
+  radiusKm: z.literal(RADII_KM).nullable(),
   remoteOnly: z.boolean(),
   postedWithin: z.enum(POSTED_VALUES),
   /** Missing in searches from before 1.12.0, which means any. */
   experience: z.enum(LEVEL_VALUES).optional(),
+  /** The highest level, when the search asks for a range from `experience` (E24-6), such as a profile's "Senior to Lead or director". */
+  experienceTo: z.enum(LEVEL_VALUES).optional(),
 });
 export type SearchQuery = z.output<typeof searchQuerySchema>;
 
-/** The level a search asks for, or null for any. */
+/** The level a search asks for, the lowest of a range, or null for any. */
 export const experienceAskedFor = (query: Pick<SearchQuery, "experience">): Exclude<ExperienceLevel, "any"> | null =>
   query.experience && query.experience !== "any" ? query.experience : null;
+
+/** The levels a search asks for (E24-6): one, a range from `experience` to `experienceTo`, or null for any. */
+export function experienceRangeAskedFor(query: Pick<SearchQuery, "experience" | "experienceTo">): Exclude<ExperienceLevel, "any">[] | null {
+  const from = experienceAskedFor(query);
+  if (!from) return null;
+  const steps = LEVEL_VALUES.filter((value) => value !== "any") as Exclude<ExperienceLevel, "any">[];
+  const to = query.experienceTo && query.experienceTo !== "any" ? query.experienceTo : from;
+  const [a, b] = [steps.indexOf(from), steps.indexOf(to)].sort((x, y) => x - y);
+  return steps.slice(a, b + 1);
+}
 
 export const EMPTY_QUERY: SearchQuery = {
   keywords: "",
@@ -92,7 +108,8 @@ export const EMPTY_QUERY: SearchQuery = {
 
 /** A posting as a source found it, in one shape for every source. */
 export const foundPostingSchema = z.object({
-  source: z.enum(POSTING_SOURCES),
+  /** The source's id: one of JOB_SOURCES when it was found, but a stored one may no longer be listed (#269). */
+  source: sourceIdSchema,
   /** The source's own id for it. */
   externalId: z.string().min(1).max(500),
   title: z.string().max(500),
@@ -114,102 +131,114 @@ export const foundPostingSchema = z.object({
   description: z.string().max(100_000),
   /** False while the description is only the start of the posting. */
   complete: z.boolean(),
-  /** Other sources the same job was found on, in a search of several (uniquePostings). */
-  alsoOn: z.array(z.enum(POSTING_SOURCES)).optional(),
 });
 export type FoundPosting = z.output<typeof foundPostingSchema>;
 
-/** What to ask each source for its next page; a source on its last page is left out. */
-export const cursorsSchema = z.partialRecord(z.enum(JOB_SOURCES), z.string());
-export type Cursors = z.output<typeof cursorsSchema>;
-
 /** A page of results, and what to ask for the next page (null on the last one). */
-export type SearchPage = { postings: FoundPosting[]; next: string | null };
+export type SearchPage = {
+  postings: FoundPosting[];
+  next: string | null;
+  /** Said with the portal's count, in words for the screen: "Couldn't read acme." */
+  note?: string;
+};
+
+/**
+ * A posting's score against one profile (E25-5). `profileName` is empty with
+ * only one profile; `older`: scored before scores showed how they add up (E25-6).
+ */
+export type ProfileFit = PostingFit & { profileId: string; profileName: string; older?: boolean };
+
+/** The best of a posting's scores: the best coverage (E32-2), the first profile's on a tie. */
+export const bestFit = (scores: readonly ProfileFit[]): ProfileFit | null =>
+  scores.reduce<ProfileFit | null>((best, fit) => (best === null || byBestFit({ coverage: coverageOf(fit), at: 0 }, { coverage: coverageOf(best), at: 0 }) < 0 ? fit : best), null);
 
 /** Where a posting stands for the user (E14-5). */
 export type PostingState = {
   /** Its row, when it's stored. */
   postingId: string | null;
+  /** In the library and not yet opened or acted on (E22-5). */
+  new: boolean;
   saved: boolean;
   dismissed: boolean;
   /** The application made from it, or from the same link before Find jobs. */
   applicationId: string | null;
-  /** How well it fits the profile, once it's scored (#208). */
-  score: PostingFit | null;
+  /** Its best score of the profiles it was scored against (#208, E25-5), or null before it's scored. */
+  score: ProfileFit | null;
+  /** Its score for each profile it was scored against, in the profiles' order (E25-5). */
+  scores: ProfileFit[];
+  /** The portals it was found on, with the link each gave (E22-6): its own first, then those of postings found to be the same job. */
+  foundOn: { portal: string; url: string }[];
+  /** In the Archive (E22-7). */
+  archived: boolean;
+  /** When a search found it again while in the Archive: "Still listed". */
+  stillListedAt: string | null;
+  /** The job agent's searches that found it, by name: "Found by the agent · <name>" (E22-8). */
+  agentSearches: string[];
+  /** The AI clients, or the employers' careers pages, that added it, by name: "Added by Claude" (jobauto fork). */
+  addedBy: string[];
+  /** Where it stands with the job agent, when the agent scored it: Prepare draft, or its draft. */
+  agent: { candidateId: string; status: "SCORED" | "DRAFTING" | "DRAFTED" | "APPROVED" | "DISMISSED"; applicationId: string | null } | null;
 };
 
 /** A posting as Find jobs shows it. */
 export type ShownPosting = FoundPosting & { state: PostingState };
 
-/** What can go wrong with a search, or with one source in it. */
-export const SEARCH_PROBLEMS = ["off", "not-accepted", "no-country", "no-key", "key", "quota", "country", "unavailable", "changed"] as const;
-
 /** What went wrong with a search, in words for the screen (E14-6). */
-export type SearchProblem = { ok: false; problem: (typeof SEARCH_PROBLEMS)[number]; message: string };
-
-/** A source that didn't answer in a search that went on without it, and the ready source that stood in for it, when one did. */
-export const sourceProblemSchema = z.object({
-  source: z.enum(JOB_SOURCES),
-  problem: z.enum(SEARCH_PROBLEMS),
-  message: z.string(),
-  fallback: z.enum(JOB_SOURCES).optional(),
-});
-export type SourceProblem = z.output<typeof sourceProblemSchema>;
-
-/** A source as the search form's Source list offers it: ready, or why it can't be searched now. */
-export type SourceState = { source: JobSource; problem: string | null };
-
-/** What a search gives the screen: postings, or what went wrong. */
-export type SearchOutcome = { ok: true; postings: ShownPosting[]; next: string | null } | SearchProblem;
+export type SearchProblem = { ok: false; problem: "off" | "not-accepted" | "no-country" | "no-key" | "key" | "quota" | "country" | "unavailable" | "changed"; message: string };
 
 /** A search kept with what it found (E14-10), as Find jobs opens it. */
 export type StoredSearch = {
   id: string;
-  /** The sources that answered, in Settings' order; [CLIENT] for an AI client's. */
-  sources: PostingOrigin[];
-  /** For a CLIENT search: the AI client that added it; for a CAREERS one, the employers whose pages it's from. */
+  /** Possibly a source that's no longer listed (#269); then `next` is null. */
+  source: string;
+  /** For a CLIENT search: the AI client that added it; for a CAREERS one, the employers whose pages it's from (jobauto fork). Empty otherwise. */
   addedBy: string;
   query: SearchQuery;
   /** "today at 14:32", "yesterday at 09:05", "on Thu 1 Oct at 18:20", in the user's time zone. */
   ranAt: string;
   postings: ShownPosting[];
-  /** Whether a source still has a next page. */
-  more: boolean;
-  /** The sources that didn't answer, and who stood in for them. */
-  problems: SourceProblem[];
+  /** The first portal's next page; null when it has none (and for a source no longer listed). */
+  next: string | null;
+  /** Each portal it asked and where it stands (E22-4). */
+  portals: SearchPortal[];
+  /** Its background job while portals are still searching (E22-4); null once they're done. */
+  jobId: string | null;
 };
 
 /** A search in the Past searches list, grouped by the day it ran. */
 export type PastSearchDay = {
   /** "Today", "Yesterday" or "Thu 1 Oct". */
   day: string;
-  searches: { id: string; sources: PostingOrigin[]; addedBy: string; query: SearchQuery; found: number; time: string }[];
+  searches: { id: string; source: string; addedBy: string; query: SearchQuery; found: number; time: string }[];
 };
 
-/** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line, without the km when none of its sources has a radius (searchesWithin). */
-export function describeSearch(query: SearchQuery, countryName: string, sources?: readonly PostingOrigin[] | null): string {
-  const where = query.place ? (sources && !searchesWithin(sources) ? query.place : `${query.place}, ${query.radiusKm} km`) : countryName;
+/** "product designer · Hamburg, 25 km · Remote only · Past week": a search in a line, without the km for a source that has no radius. */
+/** A search as the source bar's chips (E32-3): what, where, the country, remote, levels and how recent. */
+export function searchChips(query: SearchQuery, countryName: string, source?: string | null): string[] {
+  const withoutKm = query.radiusKm === null || (source && !sourceInfo(source).radius);
+  const levels = (experienceRangeAskedFor(query) ?? []).map((value) => EXPERIENCE_LEVELS.find((option) => option.value === value)!.label);
   const posted = POSTED_WITHIN.find((option) => option.value === query.postedWithin);
-  const level = EXPERIENCE_LEVELS.find((option) => option.value === experienceAskedFor(query));
-  return [query.keywords, where, query.remoteOnly ? "Remote only" : "", posted && posted.value !== "any" ? posted.label : "", level?.label ?? ""].filter(Boolean).join(" · ");
+  return [
+    query.keywords,
+    query.place ? (withoutKm ? query.place : `${query.place} + ${query.radiusKm} km`) : "",
+    countryName,
+    query.remoteOnly ? "Remote only" : "",
+    levels.length > 1 ? `${levels[0]} to ${levels.at(-1)}` : (levels[0] ?? ""),
+    posted && posted.value !== "any" ? posted.label : "Any time",
+  ].filter(Boolean);
+}
+
+export function describeSearch(query: SearchQuery, countryName: string, source?: string | null): string {
+  const withoutKm = query.radiusKm === null || (source && !sourceInfo(source).radius);
+  const where = query.place ? (withoutKm ? query.place : `${query.place}, ${query.radiusKm} km`) : countryName;
+  const posted = POSTED_WITHIN.find((option) => option.value === query.postedWithin);
+  const levels = (experienceRangeAskedFor(query) ?? []).map((value) => EXPERIENCE_LEVELS.find((option) => option.value === value)!.label);
+  const level = levels.length > 1 ? `${levels[0]} to ${levels.at(-1)}` : (levels[0] ?? "");
+  return [query.keywords, where, query.remoteOnly ? "Remote only" : "", posted && posted.value !== "any" ? posted.label : "", level].filter(Boolean).join(" · ");
 }
 
 /** Identifies a posting across searches. */
-export const postingKey = (posting: { source: PostingOrigin; externalId: string }) => `${posting.source}:${posting.externalId}`;
-
-/** Highest score first; unscored postings after the scored ones, in the order they came. */
-export const byScore = (postings: readonly ShownPosting[]) => postings.toSorted((a, b) => (b.state.score?.score ?? -1) - (a.state.score?.score ?? -1));
-
-/** A link from a source, kept only when it's a web address, so it can't run script as an href. */
-export function safeLink(value: string | null | undefined): string {
-  if (!value) return "";
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
-  } catch {
-    return "";
-  }
-}
+export const postingKey = (posting: { source: string; externalId: string }) => `${posting.source}:${posting.externalId}`;
 
 /** Lower case, letters and digits only, accents dropped: "Café  GmbH" and "cafe gmbh" are the same. */
 export const normalText = (value: string) =>
@@ -224,10 +253,14 @@ export const normalText = (value: string) =>
 const GENDER_MARK = /\(\s*(?:all genders|[a-z](?:\s*[/|]\s*[a-z]){1,3})\s*\)|\b[mwfd](?:\s*\/\s*[mwfdx]){1,2}\b/giu;
 
 /**
- * What identifies a job across sources (add_found_jobs leaves out what Dossier
- * has): its link without tracking parameters, and the same opening as other
- * sites write it, by company, title without gender marks, and the city alone.
- * A job without a link or without company and title has fewer keys.
+ * What identifies a job for an AI client's add (add_found_jobs) and the
+ * careers pages (jobauto fork), which leave out what Dossier has: its link
+ * without tracking parameters, and the same opening as other sites write it,
+ * by company, title without gender marks, and the city alone. A job without a
+ * link or without company and title has fewer keys. Readier to call two the
+ * same than the library's "same job" (src/lib/dedupe.ts), which merges
+ * postings and so must never be wrong: this only keeps a job from being
+ * added twice.
  */
 export function jobKeys(job: Pick<FoundPosting, "url" | "title" | "company" | "place">): string[] {
   const keys: string[] = [];
@@ -238,6 +271,17 @@ export function jobKeys(job: Pick<FoundPosting, "url" | "title" | "company" | "p
   const city = normalText(job.place.split(/[,(/·|–]/)[0] ?? "");
   if (company && title) keys.push(`job:${company}|${title}|${city}`);
   return keys;
+}
+
+/** A link from a source, kept only when it's a web address, so it can't run script as an href. */
+export function safeLink(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 // Query parameters that only say where a click came from.
@@ -259,35 +303,6 @@ export function linkKey(link: string): string {
   }
 }
 
-/**
- * One posting per job across sources: the same opening from JSearch and
- * SerpApi, or the same link twice, is kept once, by its keys (jobKeys and
- * postingKey), preferring the one with its whole text and noting the other
- * sources on it (alsoOn). Jobs whose keys are in `known` are left out: what a
- * kept search already holds when a page is added.
- */
-export function uniquePostings(postings: readonly FoundPosting[], known: Iterable<string> = []): FoundPosting[] {
-  const kept: FoundPosting[] = [];
-  const at = new Map<string, number>();
-  const taken = new Set(known);
-  for (const posting of postings) {
-    const keys = [postingKey(posting), ...jobKeys(posting)];
-    if (keys.some((key) => taken.has(key))) continue;
-    const index = keys.map((key) => at.get(key)).find((found) => found !== undefined);
-    if (index === undefined) {
-      kept.push(posting);
-      for (const key of keys) at.set(key, kept.length - 1);
-      continue;
-    }
-    const have = kept[index];
-    const alsoOn = [...new Set([...(have.alsoOn ?? []), ...(posting.alsoOn ?? []), have.source, posting.source])];
-    const better = posting.complete && !have.complete ? posting : have;
-    kept[index] = { ...better, alsoOn: alsoOn.filter((source) => source !== better.source) };
-    for (const key of keys) if (!at.has(key)) at.set(key, index);
-  }
-  return kept;
-}
-
 // ─── In the URL ──────────────────────────────────────────────────────────────
 // /jobs?q=designer&where=Hamburg&country=de&radius=25&remote=1&posted=week&level=senior, so
 // Back, a reload or a bookmark show the same search.
@@ -301,16 +316,134 @@ export function queryFromParams(params: Record<string, string | string[] | undef
   const radius = Number(one(params.radius));
   const posted = POSTED_VALUES.find((value) => value === one(params.posted));
   const level = LEVEL_VALUES.find((value) => value === one(params.level));
+  const levelTo = LEVEL_VALUES.find((value) => value === one(params.levelTo));
   const country = one(params.country).trim().toLowerCase();
   return {
     keywords: keywords.slice(0, 200),
     place: one(params.where).trim().slice(0, 200),
     country: /^[a-z]{2}$/.test(country) ? country : "",
-    radiusKm: RADII_KM.find((km) => km === radius) ?? DEFAULT_RADIUS_KM,
+    radiusKm: one(params.radius) === "any" ? null : (RADII_KM.find((km) => km === radius) ?? DEFAULT_RADIUS_KM),
     remoteOnly: one(params.remote) === "1",
     postedWithin: posted ?? "any",
     ...(level && level !== "any" ? { experience: level } : {}),
+    ...(level && level !== "any" && levelTo && levelTo !== "any" && levelTo !== level ? { experienceTo: levelTo } : {}),
   };
+}
+
+// ─── The positions library (E22-5) ──────────────────────────────────────────
+
+/** Where a portal stands in a search (E22-4): waiting its turn, asked, answered, failed or skipped, and why. */
+const SEARCH_PORTAL_STATUSES = ["waiting", "searching", "done", "failed", "skipped"] as const;
+export const searchPortalSchema = z.object({
+  id: sourceIdSchema,
+  status: z.enum(SEARCH_PORTAL_STATUSES),
+  found: z.number().int().min(0).catch(0),
+  /** What to ask it for next; null when it has no more. */
+  next: z.string().nullable().catch(null),
+  /** Why it failed or was skipped, or a note with what it found, in words for the screen. */
+  message: z.string().nullable().catch(null),
+  /** What kind of problem stopped it (SearchProblem's), for Settings' status (E34-1); missing before then. */
+  problem: z.string().optional().catch(undefined),
+});
+export type SearchPortal = z.output<typeof searchPortalSchema>;
+
+/**
+ * "14 of 20 portals answered · 2 failed · 4 still searching": a search's
+ * progress in a line, for its job's step and the screen.
+ */
+export function portalsLine(portals: readonly SearchPortal[]): string {
+  const count = (status: SearchPortal["status"]) => portals.filter((portal) => portal.status === status).length;
+  const asked = portals.filter((portal) => portal.status !== "skipped").length;
+  const waiting = count("waiting") + count("searching");
+  return [
+    `${count("done")} of ${asked} ${asked === 1 ? "portal" : "portals"} answered`,
+    count("failed") > 0 ? `${count("failed")} failed` : "",
+    waiting > 0 ? `${waiting} still searching` : "",
+    count("skipped") > 0 ? `${count("skipped")} skipped` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+
+/** Which postings the library shows: the open ones (not dismissed), only new ones, or one kind. */
+export const LIBRARY_SHOWS = [
+  { value: "open", label: "All open" },
+  { value: "new", label: "New" },
+  { value: "saved", label: "Saved" },
+  { value: "applied", label: "Applied for" },
+  { value: "dismissed", label: "Dismissed" },
+] as const;
+export type LibraryShow = (typeof LIBRARY_SHOWS)[number]["value"];
+const SHOW_VALUES = LIBRARY_SHOWS.map((option) => option.value) as readonly string[];
+
+
+/** The library's filters (E22-5); in the URL as tab, show, found, portal, age, score and fits. */
+export type LibraryFilters = {
+  /** Positions, or the Archive of postings left untouched (E22-7). */
+  tab: "positions" | "archive";
+  show: LibraryShow;
+  /** The search that found it, or FOUND_BY_AGENT for any of the job agent's (E22-8). */
+  found: string | null;
+  portal: string | null;
+  /** How recently it was posted. */
+  age: PostedWithin;
+  /** "Covers" (E32-2): how much of its requirements the profile must cover. */
+  covers: Covers;
+  /** "Fits" (E25-5): a profile whose coverage the Covers filter and the order go by, or null for each posting's best. */
+  fits: string | null;
+  /** "Best fit" (E32-2), or the newest found first. */
+  sort: LibrarySort;
+};
+
+export const LIBRARY_SORTS = ["fit", "new"] as const;
+type LibrarySort = (typeof LIBRARY_SORTS)[number];
+
+/** "Found by the agent": what any of the job agent's searches found, best score first (E22-8). */
+export const FOUND_BY_AGENT = "agent";
+
+/** The searches a "found" filter names: one, or an agent run's several, by comma (E26-4); null for the agent's or none. */
+export const foundSearchIds = (found: string | null): string[] | null =>
+  found && found !== FOUND_BY_AGENT ? found.split(",").map((id) => id.trim()).filter(Boolean) : null;
+
+export const DEFAULT_FILTERS: LibraryFilters = { tab: "positions", show: "open", found: null, portal: null, age: "any", covers: "any", fits: null, sort: "fit" };
+
+/**
+ * The library's filters in the URL. Links from before E22-5 still work:
+ * ?view=saved and ?view=dismissed are those, and ?search=<id> is "found by".
+ */
+export function libraryFromParams(params: Record<string, string | string[] | undefined>): LibraryFilters {
+  const view = one(params.view);
+  const show = one(params.show) || (view === "saved" || view === "dismissed" ? view : "");
+  const portal = one(params.portal).trim().toUpperCase();
+  // ?score= from before coverage (E32-2): 70 is "at least half", 85 "at least two thirds".
+  const score = Number(one(params.score));
+  const covers = COVERS.find((value) => value === one(params.covers)) ?? (score >= 85 ? "two-thirds" : score >= 70 ? "half" : "any");
+  return {
+    tab: one(params.tab) === "archive" ? "archive" : "positions",
+    show: SHOW_VALUES.includes(show) ? (show as LibraryShow) : "open",
+    found: (one(params.found) || one(params.search)).trim().slice(0, 300) || null,
+    portal: sourceIdSchema.safeParse(portal).success ? portal : null,
+    age: POSTED_VALUES.find((value) => value === one(params.age)) ?? "any",
+    covers,
+    fits: one(params.fits).trim().slice(0, 100) || null,
+    sort: one(params.sort) === "new" ? "new" : "fit",
+  };
+}
+
+/** The Positions URL for some filters, leaving out the defaults. */
+export function libraryHref(filters: Partial<LibraryFilters>): string {
+  const params = new URLSearchParams();
+  if (filters.tab === "archive") params.set("tab", "archive");
+  if (filters.show && filters.show !== "open") params.set("show", filters.show);
+  if (filters.found) params.set("found", filters.found);
+  if (filters.portal) params.set("portal", filters.portal);
+  if (filters.age && filters.age !== "any") params.set("age", filters.age);
+  if (filters.covers && filters.covers !== "any") params.set("covers", filters.covers);
+  if (filters.fits) params.set("fits", filters.fits);
+  if (filters.sort === "new") params.set("sort", "new");
+  const query = params.toString();
+  return query ? `/jobs?${query}` : "/jobs";
 }
 
 /** Find jobs' views: the search, past searches (E14-10), and the postings kept from them (E14-7). */
@@ -321,38 +454,21 @@ export function viewFromParams(params: Record<string, string | string[] | undefi
   return view === "history" || view === "saved" || view === "dismissed" ? view : "search";
 }
 
-/** Saved, Dismissed and Past searches narrowed to one source (?from=client, ?from=jsearch…); null shows every source. */
-export type SourceFilter = PostingOrigin | null;
-
-const FROM_VALUES = new Map(POSTING_SOURCES.map((source) => [source.toLowerCase(), source] as const));
-
-/** The source the URL narrows a view to, or null for all of them. */
-export function sourceFilterFromParams(params: Record<string, string | string[] | undefined>): SourceFilter {
-  return FROM_VALUES.get(one(params.from).trim().toLowerCase()) ?? null;
-}
-
-/** Past searches as every posting they found, highest score first (?view=history&sort=score), instead of the searches. */
-export function byScoreFromParams(params: Record<string, string | string[] | undefined>): boolean {
-  return one(params.sort) === "score";
-}
-
-/** A view's URL, narrowed to one source when `from` is given: /jobs?view=saved&from=client; Past searches' postings by score with `byScore`. */
-export const viewHref = (view: "history" | "saved" | "dismissed", from: SourceFilter = null, { byScore = false } = {}) =>
-  `/jobs?view=${view}${byScore ? "&sort=score" : ""}${from ? `&from=${from.toLowerCase()}` : ""}`;
-
-/** A kept search on Find jobs (E14-10). */
-export const searchRunHref = (id: string) => `/jobs?search=${encodeURIComponent(id)}`;
+export const viewHref = (view: "history" | "saved" | "dismissed") => `/jobs?view=${view}`;
 
 /** The Find jobs URL for a search. */
 export function searchHref(query: SearchQuery): string {
   const params = new URLSearchParams({ q: query.keywords });
   if (query.place) params.set("where", query.place);
   if (query.country) params.set("country", query.country);
-  if (query.radiusKm !== DEFAULT_RADIUS_KM) params.set("radius", String(query.radiusKm));
+  if (query.radiusKm !== DEFAULT_RADIUS_KM) params.set("radius", query.radiusKm === null ? "any" : String(query.radiusKm));
   if (query.remoteOnly) params.set("remote", "1");
   if (query.postedWithin !== "any") params.set("posted", query.postedWithin);
-  const level = experienceAskedFor(query);
-  if (level) params.set("level", level);
+  const levels = experienceRangeAskedFor(query);
+  if (levels) {
+    params.set("level", levels[0]);
+    if (levels.length > 1) params.set("levelTo", levels.at(-1)!);
+  }
   return `/jobs?${params.toString()}`;
 }
 

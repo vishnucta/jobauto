@@ -3,7 +3,8 @@ import { cache } from "react";
 
 import { activityTimeline } from "@/lib/activity";
 import { isAiConfigured } from "@/lib/ai/config";
-import { editsSchema, matchSchema, matchScore } from "@/lib/application-data";
+import { editsSchema, matchSchema } from "@/lib/application-data";
+import { applicationFlag, latestContact } from "@/lib/application-flag";
 import { loadApplication, loadDocuments, readJson } from "@/lib/application-documents";
 import { loadApplyTab } from "@/lib/apply/view-data";
 import { formatShortDate } from "@/lib/dates";
@@ -14,12 +15,18 @@ import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
 import { languageJobKey, translateDocumentsJob } from "@/lib/jobs/translate-documents";
 import { writeDocumentJobKey } from "@/lib/jobs/write-document";
-import { scoreResumeJobKey } from "@/lib/jobs/score-resume";
-import { resumeFitSchema } from "@/lib/resume-fit";
+import { writeApplicationJob, writeApplicationJobKey } from "@/lib/jobs/write-application";
+import { anyChannelFor } from "@/lib/notifications/notify";
+import { checkRequirementsJobKey } from "@/lib/jobs/check-requirements";
+import { prepareJobKey } from "@/lib/jobs/prepare-interview";
+import { prepSchema } from "@/lib/interview-rounds";
+import { messageJobKey } from "@/lib/jobs/write-message";
+import { messageDraftSchema } from "@/lib/message-draft";
 import { emailJobKey } from "@/lib/jobs/write-email";
 import { googleConnection } from "@/lib/google/account";
+import { fromLine } from "@/lib/google/mime";
 import { pullInterviewEvents } from "@/lib/google/availability";
-import { loadConversation } from "@/lib/google/inbox-data";
+import { applicationChoices, loadConversation } from "@/lib/google/inbox-data";
 import { readFrozenCopy } from "@/lib/frozen-copy";
 import { profileUpdate } from "@/lib/profile-update";
 import { refineSuggestions } from "@/lib/refine-suggestions";
@@ -32,8 +39,10 @@ import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
 
 import { ApplicationView } from "./application-view";
-import { metaLine } from "./meta";
+import { metaLine, roleLabel } from "./meta";
 import { tabFrom } from "./tabs";
+import { listProfiles } from "@/lib/profiles";
+import { loadHistory } from "@/lib/application-history-data";
 
 /**
  * Takes an interview moved or deleted in Google Calendar into the
@@ -51,9 +60,9 @@ export async function generateMetadata({ params }: PageProps<"/applications/[id]
 
 /** One application (PRD §6.5): its status, tailored documents, email, posting and notes. */
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
-  const [{ id }, { tab }] = await Promise.all([params, searchParams]);
+  const [{ id }, { tab, start }] = await Promise.all([params, searchParams]);
   await pullCalendar(id);
-  const [{ application, profile, liveProfile, sent, settings, extracted, resume, letter, email, includeReferences, sections, ownSections, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, languageJobs, timeZone, google, emails, themes, resumeJobs, letterJobs, scoreJobs] =
+  const [{ application, profile, liveProfile, sent, settings, baseThemeId, extracted, resume, letter, email, includeReferences, sections, ownSections, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, languageJobs, timeZone, google, emails, themes, resumeJobs, letterJobs, checkJobs, prepareJobs, messageJobs, profiles, writingJobs] =
     await Promise.all([
       loadDocuments(id),
       isAiConfigured(),
@@ -67,8 +76,22 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       loadThemes(),
       findUnfinishedJobs(writeDocumentJobKey(id, "RESUME")),
       findUnfinishedJobs(writeDocumentJobKey(id, "COVER_LETTER")),
-      findUnfinishedJobs(scoreResumeJobKey(id)),
+      findUnfinishedJobs(checkRequirementsJobKey(id)),
+      findUnfinishedJobs(prepareJobKey(id)),
+      findUnfinishedJobs(messageJobKey(id)),
+      listProfiles(),
+      // New application writing its documents on the server (E31-4).
+      findUnfinishedJobs(writeApplicationJobKey(id)),
     ]);
+  // New application still writing its documents (E31-5): what it writes, and whether a notification will say when it's done.
+  const last = writingJobs.at(-1);
+  const writingInput = last ? writeApplicationJob.input.safeParse(last.input) : null;
+  const writing = last && writingInput?.success ? { id: last.id, write: writingInput.data.write } : null;
+  const notifies = writing ? await anyChannelFor("documents.written") : false;
+  // Every change across the documents, and the answers (E30-11).
+  const history = await loadHistory(id, application.messages);
+  // Where a mail linked here by mistake can go instead (public #134).
+  const moveTo = emails.some((mail) => mail.direction === "INCOMING") ? await applicationChoices(id) : [];
 
   const apply = await loadApplyTab(application, profile, settings, timeZone);
   const prepJobs = await findUnfinishedJobs(prepJobKey(id));
@@ -84,10 +107,26 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       opening: index === 0 && message.role === "AI" && !message.writtenWith,
       canUndo: message.role === "AI" && (readJson(editsSchema, message.edits)?.length ?? 0) > 0,
       undone: message.undone,
+      at: message.createdAt.toISOString(),
     }))
     // Settings → "Show what changed" off hides the list of what was tailored (SET-5).
     .filter((message) => settings.showDiff || !message.opening);
-  const { title, company, location, status, tone, language, followThemeLayout, showPhoto, nextInterviewAt } = application;
+  const { title, role, company, location, status, tone, language, followThemeLayout, showPhoto, nextInterviewAt } = application;
+  // What it needs next (E27-2), as cards and the dashboard say it, in the breadcrumb (E30-2).
+  const flag = applicationFlag(
+    {
+      status,
+      deadline: application.deadline,
+      sentAt: application.sentAt,
+      lastStatusChange: application.events.reduce<Date | null>((latest, event) => (latest && latest > event.at ? latest : event.at), null),
+      updatedAt: application.updatedAt,
+      nextInterviewAt,
+      lastContactAt: latestContact(emails.at(-1)?.sentAt, application.contactedAt),
+      decideBy: application.offer?.decideBy ?? null,
+      waitingReplies: emails.filter((mail) => mail.direction === "INCOMING" && !mail.handled).length,
+    },
+    { now: new Date(), quietDays: settings.quietDays, timeZone },
+  );
   // Units still being rewritten, so a reload keeps showing it.
   const rewriting = unitJobs.flatMap((job) => {
     const input = regenerateUnitJob.input.safeParse(job.input);
@@ -106,9 +145,10 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       application={{
         id,
         title,
-        // The job title as saved, or as the posting was read; "" when neither knows it.
-        role: application.role.trim() || extracted?.role?.trim() || "",
+        // The job title as saved, or as the posting was read; "" when neither knows it (jobauto fork).
+        role: role.trim() || extracted?.role?.trim() || "",
         company,
+        salary: application.salary,
         location,
         status,
         tone,
@@ -120,6 +160,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
         nextInterviewAt,
       }}
       timeZone={timeZone}
+      flag={flag}
       posting={{
         text: application.postingText,
         // New applications only keep web links, but an imported file could carry any URL (E11-5).
@@ -129,19 +170,48 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       match={match}
       requirements={extracted?.requirements ?? []}
       facts={application.facts}
+      knownGaps={application.knownGaps.map((gap) => gap.requirement)}
+      interviews={application.interviews.map((round) => ({
+        id: round.id,
+        round: round.round,
+        at: round.at?.toISOString() ?? null,
+        minutes: round.minutes,
+        place: round.place,
+        people: round.people,
+        notes: round.notes,
+        prep: readJson(prepSchema, round.prep),
+      }))}
+      inCalendar={application.interviewEventId !== null}
+      preparing={prepareJobs.at(-1)?.id ?? null}
+      offer={
+        application.offer && {
+          salary: application.offer.salary,
+          decideBy: application.offer.decideBy?.toISOString().slice(0, 10) ?? null,
+          startDate: application.offer.startDate?.toISOString().slice(0, 10) ?? null,
+          holidays: application.offer.holidays,
+          office: application.offer.office,
+          fromEmail: application.offer.fromEmailId !== null,
+        }
+      }
+      messageDraft={readJson(messageDraftSchema, application.messageDraft)}
+      writingMessage={messageJobs.at(-1)?.id ?? null}
+      threadReady={application.emailThreadId !== null && google.status === "connected" && google.canSend}
+      start={start === "prepare" || start === "follow-up" ? start : null}
+      roles={liveProfile.experience.map((entry) => ({ id: entry.id, label: roleLabel(entry) }))}
       activity={activityTimeline({ notes: application.notes, events: application.events, createdAt: application.createdAt })}
-      meta={metaLine(application)}
+      meta={metaLine(application, profiles.length > 1 ? (profiles.find((entry) => entry.id === application.profileId) ?? profiles[0]).name : "", { timeZone })}
       resume={resume}
       letter={letter}
       themes={themes}
-      baseThemeId={settings.baseThemeId}
+      baseThemeId={baseThemeId}
       languages={[...DOCUMENT_LANGUAGES.map((entry) => entry.name), ...settings.customLanguages]}
       rewritingLanguage={rewritingLanguage}
       email={email}
       writingEmail={emailJobs.at(-1)?.id ?? null}
       writingDocuments={{ resume: resumeJobs.at(-1)?.id ?? null, letter: letterJobs.at(-1)?.id ?? null }}
-      resumeFit={readJson(resumeFitSchema, application.resumeFit)}
-      scoringResume={scoreJobs.at(-1)?.id ?? null}
+      writingApplication={writing && { jobId: writing.id, write: writing.write, notifies }}
+      versions={Object.fromEntries(application.documents.map((document) => [document.kind, document._count.versions]))}
+      checkingRequirements={checkJobs.at(-1)?.id ?? null}
       attachments={{ resume: resume ? fileName("RESUME") : null, letter: letter ? fileName("COVER_LETTER") : null }}
       gmail={
         google.status === "not-configured" && emails.length === 0
@@ -150,11 +220,13 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
               sender:
                 google.status === "connected"
                   ? google.canSend
-                    ? { from: google.email }
+                    ? // As the mail goes out: "Jane Doe <jane@gmail.com>" (#358).
+                      { from: fromLine(liveProfile.basics.name, google.email) }
                     : { from: null, reason: "no-permission" }
                   : { from: null, reason: google.status === "not-configured" ? "not-configured" : "not-connected" },
               sentBefore: application.emailThreadId !== null,
               emails,
+              moveTo,
               reading: google.status === "connected" && google.canRead && settings.gmailRead,
             }
       }
@@ -178,7 +250,6 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       }
       baseSections={sectionsWithContent(resumeContent(liveProfile, { includeReferences: true })).map((key) => ({ key, name: sectionName(key, liveProfile.customSections) }))}
       letterDate={letterDate}
-      score={match && match.items.length > 0 ? matchScore(match) : null}
       initialTab={tabFrom(tab)}
       apply={apply}
       prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
@@ -187,6 +258,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       aiReady={aiReady}
       rewriting={rewriting}
       messages={messages}
+      history={history}
       refining={refineJobs.at(-1)?.id ?? null}
       suggestions={refineSuggestions({
         match,

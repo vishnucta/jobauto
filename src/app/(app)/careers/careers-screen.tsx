@@ -15,14 +15,15 @@ import { BOARD_NAMES, type BoardKind } from "@/lib/careers/boards";
 import type { CareersCheckResult } from "@/lib/careers/check-result";
 import type { EmployerView } from "@/lib/careers/store-types";
 import { formatDateTime } from "@/lib/dates";
-import { searchRunHref } from "@/lib/job-search/search";
+import { libraryHref } from "@/lib/job-search/search";
+import { CAREERS_SOURCE } from "@/lib/job-search/sources";
 
-import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
+import { FindWorkLinks, type JobsCounts } from "../jobs/find-work-links";
 import { addEmployer, checkCareers, deleteEmployer, saveEmployer, switchEmployer } from "./actions";
 
 export type CareersScreenProps = {
   employers: EmployerView[];
-  /** The Find jobs tabs' counts, since Careers pages is one of them. */
+  /** How many recruiters and careers pages there are, for the links beside Positions. */
   counts: JobsCounts;
   /** The profile's search words, for a new employer's words to start from. */
   suggestedWords: string;
@@ -38,7 +39,8 @@ const boardName = (ats: string) => BOARD_NAMES[ats as BoardKind] ?? ats;
 /**
  * Careers pages (jobauto fork): the employers whose own careers pages are
  * checked once a day. Jobs show there days before the job boards have them,
- * and an application sent in the first days is read first.
+ * and an application sent in the first days is read first. New ones land in
+ * Positions; a screen of its own under it, which Find jobs had as a tab.
  */
 export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone }: CareersScreenProps) {
   const router = useRouter();
@@ -49,7 +51,7 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
     if (view.status === "DONE" && view.result) {
       const result = view.result;
       setCheck(null);
-      toast(result.message, result.searchId ? { action: { label: "Show them", onClick: () => router.push(searchRunHref(result.searchId!)) } } : undefined);
+      toast(result.message, result.searchId ? { action: { label: "Show them", onClick: () => router.push(libraryHref({ found: result.searchId! })) } } : undefined);
       router.refresh();
     } else if (view.status === "FAILED") {
       setCheck(null);
@@ -68,13 +70,13 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
   return (
     <>
       <PageHeader
-        title="Find jobs"
-        description="Search for postings near you, then start an application from the one you like."
+        title="Careers pages"
+        breadcrumb={[{ label: "Positions", href: "/jobs" }, { label: "Careers pages" }]}
+        actions={<FindWorkLinks counts={{ ...counts, employers: employers.length }} current="careers" />}
       />
-      <JobsTabs view="careers" counts={{ ...counts, employers: employers.length }} />
       <div className="flex max-w-[860px] flex-col gap-5 px-10 pb-16">
         <p className="text-sm text-pretty text-muted">
-          Follow the employers you&apos;d most like to work for. Their careers pages are checked every morning, and new jobs that match the words and places you give go into Find jobs as a
+          Follow the employers you&apos;d most like to work for. Their careers pages are checked every morning, and new jobs that match the words and places you give go into Positions as a
           search of their own, often days before job boards list them. Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, and pages that
           carry job data.
         </p>
@@ -245,7 +247,7 @@ function EmployerCard({
             {checking ? "Checking…" : "Check now"}
           </Button>
           {employer.lastNew > 0 && (
-            <Link href="/jobs?view=history&from=careers" className={buttonClassName("secondary", "sm")}>
+            <Link href={libraryHref({ portal: CAREERS_SOURCE })} className={buttonClassName("secondary", "sm")}>
               See what it found
             </Link>
           )}
@@ -262,7 +264,7 @@ function EmployerCard({
         open={removing}
         onOpenChange={setRemoving}
         title={`Stop following ${employer.name}?`}
-        description="Its careers page won't be checked any more. The jobs already found on it stay in Find jobs."
+        description="Its careers page won't be checked any more. The jobs already found on it stay in Positions."
         confirmLabel="Stop following"
         onConfirm={() => void remove()}
         returnFocusTo={removeButton}
