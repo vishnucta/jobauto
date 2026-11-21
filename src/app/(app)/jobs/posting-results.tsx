@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { FitDetails } from "@/components/fit-details";
@@ -16,11 +17,12 @@ import { cn } from "@/lib/cn";
 import type { PostingFit } from "@/lib/fit";
 import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
 import type { Person } from "@/lib/network";
+import type { PrepareApplicationResult } from "@/lib/jobs/prepare-application-types";
 import type { JobView } from "@/lib/jobs/runner";
 import { byScore, isAddedSource, postedAgo, postingKey, type FoundPosting, type PostingState, type ShownPosting, type StoredSearch } from "@/lib/job-search/search";
 import { arbeitsagenturPage, describeSourceProblem, searchesWithin, searchSourcesName, SOURCE_INFO } from "@/lib/job-search/sources";
 
-import { dismissFoundPosting, loadFullText, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
+import { dismissFoundPosting, loadFullText, prepareApplication, restorePosting, savePostingForLater, showMorePostings, startScoringPosting, unsavePosting } from "./actions";
 import { useStartApplication } from "./use-start-application";
 
 /** Narrow windows show the posting above the list. */
@@ -34,6 +36,8 @@ export type PostingResultsProps = {
   german?: ProfileGerman;
   /** The people she knows at each employer, by the posting's company (network.ts). */
   network?: Record<string, Person[]>;
+  /** Dossier's own AI model can write: "Prepare it for me" makes the application in one click, in the background. */
+  canPrepare?: boolean;
 } & (
   | {
       mode: "search";
@@ -96,6 +100,9 @@ export function PostingResults(props: PostingResultsProps) {
   const detail = useRef<HTMLElement>(null);
   const now = new Date(props.today);
   const { starting, start } = useStartApplication();
+  const router = useRouter();
+  // Postings whose application is being prepared, with the step under way, by postingKey.
+  const [preparing, setPreparing] = useState<Record<string, { jobId: string; step: string | null }>>({});
   // Postings being scored (#208), with the step under way, by postingKey.
   const [scoring, setScoring] = useState<Record<string, { jobId: string; step: string | null }>>({});
 
@@ -171,6 +178,34 @@ export function PostingResults(props: PostingResultsProps) {
     setScoring((current) => (result.ok && "jobId" in result.data ? { ...current, [key]: { jobId: result.data.jobId, step: null } } : without(current, key)));
   };
 
+  const ready = (key: string, title: string, applicationId: string) => {
+    setPreparing((current) => without(current, key));
+    updateState(key, { applicationId });
+    toast(`Ready to read: ${title || "your application"}.`, { action: { label: "Open", onClick: () => router.push(`/applications/${applicationId}`) } });
+  };
+
+  /** "Prepare it for me": the application is read, written and created in the background; she goes on browsing. */
+  const prepare = async (posting: ShownPosting) => {
+    const key = postingKey(posting);
+    if (preparing[key]) return;
+    setPreparing((current) => ({ ...current, [key]: { jobId: "", step: null } }));
+    const result = toastResult(await prepareApplication({ posting: withoutState(posting) }));
+    if (!result.ok) return void setPreparing((current) => without(current, key));
+    const { jobId, applicationId } = result.data;
+    if (applicationId) return ready(key, posting.title, applicationId);
+    setPreparing((current) => ({ ...current, [key]: { jobId: jobId ?? "", step: null } }));
+  };
+
+  const preparingChanged = (posting: ShownPosting, job: JobView<PrepareApplicationResult>) => {
+    const key = postingKey(posting);
+    if (job.status === "DONE" && job.result) return ready(key, posting.title, job.result.applicationId);
+    if (job.status === "DONE" || job.status === "FAILED") {
+      setPreparing((current) => without(current, key));
+      return void toast(job.error ?? "The application couldn't be prepared. Try again, or start it step by step.");
+    }
+    setPreparing((current) => (current[key] ? { ...current, [key]: { ...current[key], step: job.step } } : current));
+  };
+
   const scoringChanged = (key: string, job: JobView<PostingFit>) => {
     if (job.status === "DONE" || job.status === "FAILED") {
       setScoring((current) => without(current, key));
@@ -216,6 +251,10 @@ export function PostingResults(props: PostingResultsProps) {
       {Object.entries(scoring).map(([key, { jobId }]) =>
         jobId ? <ScoreWatcher key={jobId} jobId={jobId} onChange={(job) => scoringChanged(key, job)} /> : null,
       )}
+      {Object.entries(preparing).map(([key, { jobId }]) => {
+        const posting = postings.find((entry) => postingKey(entry) === key);
+        return jobId && posting ? <PrepareWatcher key={jobId} jobId={jobId} onChange={(job) => preparingChanged(posting, job)} /> : null;
+      })}
       <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-3">
         {props.mode === "search" && props.search.problems.length > 0 && (
           <div role="note" className="flex flex-col gap-1 rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
@@ -318,8 +357,17 @@ export function PostingResults(props: PostingResultsProps) {
           scoring={scoring[postingKey(selected)] ?? null}
           onScore={() => void score(selected)}
         >
+          {!selected.state.dismissed && !selected.state.applicationId && props.canPrepare && (
+            <Button size="sm" aria-disabled={preparing[postingKey(selected)] ? true : undefined} onClick={preparing[postingKey(selected)] ? undefined : () => void prepare(selected)}>
+              {preparing[postingKey(selected)] ? (preparing[postingKey(selected)].step ?? "Preparing…") : "Prepare it for me"}
+            </Button>
+          )}
           {!selected.state.dismissed && (
-            <StartButton starting={starting === postingKey(selected)} onClick={() => void start(withoutState(selected), postingKey(selected))} />
+            <StartButton
+              secondary={props.canPrepare && !selected.state.applicationId}
+              starting={starting === postingKey(selected)}
+              onClick={() => void start(withoutState(selected), postingKey(selected))}
+            />
           )}
         </PostingDetail>
       )}
@@ -340,11 +388,17 @@ function ScoreWatcher({ jobId, onChange }: { jobId: string; onChange: (job: JobV
   return null;
 }
 
-/** "Start application →" on a posting (E14-8). */
-export function StartButton({ starting, onClick }: { starting: boolean; onClick: () => void }) {
+/** Follows an application being prepared in the background. */
+function PrepareWatcher({ jobId, onChange }: { jobId: string; onChange: (job: JobView<PrepareApplicationResult>) => void }) {
+  useJob<PrepareApplicationResult>(jobId, 0, onChange);
+  return null;
+}
+
+/** "Start application →" on a posting (E14-8); beside "Prepare it for me", it's the way to do it step by step. */
+export function StartButton({ starting, onClick, secondary = false }: { starting: boolean; onClick: () => void; secondary?: boolean }) {
   return (
-    <Button size="sm" aria-disabled={starting || undefined} onClick={starting ? undefined : onClick}>
-      {starting ? "Starting…" : "Start application →"}
+    <Button variant={secondary ? "secondary" : "primary"} size="sm" aria-disabled={starting || undefined} onClick={starting ? undefined : onClick}>
+      {starting ? "Starting…" : secondary ? "Step by step →" : "Start application →"}
     </Button>
   );
 }
@@ -553,7 +607,7 @@ function PostingDetail({
 
       {state.applicationId && (
         <p role="note" className="rounded-card bg-track px-4 py-3 text-meta">
-          You&apos;ve applied for this.{" "}
+          You have an application for this.{" "}
           <Link href={`/applications/${state.applicationId}`} className="underline underline-offset-2">
             Open the application
           </Link>

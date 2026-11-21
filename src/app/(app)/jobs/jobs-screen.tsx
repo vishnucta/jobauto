@@ -56,6 +56,8 @@ export type JobsScreenProps = {
   german?: ProfileGerman;
   /** The people she knows at each employer on screen, by the posting's company (network.ts). */
   network?: Record<string, Person[]>;
+  /** Dossier's own AI model can write: postings offer "Prepare it for me". */
+  canPrepare?: boolean;
   /** Every country by name, named on the server. */
   countries: readonly Country[];
   /** The search, past searches, or the Saved or Dismissed postings. */
@@ -94,6 +96,7 @@ export function JobsScreen({
   scoreInClaude = false,
   german = "NONE",
   network = {},
+  canPrepare = false,
   countries,
   view,
   query,
@@ -138,6 +141,7 @@ export function JobsScreen({
           scoreInClaude={scoreInClaude}
           german={german}
           network={network}
+          canPrepare={canPrepare}
           empty={from ? `No postings from ${filterName(from)}.` : undefined}
         />
       </>
@@ -169,6 +173,7 @@ export function JobsScreen({
           scoreInClaude={scoreInClaude}
           german={german}
           network={network}
+          canPrepare={canPrepare}
           empty={from ? `Nothing ${view} from ${filterName(from)}.` : undefined}
         />
       </>
@@ -227,6 +232,7 @@ export function JobsScreen({
             scoreInClaude={scoreInClaude}
             german={german}
             network={network}
+            canPrepare={canPrepare}
             onSearchAgain={() => run(search.query, startSources)}
             searching={pending}
           />

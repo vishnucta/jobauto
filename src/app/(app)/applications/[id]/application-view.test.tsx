@@ -235,6 +235,17 @@ describe("the document tabs (E8-2)", () => {
     expect(screen.getByRole("tab", { name: "Apply" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("shows a draft how to send it, but not an agent draft still waiting for review (jobauto fork)", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<ApplicationView {...props} />);
+    const guide = screen.getByRole("region", { name: "How to send this application" });
+    await user.click(within(guide).getByRole("button", { name: "Cover letter" }));
+    expect(screen.getByRole("tab", { name: "Cover letter" })).toHaveAttribute("aria-selected", "true");
+    unmount();
+    render(<ApplicationView {...props} application={{ ...props.application, awaitingReview: true }} />);
+    expect(screen.queryByRole("region", { name: "How to send this application" })).not.toBeInTheDocument();
+  });
+
   it("has Resume, Cover letter, Email and the posting with its match", () => {
     render(<ApplicationView {...props} />);
     const tabs = within(screen.getByRole("tablist", { name: "Application" })).getAllByRole("tab");

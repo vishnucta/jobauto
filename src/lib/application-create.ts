@@ -44,12 +44,15 @@ export type ApplicationReading = {
  * Who's creating it, and the claim that stops a second click, a retry or a
  * second run from making two applications: the write-documents job for New
  * application, the candidate (DRAFTING → DRAFTED) for the agent. Claude chat
- * saves through the connector (#221), where one call makes one application.
+ * saves through the connector (#221), where one call makes one application;
+ * Prepare application on Find jobs (jobauto fork) makes one for its posting,
+ * which its job checks before it writes.
  */
 export type ApplicationClaim =
   | { kind: "manual"; writeJobId: string; readJobId: string; postingId: string | null; startupId?: string | null }
   | { kind: "agent"; candidateId: string; score: number }
-  | { kind: "connector"; postingId: string | null };
+  | { kind: "connector"; postingId: string | null }
+  | { kind: "prepare"; postingId: string };
 
 export type CreateApplicationInput = {
   reading: ApplicationReading;
@@ -120,6 +123,11 @@ export async function createApplicationFromDocuments({ reading, documents, match
         data: { status: AgentCandidateStatus.DRAFTED, error: null },
       });
       if (count === 0) throw new ActionError("That posting is no longer waiting for a draft.");
+    } else if (claim.kind === "prepare") {
+      // Locked (by a write that changes nothing), so two preparations of one posting make one application.
+      await tx.$executeRaw`UPDATE "Posting" SET id = id WHERE id = ${claim.postingId}`;
+      const linked = await tx.posting.findUnique({ where: { id: claim.postingId }, select: { applicationId: true } });
+      if (linked?.applicationId) return { id: linked.applicationId, isNew: false };
     }
 
     // While an experiment runs, a new application gets the version with fewer so far (experiments.ts).

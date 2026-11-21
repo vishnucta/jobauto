@@ -82,6 +82,7 @@ import { ApplyTab } from "./apply-tab";
 import { PrepTab, type PrepTabData } from "./prep-tab";
 import { RecruiterEyeCard } from "./recruiter-eye-card";
 import { WorkSampleTab, type WorkSampleTabData } from "./work-sample-tab";
+import { SendGuide } from "./send-guide";
 import { EnglishCopy } from "./english-copy";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
@@ -935,6 +936,18 @@ export function ApplicationView({
           <span className="font-medium">Experiment “{version.experiment}”:</span> this one is version {version.label}. Write it that way before you send it.
         </p>
       )}
+      {application.status === "DRAFT" && !application.awaitingReview && (resume || letter) && (
+        <SendGuide
+          plan={apply.plan}
+          hasResume={Boolean(resume)}
+          hasLetter={Boolean(letter)}
+          hasEmail={Boolean(emailUnits)}
+          waitingInBrowser={apply.attempts[0]?.status === "WAITING"}
+          letterAsks={letterAsks}
+          onTab={selectTab}
+        />
+      )}
+
       <div className="@container flex min-h-0 flex-1 flex-wrap @min-[780px]/page:flex-nowrap">
         <TabsContent value="resume" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           {resume && resumeTheme && resumeUnits ? (

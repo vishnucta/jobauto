@@ -35,7 +35,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const from = sourceFilterFromParams(params);
   const typed = queryFromParams(params);
   const searchId = typeof params.search === "string" ? params.search : undefined;
-  const [config, timeZone, postingCounts, searches, recruiters, employers, profile, scoreInClaude] = await Promise.all([
+  const aiUsable = isAiUsable();
+  const [config, timeZone, postingCounts, searches, recruiters, employers, profile, scoreInClaude, canPrepare] = await Promise.all([
     loadJobSearchConfig(),
     userTimeZone(),
     countPostings(),
@@ -43,7 +44,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     prisma.recruiter.count(),
     prisma.employer.count(),
     loadProfile(),
-    isAiUsable().then(handsOffToClaude),
+    aiUsable.then(handsOffToClaude),
+    aiUsable,
   ]);
   const now = new Date();
 
@@ -68,6 +70,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       scoreInClaude={scoreInClaude}
       german={profileGerman(profile.languages)}
       network={network}
+      canPrepare={canPrepare}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       view={view}

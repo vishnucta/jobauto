@@ -31,14 +31,18 @@ export const emailJobKey = (applicationId: string) => `email:${applicationId}`;
  */
 export const writeEmailJob = defineJob({
   type: "write-email",
-  input: z.object({ applicationId: z.string().min(1) }),
+  input: z.object({
+    applicationId: z.string().min(1),
+    /** The address the posting names, for when the email has none (Prepare it for me, jobauto fork). */
+    to: z.string().optional(),
+  }),
   result: z.object({
     /** The email as written. */
     units: unitsSchema,
     /** The email it replaced, for Undo; null for the first one. */
     previous: unitsSchema.nullable(),
   }),
-  async run({ applicationId }, { step, signal }) {
+  async run({ applicationId, to }, { step, signal }) {
     await step("Writing the email");
     const application = await prisma.application.findUniqueOrThrow({ where: { id: applicationId }, include: { documents: true, startup: { select: { emails: true } } } });
     const unitsOf = (kind: DocumentKind): Unit[] | null => {
@@ -64,9 +68,9 @@ export const writeEmailJob = defineJob({
       { ...options, language: application.language || options.language, signal },
     );
 
-    const startupTo = startupAddress(application.startup?.emails);
+    const fallbackTo = startupAddress(application.startup?.emails) || (to ?? "");
     const withTo = (units: Unit[], kept = "") =>
-      units.map((unit) => (unit.id === "to" && !unit.text && (kept || startupTo) ? { ...unit, text: kept || startupTo } : unit));
+      units.map((unit) => (unit.id === "to" && !unit.text && (kept || fallbackTo) ? { ...unit, text: kept || fallbackTo } : unit));
 
     if (!unitsOf(DocumentKind.EMAIL)) {
       try {

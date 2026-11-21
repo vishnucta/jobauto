@@ -24,3 +24,4 @@ import "./prepare-call";
 import "./prepare-practice";
 import "./english-copy";
 import "./write-work-sample";
+import "./prepare-application";

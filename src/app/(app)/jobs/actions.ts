@@ -8,6 +8,7 @@ import { handOffFoundPosting, handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { fullText } from "@/lib/job-search/find";
 import { foundPostingSchema, JOB_SOURCES, POSTING_SOURCES, searchQuerySchema } from "@/lib/job-search/search";
+import { startPreparing } from "@/lib/jobs/prepare-application";
 import { startScoring } from "@/lib/jobs/score-posting";
 import { removeSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { dismissPosting, savePosting, storePosting, unmarkPosting } from "@/lib/postings";
@@ -72,6 +73,19 @@ export const startApplicationFrom = action(z.object({ posting: foundPostingSchem
   const text = await fullText(posting);
   const stored = await storePosting(text ? { ...posting, description: text, complete: true } : posting);
   return { postingId: stored.id };
+});
+
+/**
+ * "Prepare application" (jobauto fork): keeps the posting with its whole
+ * text, then reads it, writes the documents and creates the Draft in the
+ * background, in one go. Answers with the job to follow, or the application
+ * when the posting has one already.
+ */
+export const prepareApplication = action(z.object({ posting: foundPostingSchema }), async ({ posting }) => {
+  if (!(await isAiUsable())) throw new ActionError("Set up an AI provider in Settings → AI provider first, or start the application step by step.");
+  const text = await fullText(posting);
+  const stored = await storePosting(text ? { ...posting, description: text, complete: true } : posting);
+  return { postingId: stored.id, ...(await startPreparing(stored.id)) };
 });
 
 /** Brings a dismissed posting back, into Saved again when it was there (Undo). */
