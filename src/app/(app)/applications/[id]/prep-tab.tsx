@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useJob } from "@/hooks/use-job";
 import { FALLBACK, SAY_AGAIN, spokenMatch, type CallPrep, type Pair } from "@/lib/call-prep";
 
+import { preparePractice } from "../../practice/actions";
 import { prepareForCall } from "./prep-actions";
 
 export type PrepTabData = {
@@ -31,7 +32,20 @@ const PRINT_CSS = `@media print {
  * the phone, and a practice mode that reads each question aloud and listens
  * to her answer.
  */
-export function PrepTab({ applicationId, data, aiReady, company }: { applicationId: string; data: PrepTabData; aiReady: boolean; company: string }) {
+export function PrepTab({
+  applicationId,
+  data,
+  aiReady,
+  company,
+  practice = false,
+}: {
+  applicationId: string;
+  data: PrepTabData;
+  aiReady: boolean;
+  company: string;
+  /** Interview practice (jobauto fork): the pack from her profile alone, before there's a call. */
+  practice?: boolean;
+}) {
   const router = useRouter();
   const [jobId, setJobId] = useState(data.jobId);
   const [practising, setPractising] = useState(false);
@@ -47,7 +61,7 @@ export function PrepTab({ applicationId, data, aiReady, company }: { application
   const pack = data.pack;
 
   const prepare = async () => {
-    const result = toastResult(await prepareForCall({ id: applicationId }));
+    const result = toastResult(await (practice ? preparePractice({}) : prepareForCall({ id: applicationId })));
     if (result.ok) setJobId(result.data.jobId);
   };
 
@@ -62,13 +76,21 @@ export function PrepTab({ applicationId, data, aiReady, company }: { application
     return (
       <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-10 py-8">
         <div className="flex max-w-[640px] flex-col gap-3 rounded-panel border border-line-card bg-card p-7">
-          <h2 className="font-serif text-section">Prepare for the call</h2>
-          <p className="text-sm text-pretty text-muted">
-            A first call in Germany often starts in German. This prepares the questions it usually asks, with answers from your profile in short German you can say, the English beside
-            them, a line for salary, three stories from your roles, and questions to ask them. Print it to keep by the phone, and practise it out loud. It&apos;s prepared on its own
-            when the application moves to Screening or Interview.
-          </p>
-          {aiReady ? prepareButton("Prepare for the call") : <p className="text-meta text-warning">Set up an AI provider in Settings → AI provider first.</p>}
+          <h2 className="font-serif text-section">{practice ? "Practise before the first call" : "Prepare for the call"}</h2>
+          {practice ? (
+            <p className="text-sm text-pretty text-muted">
+              Every first call in Germany asks much the same questions, and it often starts in German. Practise them now, so the first real call isn&apos;t the first time you say the
+              answers: from your profile, in short German at your level with the English beside it, a line for salary, three stories from your roles, and questions to ask. Each
+              application gets its own pack on its Call prep tab once it reaches Screening.
+            </p>
+          ) : (
+            <p className="text-sm text-pretty text-muted">
+              A first call in Germany often starts in German. This prepares the questions it usually asks, with answers from your profile in short German you can say, the English
+              beside them, a line for salary, three stories from your roles, and questions to ask them. Print it to keep by the phone, and practise it out loud. It&apos;s prepared on
+              its own when the application moves to Screening or Interview.
+            </p>
+          )}
+          {aiReady ? prepareButton(practice ? "Prepare my practice call" : "Prepare for the call") : <p className="text-meta text-warning">Set up an AI provider in Settings → AI provider first.</p>}
           <SayItCard pair={FALLBACK} title="When German runs out" />
         </div>
       </div>
@@ -92,7 +114,7 @@ export function PrepTab({ applicationId, data, aiReady, company }: { application
         <Practice questions={[...pack.questions, { question: { de: "Und wenn Ihr Deutsch nicht reicht?", en: "And if your German isn't enough?" }, answer: FALLBACK }]} />
       ) : (
         <article data-prep-print aria-label="Call prep" className="flex max-w-[860px] flex-col gap-6">
-          <h2 className="font-serif text-section">First call{company ? ` with ${company}` : ""}</h2>
+          <h2 className="font-serif text-section">{practice ? "Practice call" : `First call${company ? ` with ${company}` : ""}`}</h2>
 
           {pack.gaps.length > 0 && (
             <section aria-label="Decide before the call" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">

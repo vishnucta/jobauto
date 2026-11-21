@@ -85,6 +85,7 @@ The agent's searches share one daily schedule and one AI score/draft limit per b
 | Read in English, on a resume or cover letter written in another language | That document's parts, never a letter's sender or signature. The English copy is shown to you and not kept in the document |
 | Writing a work sample ("My first 90 days"), with **Write my first 90 days** on an application | Your profile without contact details, as for the documents, the job's details, the posting, and the facts you gave for the application |
 | Preparing for a call (Call prep), with **Prepare for the call**, or on its own when an application moves to Screening or Interview | Your profile without contact details, as for the documents, your German level, the job's details, the posting, and the facts you gave for the application |
+| Practising for calls (Interview practice), with **Prepare my practice call** | Your profile without contact details, as for the documents, and your German level. No posting: the pack is kept in your settings |
 
 Never sent in a prompt: your email, phone, address, date of birth and links, your references, the notes you keep on an application, and the addresses Startups finds: a startup's text reaches New application without them, and the email's recipient is filled in on your server. A posting may name a contact person, a mail from an employer has its sender's name and address, and what you write in the chat may mention people, so other people's details can still be sent.
 

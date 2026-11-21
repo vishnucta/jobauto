@@ -4,6 +4,7 @@ import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated
 import { announcementFeedSchema } from "@/lib/announcements/contract";
 import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
+import { callPrepSchema } from "@/lib/call-prep";
 import { experimentSchema } from "@/lib/experiments";
 import { DEFAULT_SECTION_LAYOUT, sectionLayoutSchema } from "@/lib/resume-sections";
 import { setupGuideSchema } from "@/lib/setup-guide";
@@ -221,6 +222,9 @@ export const settingsSchema = z.object({
   supporterSentOn: z.string().nullable().catch(null),
   /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
   careersCheckedOn: z.string().nullable().catch(null),
+  /** Interview practice (jobs/prepare-practice.ts): the call prep pack from her profile alone, and the prompt that wrote it. */
+  practicePrep: json(callPrepSchema).nullable().catch(null),
+  practicePrepWith: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh
   // only runs while it's in use, and what the last refresh found. They belong
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).

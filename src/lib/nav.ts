@@ -1,4 +1,4 @@
-import { Bot, BriefcaseBusiness, FileText, Gauge, House, Inbox, Rocket, Search, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Bot, BriefcaseBusiness, FileText, Gauge, House, Inbox, Mic, Rocket, Search, Settings, UserRound, type LucideIcon } from "lucide-react";
 
 // The app's sections, shared by the sidebar and the page bar so they always agree.
 
@@ -21,6 +21,8 @@ export const NAV: { label?: string; items: NavItem[] }[] = [
     items: [
       { href: "/profile", label: "Profile", icon: UserRound },
       { href: "/resume", label: "Base resume", icon: FileText },
+      // Interview practice (jobauto fork): the call prep pack before there's a call.
+      { href: "/practice", label: "Interview practice", icon: Mic },
     ],
   },
   {

@@ -85,6 +85,8 @@ describe("stored settings", () => {
       alertProblem: null,
       alertMinScore: 80,
       careersCheckedOn: null,
+      practicePrep: null,
+      practicePrepWith: null,
       supporterAddress: null,
       supporterDay: 1,
       supporterHour: 8,
