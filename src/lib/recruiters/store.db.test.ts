@@ -14,6 +14,8 @@ vi.mock("@/lib/prisma", async () => {
 
 const prisma = () => db.client!;
 const NOW = new Date("2026-11-10T09:00:00.000Z");
+/** When the recruiters in a test were added: before NOW, so the history's order doesn't depend on today's date. */
+const ADDED = new Date("2026-11-09T09:00:00.000Z");
 const fields = { name: "Selby Jennings", contactName: "", email: "", website: "", speciality: "Financial services", notes: "" };
 
 beforeEach(() => resetDatabase(prisma()));
@@ -28,7 +30,7 @@ describe("recruiters", () => {
   });
 
   it("start the follow-up clock when written to, and stop it on a reply", async () => {
-    const { id } = await createRecruiter(fields);
+    const { id } = await createRecruiter(fields, "you", ADDED);
     const written = await setRecruiterStatus(id, "CONTACTED", NOW);
     expect(written).toMatchObject({ status: "CONTACTED", contactedAt: NOW.toISOString(), followUpAt: "2026-11-17T09:00:00.000Z" });
     expect(written!.events.map((event) => event.text)).toEqual(["Added", "Marked as contacted"]);
@@ -46,7 +48,7 @@ describe("recruiters", () => {
   });
 
   it("can wait a few more days before a follow-up, but only while waiting for an answer", async () => {
-    const { id } = await createRecruiter(fields);
+    const { id } = await createRecruiter(fields, "you", ADDED);
     expect(await snoozeRecruiter(id, NOW)).toBeNull();
     await setRecruiterStatus(id, "CONTACTED", NOW);
     const later = new Date("2026-11-17T09:00:00.000Z");

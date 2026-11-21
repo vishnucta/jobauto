@@ -61,10 +61,10 @@ export type RecruiterFields = {
 
 const ADDED_TEXT: Record<string, string> = { you: "Added", "starter list": "Added from the starter list" };
 
-export async function createRecruiter(fields: RecruiterFields, source = "you"): Promise<RecruiterView> {
+export async function createRecruiter(fields: RecruiterFields, source = "you", now = new Date()): Promise<RecruiterView> {
   // Adding one by hand, or from the starter list, lifts "removed": the user wants it now.
   await prisma.recruiterBlock.deleteMany({ where: { key: foldName(fields.name) } });
-  const row = await prisma.recruiter.create({ data: { ...fields, source, events: { create: { text: ADDED_TEXT[source] ?? "Added" } } }, include: withEvents });
+  const row = await prisma.recruiter.create({ data: { ...fields, source, events: { create: { text: ADDED_TEXT[source] ?? "Added", at: now } } }, include: withEvents });
   return viewOf(row);
 }
 
