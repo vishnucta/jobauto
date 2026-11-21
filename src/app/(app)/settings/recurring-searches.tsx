@@ -62,7 +62,7 @@ export function RecurringSearches({ initial, suggestedQuery, source, countries }
     <div>
       <h3 className="text-field font-medium">Recurring searches ({searches.length}/{MAX_AGENT_SEARCHES})</h3>
       <p className="text-meta text-muted">
-        Up to {MAX_AGENT_SEARCHES} named searches, including disabled ones. Enabled searches run in this order through the shared source in Settings → Job search.
+        Up to {MAX_AGENT_SEARCHES} named searches, including disabled ones. Enabled searches run in this order through the source the agent searches with.
         Saved, dismissed and applied-for postings stay out of the review queue.
       </p>
     </div>
