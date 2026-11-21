@@ -6,19 +6,15 @@ import type { AgentCandidate, Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { AiError } from "@/lib/ai/errors";
-import { createApplicationFromDocuments, type ApplicationDetails } from "@/lib/application-create";
-import type { Extracted } from "@/lib/application-data";
 import { fullText } from "@/lib/job-search/find";
 import { postingText, safeLink, type FoundPosting } from "@/lib/job-search/search";
-import { readPostingJob } from "@/lib/jobs/read-posting";
 import { cancelJob, defineJob, findUnfinishedJobs, startJob, type JobContext } from "@/lib/jobs/runner";
-import { writeDocumentsJob } from "@/lib/jobs/write-documents";
+import { writeApplication } from "@/lib/jobs/write-application";
 import { logServerError } from "@/lib/log";
 import { dismissPosting, storePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { emit } from "@/lib/notifications/notify";
 import { profileIdOr } from "@/lib/profiles";
-import { loadSettings } from "@/lib/settings-data";
 
 import { DISMISSED_TRIM, stringsOf } from "./candidates";
 import { lockAgentSearches } from "./searches";
@@ -49,19 +45,6 @@ function foundFromCandidate(candidate: AgentCandidate): FoundPosting {
   };
 }
 
-/** The application's details from what was read, as New application fills them in. */
-function detailsFrom(extracted: Extracted): ApplicationDetails {
-  return {
-    title: extracted.title ?? [extracted.role, extracted.company].filter(Boolean).join(" · "),
-    company: extracted.company ?? "",
-    role: extracted.role ?? "",
-    location: extracted.location ?? "",
-    mode: extracted.mode ?? "",
-    salary: extracted.salary ?? "",
-    deadline: extracted.deadline ?? "",
-  };
-}
-
 /**
  * Prepares a candidate's draft. It's claimed first (SCORED → DRAFTING), so a
  * retry, a second click and auto-draft can't make two applications; a failure
@@ -83,7 +66,6 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
     // The source may have given only a snippet; the whole text writes a better draft.
     const description = (await fullText(found)) ?? candidate.description;
     if (!description.trim()) throw new ActionError("That posting has no text to write from. Open it and start an application by hand.");
-    const posting = postingText({ ...found, description });
 
     // Written from the profile of the search that found it first (E24-6), or the one that scored it best when that search scores against all (E25-5); the first profile's when that search is gone.
     const foundBy = await prisma.agentCandidateSearch.findFirst({
@@ -94,34 +76,24 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
     const best = foundBy?.search?.allProfiles ? await bestProfileFor(candidate) : null;
     const profileId = await profileIdOr(best ?? foundBy?.search?.profileId);
 
-    await context.step(`Reading the posting from ${name}`);
-    // Its score for that profile, when the agent kept one, answers How you match with no new call (E25-7).
-    const reading = await readPostingJob.run({ posting, profileId, scored: { source: candidate.source, externalId: candidate.externalId } }, context);
-    await context.step(`Writing the draft for ${name}`);
-    const settings = await loadSettings();
-    const documents = await writeDocumentsJob.run(
-      { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: "both", profileId },
-      context,
-    );
     // Keep the whole text, so a retry doesn't fetch it again.
     if (!candidate.complete && description !== candidate.description) {
       await prisma.agentCandidate.update({ where: { id: candidateId }, data: { description, complete: true } });
     }
-
-    const applicationId = await createApplicationFromDocuments({
-      reading: { posting, ...reading },
-      documents,
-      match: reading.match,
-      details: detailsFrom(reading.extracted),
-      postingUrl: candidate.url,
-      tone: settings.defaultTone,
-      note: "",
-      claim: { kind: "agent", candidateId, score: candidate.score },
-      profileId,
-    });
-    // The job holds nothing of the draft, but goes with it all the same.
-    await prisma.job.updateMany({ where: { id: context.id }, data: { applicationId } });
-    return applicationId;
+    // Read, written and created as Prepare it for me does (write-application.ts, jobauto fork). Its score for
+    // that profile, when the agent kept one, answers How you match with no new call (E25-7).
+    return await writeApplication(
+      {
+        posting: postingText({ ...found, description }),
+        postingUrl: candidate.url,
+        name,
+        write: "both",
+        claim: { kind: "agent", candidateId, score: candidate.score },
+        profileId,
+        scored: { source: candidate.source, externalId: candidate.externalId },
+      },
+      context,
+    );
   } catch (error) {
     const known = error instanceof AiError || error instanceof ActionError;
     const message = context.signal.aborted ? "Cancelled." : known ? error.message : "The draft couldn't be prepared. Try again.";

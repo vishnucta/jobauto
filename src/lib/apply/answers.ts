@@ -28,13 +28,27 @@ export const applyAnswersSchema = z.object({
   postalCode: z.string().max(12).catch(""),
   /** Allowed to work in Germany without sponsorship. */
   workPermit: z.boolean().catch(true),
+  /** The German course she's in, and the exam date, e.g. "B1 course since Sept 2026, exam March 2027" (recruiter-eye.ts). */
+  germanCourse: z.string().max(120).catch(""),
+  /** Her degree's German equivalence, e.g. "ZAB statement: equivalent to a German Bachelor" (recruiter-eye.ts). */
+  degreeRecognition: z.string().max(160).catch(""),
+  /** Where she'd work, e.g. "Ganz Deutschland, auch remote", for the Kurzprofil and agencies (kurzprofil.ts). */
+  mobility: z.string().max(120).catch(""),
   germanLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("A2"),
   englishLevel: z.enum(LANGUAGE_LEVEL_ANSWERS).catch("C1"),
   /** Press Send for the user, on systems where that's safe; off, the user presses it herself. */
   autoSubmit: z.boolean().catch(false),
+  /**
+   * False while these are only the defaults, never saved (settings.ts): then
+   * letters and the Kurzprofil don't claim a work permit she never confirmed.
+   */
+  confirmed: z.boolean().optional(),
 });
 export type ApplyAnswers = z.output<typeof applyAnswersSchema>;
 export const DEFAULT_APPLY_ANSWERS: ApplyAnswers = applyAnswersSchema.parse({});
+
+/** Whether letters and the Kurzprofil may say she can work in Germany without a visa. */
+export const permitClaimed = (answers: Pick<ApplyAnswers, "workPermit" | "confirmed">) => answers.workPermit && answers.confirmed !== false;
 
 /** Everything a form field can be filled from. */
 export const ANSWER_KEYS = [

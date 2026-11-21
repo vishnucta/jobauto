@@ -15,6 +15,7 @@ import { updateDocuments } from "@/lib/document-units";
 import { saveVersion } from "@/lib/document-versions";
 import { newFrame, withFrame } from "@/lib/letter-frame";
 import { letterAvailability } from "@/lib/letter-availability";
+import { readinessLines } from "@/lib/recruiter-eye";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
 import { sectionLayoutSchema, withoutSectionsOff } from "@/lib/resume-sections";
@@ -73,7 +74,7 @@ export const writeDocumentJob = defineJob({
       writtenWith = resume.promptVersion;
     } else {
       const availability = letterAvailability(posting, settings.applyAnswers).say;
-      const letter = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting, availability }, taskOptions);
+      const letter = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting, availability, readiness: readinessLines(profile, settings.applyAnswers) }, taskOptions);
       const language = application.language || settings.docLanguage || extracted.language || "English";
       // The sender and signature from the profile, and today's date, as a new application's letter has (E8-11).
       units = withFrame(

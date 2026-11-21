@@ -13,6 +13,12 @@ vi.mock("../agent/actions", () => ({
   saveAgentSettings: vi.fn(async () => ({ ok: true, data: null })),
   saveRecurringSearch: vi.fn(), moveRecurringSearch: vi.fn(), deleteRecurringSearch: vi.fn(), setRecurringSearchEnabled: vi.fn(),
 }));
+// The supporter digest's own actions (jobauto fork).
+vi.mock("./actions", () => ({
+  updateSettings: vi.fn(async () => ({ ok: true, data: null })),
+  saveSupporterAddress: vi.fn(async ({ address }: { address: string | null }) => ({ ok: true, data: { address } })),
+  sendDigestNow: vi.fn(async () => ({ ok: true, data: null })),
+}));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { ok: boolean; error?: string }) => (result.ok ? result : (toast(result.error!), result)) }));
 
 const initial: AgentSettings = { enabled: false, hour: 7, covers: "two-thirds", maxScores: 15, maxDrafts: 3, autoDraft: false, strongCovers: "two-thirds" };
@@ -181,6 +187,38 @@ describe("Settings → Job agent", () => {
     vi.mocked(deleteRecurringSearch).mockResolvedValueOnce({ ok: true, data: null });
     await user.click(within(dialog).getByRole("button", { name: "Delete search" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Add search" })).toBeEnabled());
+  });
+
+  it("searches a portal of hers while only the Bundesagentur is switched on, and can be given portals of its own (jobauto fork)", async () => {
+    const user = userEvent.setup();
+    const portals = { automatic: ["JSEARCH"], choices: [{ id: "JSEARCH", name: "JSearch" }, { id: "FREEHIRE", name: "FreeHire" }] };
+    open({ source: null, sources: ["JSEARCH"], portals });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Searches with")).toHaveDisplayValue("Automatic (JSearch)");
+    expect(screen.getByText(/which the agent may not search on its own/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Searches with"), "Portals of its own");
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ portals: ["JSEARCH"] });
+    // At least one stays ticked; others can be added, switched on in Job search or not.
+    expect(screen.getByRole("checkbox", { name: "JSearch" })).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: "FreeHire" }));
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ portals: ["JSEARCH", "FREEHIRE"] });
+    await user.click(screen.getByRole("checkbox", { name: "JSearch" }));
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ portals: ["FREEHIRE"] });
+    await user.selectOptions(screen.getByLabelText("Searches with"), "Automatic (JSearch)");
+    expect(saveAgentSettings).toHaveBeenLastCalledWith({ portals: null });
+  });
+
+  it("says when none of the portals chosen for it can be searched now (jobauto fork)", () => {
+    const portals = { automatic: ["JSEARCH"], choices: [{ id: "JSEARCH", name: "JSearch" }, { id: "ADZUNA", name: "Adzuna" }] };
+    open({ initial: { ...initial, portals: ["ADZUNA"] }, sources: [], portals });
+    expect(screen.getByRole("note")).toHaveTextContent("None of the portals chosen for the agent below can be searched now. Check their keys in Settings → Job search, or choose others.");
+    expect(screen.getByRole("checkbox", { name: "Adzuna" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "JSearch" })).not.toBeChecked();
+  });
+
+  it("shows the weekly digest for a supporter when it's given (jobauto fork)", () => {
+    open({ supporter: { address: null, day: 7, hour: 18 } });
+    expect(screen.getByText("Weekly digest for a supporter")).toBeInTheDocument();
   });
 
   it("warns for Bundesagentur without disabling manual search and points to missing global providers", () => {

@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { loadProfile } from "@/lib/profile-data";
+import { loadSettings } from "@/lib/settings-data";
 import { outreachFacts } from "@/lib/recruiters/facts";
 import { recruiterFields } from "@/lib/recruiters/fields";
 import { addStarterRecruiters, createRecruiter, getRecruiter, listRecruiters, removeRecruiter, setRecruiterStatus, snoozeRecruiter, updateRecruiter } from "@/lib/recruiters/store";
@@ -266,10 +267,10 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
     async ({ id: recruiterId, kind, profile: asked }) => {
       const chosen = await chooseProfile(asked);
       if ("failure" in chosen) return chosen.failure;
-      const [recruiter, profile] = await Promise.all([getRecruiter(recruiterId), loadProfile(chosen.id)]);
+      const [recruiter, profile, settings] = await Promise.all([getRecruiter(recruiterId), loadProfile(chosen.id), loadSettings()]);
       if (!recruiter) return failure(GONE);
       const sort: OutreachKind = kind ?? (recruiter.status === "CONTACTED" && recruiter.contactedAt ? "follow-up" : "first");
-      const draft = outreachDraft(recruiter, sort, outreachFacts(profile));
+      const draft = outreachDraft(recruiter, sort, outreachFacts(profile, settings.applyAnswers));
       return text({
         recruiter: recruiter.name,
         kind: sort,

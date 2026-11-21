@@ -7,9 +7,8 @@ import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { AiError } from "@/lib/ai/errors";
 import { dayOf } from "@/lib/calendar-view";
 import { germanFit, profileGerman, textForGerman } from "@/lib/german-need";
-import { credentialsFor, enabledPortals, loadJobSearchConfig, type JobSearchConfig } from "@/lib/job-search/config";
+import { enabledPortals, loadJobSearchConfig, type JobSearchConfig } from "@/lib/job-search/config";
 import { countryName } from "@/lib/job-search/countries";
-import { JobSearchError } from "@/lib/job-search/errors";
 import { postingKey, type FoundPosting, type JobSource, type SearchPortal } from "@/lib/job-search/search";
 import { sourceCovers, sourceInfo } from "@/lib/job-search/sources";
 import { startJob, type JobContext } from "@/lib/jobs/runner";
@@ -35,6 +34,7 @@ import { attributeAgentCandidates } from "./attribution";
 import { agentDedupeKey, candidateCoverage, candidateData, stringsOf, type SkipReason } from "./candidates";
 import { agentDraftJob, draftJobKey } from "./draft";
 import { reconcileInterruptedRuns, recordRunEnd, recordSourceRequest, reserveRun } from "./runs";
+import { agentMayAsk, agentPortalPool, agentPortals, portalProblem } from "./source";
 import { listAgentSearches } from "./searches";
 import { withAgentScanLock } from "./scan-lock";
 import { agentSearchSetupProblem, type SavedAgentSearch } from "./search";
@@ -43,8 +43,9 @@ import { agentSearchSetupProblem, type SavedAgentSearch } from "./search";
 // new postings under shared score/draft limits. It never sends anything.
 // Adapted from avinashbatchala's fork of Dossier. Since E22-8 (#394) each
 // search asks every portal switched on that covers its country, as a search
-// in Positions does, and what it finds lands in the library, "Found by the
-// agent". The Bundesagentur für Arbeit is never asked (#223).
+// in Positions does, or the portals chosen for the agent (source.ts, jobauto
+// fork), and what it finds lands in the library, "Found by the agent". The
+// Bundesagentur für Arbeit is never asked (#223).
 
 export const agentScanResultSchema = z.object({
   /** Postings the source returned. */
@@ -64,36 +65,22 @@ const stopped = (message: string): AgentScanResult => ({ found: 0, fresh: 0, sco
 
 /** Why the agent can't run at all, in words, or null when it's set up. */
 export async function agentSetupProblem(): Promise<string | null> {
-  const [searches, config] = await Promise.all([listAgentSearches(), loadJobSearchConfig()]);
-  return setupProblemFor(searches, config);
+  const [searches, config, settings] = await Promise.all([listAgentSearches(), loadJobSearchConfig(), loadSettings()]);
+  return setupProblemFor(searches, config, settings.agentPortals);
 }
 
 /** "JSearch: The portal couldn't be reached.", unless the message names the portal already. */
 const withName = (id: string, message: string) => (message.startsWith(sourceInfo(id).name) ? message : `${sourceInfo(id).name}: ${message}`);
 
-/** Why a portal can't be asked (a key missing), or null. */
-function portalProblem(config: JobSearchConfig, id: JobSource): string | null {
-  try {
-    credentialsFor(config, id);
-    return null;
-  } catch (error) {
-    if (error instanceof JobSearchError) return error.message;
-    throw error;
-  }
-}
-
-/**
- * The portals the agent asks: those switched on, with what they need saved,
- * except the Bundesagentur für Arbeit, whose terms forbid searching on one's
- * own most clearly (#223).
- */
-export function agentPortals(config: JobSearchConfig): JobSource[] {
-  return enabledPortals(config).filter((id) => id !== "ARBEITSAGENTUR" && portalProblem(config, id) === null);
-}
+// The portals the agent asks are in source.ts: those switched on, with what
+// they need saved, or the ones chosen for it in Settings → Job agent (jobauto
+// fork); never the Bundesagentur für Arbeit, whose terms forbid searching on
+// one's own most clearly (#223). Kept importable from here too.
+export { agentPortals };
 
 /** Each enabled search with the portals it goes to: the agent's that cover its country. */
-export function agentPlan(searches: readonly SavedAgentSearch[], config: JobSearchConfig): { search: SavedAgentSearch; portals: JobSource[] }[] {
-  const portals = agentPortals(config);
+export function agentPlan(searches: readonly SavedAgentSearch[], config: JobSearchConfig, chosen: readonly string[] | null): { search: SavedAgentSearch; portals: JobSource[] }[] {
+  const portals = agentPortals(config, chosen);
   return searches.filter((search) => search.enabled).map((search) => ({ search, portals: portals.filter((id) => sourceCovers(id, search.query.country)) }));
 }
 
@@ -102,26 +89,38 @@ export const planSlots = (plan: ReturnType<typeof agentPlan>): JobSource[] => pl
 
 /** The requests the next run would send, for the budget. */
 export async function agentSlots(): Promise<JobSource[]> {
-  const [searches, config] = await Promise.all([listAgentSearches(), loadJobSearchConfig()]);
-  return planSlots(agentPlan(searches, config));
+  const [searches, config, settings] = await Promise.all([listAgentSearches(), loadJobSearchConfig(), loadSettings()]);
+  return planSlots(agentPlan(searches, config, settings.agentPortals));
 }
 
-async function setupProblemFor(searches: readonly SavedAgentSearch[], config: JobSearchConfig): Promise<string | null> {
+/** What the agent can't search without, when only the Bundesagentur is switched on (source.ts). */
+const NO_AGENT_PORTAL =
+  "The job agent has no portal it may search: the Bundesagentur can't be searched automatically, and no other portal has a key yet. Add a JSearch, SerpApi, Adzuna or Jooble key in Settings → Job search, or choose FreeHire for it in Settings → Job agent.";
+
+async function setupProblemFor(searches: readonly SavedAgentSearch[], config: JobSearchConfig, chosen: readonly string[] | null): Promise<string | null> {
   const searchProblem = agentSearchSetupProblem(searches);
   if (searchProblem) return searchProblem;
   // Scoring is what a run does; drafts ask the AI provider when there are any.
   const scoring = await scoringProblem();
   if (scoring) return scoring;
-  const enabled = enabledPortals(config);
-  if (enabled.length === 0) return "Switch on a portal in Settings → Job search first.";
-  // It searches on its own, which the BA's terms forbid most clearly (#223).
-  const allowed = enabled.filter((id) => id !== "ARBEITSAGENTUR");
-  if (allowed.length === 0) return "The job agent doesn't search the Bundesagentur für Arbeit. Switch on JSearch, SerpApi, Adzuna or FreeHire in Settings → Job search for it.";
-  if (agentPortals(config).length === 0) return portalProblem(config, allowed[0]);
-  const plan = agentPlan(searches, config);
+  // Its own portals, when some are chosen for it (jobauto fork).
+  if (chosen) {
+    const pool = agentPortalPool(config, chosen);
+    if (pool.length === 0) return "None of the portals chosen for the job agent is there any more. Choose others in Settings → Job agent.";
+    if (agentPortals(config, chosen).length === 0) return portalProblem(config, pool[0]);
+  } else {
+    const enabled = enabledPortals(config);
+    if (enabled.length === 0) return "Switch on a portal in Settings → Job search first.";
+    // It searches on its own, which the BA's terms forbid most clearly (#223); a key she has stands in (source.ts).
+    const allowed = enabled.filter(agentMayAsk);
+    if (agentPortals(config, null).length === 0) return allowed.length === 0 ? NO_AGENT_PORTAL : portalProblem(config, allowed[0]);
+  }
+  const plan = agentPlan(searches, config, chosen);
   if (planSlots(plan).length === 0) {
     const countries = [...new Set(plan.map((entry) => countryName(entry.search.query.country)))].join(", ");
-    return `None of the portals switched on for the job agent lists jobs in ${countries}. Switch on one that does in Settings → Job search.`;
+    return chosen
+      ? `None of the portals chosen for the job agent lists jobs in ${countries}. Choose one that does in Settings → Job agent.`
+      : `None of the portals switched on for the job agent lists jobs in ${countries}. Switch on one that does in Settings → Job search.`;
   }
   return null;
 }
@@ -180,11 +179,12 @@ async function scan(manual: boolean, context: JobContext, now: Date, requestNow:
   // Validate and execute one configuration snapshot. Concurrent source/key
   // edits apply to the next run, not to slots already admitted for this one.
   const [allSearches, config] = await Promise.all([listAgentSearches(), loadJobSearchConfig()]);
-  const setup = await setupProblemFor(allSearches, config);
+  const setup = await setupProblemFor(allSearches, config, settings.agentPortals);
   if (setup) return stopped(setup);
-  const plan = agentPlan(allSearches, config);
+  const plan = agentPlan(allSearches, config, settings.agentPortals);
   const searches = plan.map((entry) => entry.search);
-  const allowed = enabledPortals(config).filter((id) => id !== "ARBEITSAGENTUR");
+  // Never the Bundesagentur: the pool leaves it out (source.ts).
+  const allowed = agentPortalPool(config, settings.agentPortals);
   const run = await reserveRun(now, manual, planSlots(plan), await lastKnownTimeZone());
   if (typeof run === "string") return stopped(run);
   const results: AgentSearchRun[] = [];

@@ -89,6 +89,14 @@ describe("writeEmailJob", () => {
     expect(JSON.stringify(mock.calls)).not.toContain("ledgerly.example");
   });
 
+  it("fills in the address it's given when the AI names none, in the email's first version", async () => {
+    provider.current = new MockProvider({ reply: () => answer({ contactEmail: null, contactName: null }) });
+    const result = await writeEmailJob.run({ applicationId: "app-1", to: "bewerbung@ledgerly.example" }, context);
+    expect(result.units[0]).toMatchObject({ id: "to", text: "bewerbung@ledgerly.example" });
+    const document = await prisma().document.findUniqueOrThrow({ where, include: { versions: true } });
+    expect(document.versions[0].units).toMatchObject([{ id: "to", text: "bewerbung@ledgerly.example" }, {}, {}]);
+  });
+
   it("writes over the email it had, keeping a recipient typed in, and returns the old one for Undo", async () => {
     const typed = [
       { id: "to", label: "Recipient", text: "jobs@example.com" },

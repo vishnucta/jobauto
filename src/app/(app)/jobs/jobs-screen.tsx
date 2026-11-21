@@ -14,6 +14,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import type { ProfileGerman } from "@/lib/german-need";
 import type { Country } from "@/lib/job-search/countries";
+import type { Person } from "@/lib/network";
 import {
   describeSearch,
   FOUND_BY_AGENT,
@@ -78,8 +79,14 @@ export type JobsScreenProps = {
   suggestions?: readonly string[];
   /** The profile they're from, named when there are several; null with one. */
   suggestionsFrom?: string | null;
+  /** Titles of jobs seen that ask for the profile's skills but its searches miss (hidden-titles.ts), with how many postings (jobauto fork). */
+  alsoAdvertised?: readonly { title: string; postings: number }[];
   /** The profile's German, which each posting's is read against (jobauto fork). */
   german?: ProfileGerman;
+  /** The people she knows at each employer on screen, by the posting's company (network.ts, jobauto fork). */
+  network?: Record<string, Person[]>;
+  /** Dossier's own AI model can write: postings offer "Prepare it for me" (jobauto fork). */
+  canPrepare?: boolean;
   /** How many recruiters and careers pages there are, for the links to their screens (jobauto fork). */
   elsewhere?: JobsCounts;
 };
@@ -110,7 +117,10 @@ export function JobsScreen({
   editing: editingAsked = false,
   suggestions = [],
   suggestionsFrom = null,
+  alsoAdvertised = [],
   german = "NONE",
+  network = {},
+  canPrepare = false,
   elsewhere = { recruiters: 0, employers: 0 },
 }: JobsScreenProps) {
   const router = useRouter();
@@ -208,7 +218,16 @@ export function JobsScreen({
             }
             editor={
               editing && (
-                <SearchForm sources={sources} countries={countries} query={query} pending={pending} onSearch={run} suggestions={suggestions} suggestionsFrom={suggestionsFrom} />
+                <SearchForm
+                  sources={sources}
+                  countries={countries}
+                  query={query}
+                  pending={pending}
+                  onSearch={run}
+                  suggestions={suggestions}
+                  suggestionsFrom={suggestionsFrom}
+                  alsoAdvertised={alsoAdvertised}
+                />
               )
             }
           />
@@ -237,6 +256,8 @@ export function JobsScreen({
           scoreInClaude={scoreInClaude}
           profiles={profiles}
           german={german}
+          network={network}
+          canPrepare={canPrepare}
         />
       </div>
     </div>
@@ -251,6 +272,7 @@ function SearchForm({
   onSearch,
   suggestions,
   suggestionsFrom,
+  alsoAdvertised,
 }: {
   sources: readonly JobSource[];
   countries: readonly Country[];
@@ -259,6 +281,7 @@ function SearchForm({
   onSearch: (query: SearchQuery) => void;
   suggestions: readonly string[];
   suggestionsFrom: string | null;
+  alsoAdvertised: readonly { title: string; postings: number }[];
 }) {
   const [form, setForm] = useState(query);
   const [errors, setErrors] = useState<{ keywords?: string; country?: string }>({});
@@ -308,6 +331,28 @@ function SearchForm({
               )}
             >
               {word}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* The titles employers use for the profile's skills (jobauto fork, hidden-titles.ts). */}
+      {alsoAdvertised.length > 0 && (
+        <div role="group" aria-label="Titles employers use for your skills" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-6">
+          <span className="text-meta text-muted" title="Titles of jobs you've seen that ask for your skills, which your searches don't cover.">
+            Also advertised as:
+          </span>
+          {alsoAdvertised.map(({ title, postings }) => (
+            <button
+              key={title}
+              type="button"
+              aria-pressed={form.keywords === title}
+              onClick={() => set({ keywords: title })}
+              className={cn(
+                "rounded-full border border-dashed px-3 py-1 text-control",
+                form.keywords === title ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink",
+              )}
+            >
+              {title} <span className="text-xs opacity-65">{postings}</span>
             </button>
           ))}
         </div>

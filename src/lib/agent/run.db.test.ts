@@ -54,9 +54,13 @@ const fake = vi.hoisted(() => ({
   source: "JSEARCH" as "JSEARCH" | "ADZUNA" | "FREEHIRE" | "ARBEITSAGENTUR" | null,
   /** More portals switched on, after `source` (E22-8). */
   extra: [] as ("JSEARCH" | "ADZUNA" | "FREEHIRE" | "ARBEITSAGENTUR")[],
+  /** Portals there but switched off in Settings → Job search, which the agent may still be given (jobauto fork). */
+  off: [] as ("JSEARCH" | "ADZUNA" | "FREEHIRE")[],
   ai: true,
   failOn: null as string | null,
   onScore: (() => {}) as (title: string) => void,
+  /** No source has a key: only FreeHire, which needs none, is ready. */
+  keyless: false,
 }));
 vi.mock("@/lib/job-search", () => ({
   // Each portal gives the same postings as its own.
@@ -65,17 +69,26 @@ vi.mock("@/lib/job-search", () => ({
     return { postings: fake.postings.map((posting) => (fake.extra.length > 0 ? { ...posting, source } : posting)), next: "page-2" };
   }),
 }));
-vi.mock("@/lib/job-search/config", () => ({
+vi.mock("@/lib/job-search/config", async () => {
+  const { JobSearchError } = await import("@/lib/job-search/errors");
+  return {
   loadJobSearchConfig: vi.fn(async () => ({
     saved: true,
     freehire: { url: "https://freehire.me" },
-    portals: [...(fake.source ? [fake.source] : []), ...fake.extra].map((id) => ({ id, on: true, offered: true, fields: {}, keys: {}, acceptedAt: null })),
+    portals: [
+      ...[...(fake.source ? [fake.source] : []), ...fake.extra].map((id) => ({ id, on: true, offered: true, fields: {}, keys: {}, acceptedAt: null })),
+      ...fake.off.map((id) => ({ id, on: false, offered: true, fields: {}, keys: {}, acceptedAt: null })),
+    ],
   })),
   enabledPortals: (config: { portals: { id: string; on: boolean }[] }) => config.portals.filter((portal) => portal.on).map((portal) => portal.id),
   agentPortal: (config: { portals: { id: string; on: boolean }[] }) => config.portals.find((portal) => portal.on && portal.id !== "ARBEITSAGENTUR")?.id ?? null,
-  credentialsFor: () => ({ key: "jsearch-key", host: "openwebninja" }),
+  credentialsFor: (_config: unknown, source: string) => {
+    if (fake.keyless && source !== "FREEHIRE") throw new JobSearchError("no-key", "No key.");
+    return { key: "jsearch-key", host: "openwebninja" };
+  },
   requestContext: () => ({}),
-}));
+  };
+});
 vi.mock("@/lib/ai/config", () => ({ isAiConfigured: async () => fake.ai }));
 vi.mock("@/lib/ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ai")>()),
@@ -126,7 +139,7 @@ const context = (abort?: AbortController): JobContext & { steps: string[] } => {
 
 beforeEach(async () => {
   await resetDatabase(prisma());
-  Object.assign(fake, { postings: page, searches: 0, source: "JSEARCH", extra: [], ai: true, failOn: null, onScore: () => {} });
+  Object.assign(fake, { postings: page, searches: 0, source: "JSEARCH", extra: [], off: [], ai: true, failOn: null, onScore: () => {}, keyless: false });
   await saveSettings({ agentEnabled: true });
   await prisma().agentSearch.create({ data: { name: "My search", query } });
 });
@@ -269,10 +282,34 @@ describe("runAgentScan (E16-3)", () => {
     expect(fake.searches).toBe(1);
   });
 
-  it("excludes Bundesagentur for all enabled searches and manual Agent runs too", async () => {
+  it("never searches the Bundesagentur: it takes another portal with a key, or stops (jobauto fork)", async () => {
     await saveAgentSearch({ name: "Second", query, sort: 1, enabled: true });
     fake.source = "ARBEITSAGENTUR";
-    expect((await runAgentScan({ manual: true }, context(), now)).message).toContain("doesn't search the Bundesagentur");
+    fake.keyless = true;
+    expect((await runAgentScan({ manual: true }, context(), now)).message).toContain("the Bundesagentur can't be searched automatically");
+    expect(fake.searches).toBe(0);
+    expect((await loadSettings()).agentRuns).toEqual([]);
+    fake.keyless = false;
+    const { searchPostings } = await import("@/lib/job-search");
+    await runAgentScan({ manual: true }, context(), now);
+    expect(vi.mocked(searchPostings).mock.calls.at(-1)?.[0]).toBe("JSEARCH");
+    expect((await loadSettings()).agentRuns[0].sourceRequestPortals).toEqual(["JSEARCH", "JSEARCH"]);
+  });
+
+  it("searches the portals chosen for it, whatever Positions' searches use (jobauto fork)", async () => {
+    // FreeHire is switched off for Positions; JSearch, switched on, isn't asked.
+    fake.off = ["FREEHIRE"];
+    await saveSettings({ agentPortals: ["FREEHIRE"] });
+    const { searchPostings } = await import("@/lib/job-search");
+    await runAgentScan({ manual: true }, context(), now);
+    expect(vi.mocked(searchPostings).mock.calls.at(-1)?.[0]).toBe("FREEHIRE");
+    expect((await loadSettings()).agentRuns[0].sourceRequestPortals).toEqual(["FREEHIRE"]);
+  });
+
+  it("stops when no portal chosen for it can be asked, saying why, without spending a request", async () => {
+    await saveSettings({ agentPortals: ["JSEARCH"] });
+    fake.keyless = true;
+    expect((await runAgentScan({ manual: true }, context(), now)).message).toBe("No key.");
     expect(fake.searches).toBe(0);
     expect((await loadSettings()).agentRuns).toEqual([]);
   });
@@ -518,7 +555,10 @@ describe("runAgentScan (E16-3)", () => {
     expect(await stop()).toBe("Switch on a portal in Settings → Job search first.");
     // It never searches the Bundesagentur für Arbeit on its own (#223).
     fake.source = "ARBEITSAGENTUR";
-    expect(await stop()).toBe("The job agent doesn't search the Bundesagentur für Arbeit. Switch on JSearch, SerpApi, Adzuna or FreeHire in Settings → Job search for it.");
+    // With no other portal's key to stand in (source.ts, jobauto fork).
+    fake.keyless = true;
+    expect(await stop()).toMatch(/^The job agent has no portal it may search: the Bundesagentur can't be searched automatically/);
+    fake.keyless = false;
     fake.source = "JSEARCH";
     expect(fake.searches).toBe(0);
     expect((await loadSettings()).agentRuns).toEqual([]);

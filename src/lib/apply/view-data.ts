@@ -4,6 +4,8 @@ import { DocumentKind } from "@/generated/prisma/enums";
 import { applyJobKey } from "@/lib/jobs/apply";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
+import { describeGuide } from "@/lib/salary-guide";
+import { loadSalaryGuide } from "@/lib/salary-guide-data";
 import type { Basics } from "@/lib/profile";
 import type { SettingsData } from "@/lib/settings";
 
@@ -34,15 +36,16 @@ function when(date: Date, timeZone: string | undefined): string {
 
 /** Everything the Apply tab shows for an application. */
 export async function loadApplyTab(
-  application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[] },
+  application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[]; role?: string; title?: string },
   profile: { basics: Basics },
   settings: Pick<SettingsData, "applyAnswers" | "applyBrowserAddress">,
   timeZone: string | undefined,
 ): Promise<ApplyTabData> {
-  const [posting, rows, jobs] = await Promise.all([
+  const [posting, rows, jobs, guide] = await Promise.all([
     prisma.posting.findUnique({ where: { applicationId: application.id }, select: { url: true, source: true } }),
     prisma.applyAttempt.findMany({ where: { applicationId: application.id }, orderBy: { startedAt: "desc" }, take: ATTEMPTS_SHOWN }),
     findUnfinishedJobs(applyJobKey(application.id)),
+    loadSalaryGuide(application.role || application.title || ""),
   ]);
   const route = planFor({ postingUrl: application.postingUrl, postingText: application.postingText, posting });
   const plan: ApplyPlanView =
@@ -73,5 +76,6 @@ export async function loadApplyTab(
     hasLetter: application.documents.some((document) => document.kind === DocumentKind.COVER_LETTER),
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),
     browserAddress: settings.applyBrowserAddress,
+    salaryGuide: guide ? describeGuide(guide) : null,
   };
 }

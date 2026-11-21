@@ -132,6 +132,20 @@ export function germanExplanation(need: GermanNeed, verdict: GermanVerdict): str
   return need.adLanguage === "English" ? "The ad is in English and asks for no German." : "";
 }
 
+/**
+ * The language to write in when it's left to the posting (jobauto fork): a
+ * German ad gets German documents only when the job needs German she has.
+ * One that asks for more German than she has, says the team works in
+ * English, or names German only as a plus gets English: a letter in fluent
+ * German she couldn't follow up in the interview does her no favours.
+ */
+export function postingWriteLanguage(adLanguage: string | null | undefined, text: string, german: ProfileGerman): string | null {
+  if (!adLanguage || !/^(german|deutsch)$/i.test(adLanguage.trim())) return adLanguage ?? null;
+  const need = germanNeed(text);
+  if (need.englishWorkplace || need.optional) return "English";
+  return germanVerdict(need, german) === "fits" ? adLanguage : "English";
+}
+
 /** The text a posting's German is read from: its title, then its description. */
 export const textForGerman = (posting: { title: string; description: string }) => `${posting.title}\n${posting.description}`;
 

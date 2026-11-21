@@ -54,6 +54,10 @@ export async function register() {
     const { startStartupsSchedule } = await import("@/lib/startups/schedule");
     startStartupsSchedule();
 
+    // The weekly digest for her supporter, while a topic is saved for it.
+    const { startDigestSchedule } = await import("@/lib/supporter-digest-data");
+    startDigestSchedule();
+
     // The careers pages the user follows, checked once a day while any are on.
     const { startCareersSchedule } = await import("@/lib/careers/check");
     startCareersSchedule();

@@ -83,6 +83,8 @@ describe("deleteEverything (E10-8)", () => {
     // And the careers pages followed, and the certificates kept to send (jobauto fork).
     await prisma().employer.create({ data: { name: "Beispiel AG", careersUrl: "https://example.com/careers", ats: "personio" } });
     await prisma().attachment.create({ data: { name: "Arbeitszeugnis", fileName: "zeugnis.pdf", size: 100 } });
+    // And her LinkedIn network, which is other people's details (jobauto fork).
+    await prisma().connection.create({ data: { firstName: "Max", lastName: "Beispiel", company: "Beispiel AG", companyKey: "beispiel" } });
     // A posting pasted for Claude chat, and the connector, which goes off (#221).
     await prisma().claudePaste.create({ data: { text: "A posting", expiresAt: new Date(Date.now() + 60_000) } });
     await prisma().setting.create({ data: { key: "connectorEnabledAt", value: "2026-10-23T09:00:00.000Z" } });
@@ -125,6 +127,7 @@ describe("deleteEverything (E10-8)", () => {
     expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     expect(await prisma().agentSearch.count()).toBe(0);
     expect(await prisma().agentCandidateSearch.count()).toBe(0);
+    expect(await prisma().connection.count()).toBe(0);
     expect(await prisma().theme.count({ where: { builtIn: true } })).toBe(13);
     expect(await readdir(dataDir.path)).toEqual([]);
   });

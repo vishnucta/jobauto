@@ -2,6 +2,8 @@ import "server-only";
 
 import { z } from "zod";
 
+import { parseCsv } from "@/lib/csv";
+
 import { getBytes, getJson, SourceError } from "../http";
 import { companySite } from "../text";
 import type { FoundStartup } from "../types";
@@ -56,38 +58,6 @@ export function decodeMixed(bytes: Uint8Array): string {
     start = index + 1;
   }
   return lines.join("\n");
-}
-
-/** Rows of a CSV with a header, quoted fields and line breaks in them included. */
-export function parseCsv(text: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let quoted = false;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (quoted) {
-      if (char === '"' && text[index + 1] === '"') {
-        field += '"';
-        index++;
-      } else if (char === '"') quoted = false;
-      else field += char;
-    } else if (char === '"') quoted = true;
-    else if (char === ",") {
-      row.push(field);
-      field = "";
-    } else if (char === "\n" || char === "\r") {
-      if (char === "\r" && text[index + 1] === "\n") index++;
-      row.push(field);
-      if (row.some((cell) => cell.trim())) rows.push(row);
-      row = [];
-      field = "";
-    } else field += char;
-  }
-  row.push(field);
-  if (row.some((cell) => cell.trim())) rows.push(row);
-  const [header = [], ...body] = rows;
-  return body.map((cells) => Object.fromEntries(header.map((name, index) => [name.trim(), (cells[index] ?? "").trim()])));
 }
 
 /** "19/12/2025" as a date, or null. */

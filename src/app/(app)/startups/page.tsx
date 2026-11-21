@@ -7,6 +7,7 @@ import { listProfiles } from "@/lib/profiles";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { placeOf } from "@/lib/startups/place";
 import { STARTUPS_JOB_KEY } from "@/lib/startups/refresh";
+import { peopleAt } from "@/lib/network-data";
 import { listStartups } from "@/lib/startups/store";
 import { startupFilterFromParams } from "@/lib/startups/types";
 
@@ -30,10 +31,12 @@ export default async function StartupsPage({ searchParams }: PageProps<"/startup
   if (!settings.startupsViewedAt || now.getTime() - Date.parse(settings.startupsViewedAt) > VIEW_MARK_MS) {
     await saveSettings({ startupsViewedAt: now.toISOString() });
   }
+  const list = await listStartups(filter, place);
   return (
     <StartupsScreen
       filter={filter}
-      list={await listStartups(filter, place)}
+      list={list}
+      network={await peopleAt(list.startups.map((startup) => startup.company))}
       lastRefresh={settings.startupsLastRefresh}
       refreshJobId={running?.id ?? null}
       city={place.city}

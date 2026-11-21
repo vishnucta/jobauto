@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { action } from "@/lib/action";
 import { hideNote, writeNote } from "@/lib/daily-note";
+import { experimentSchema } from "@/lib/experiments";
 import { saveSettings } from "@/lib/settings-data";
 import { userTimeZone } from "@/lib/time-zone";
 
@@ -31,5 +32,18 @@ export const writeDailyNoteAction = action(z.object({ another: z.boolean() }), a
 /** "Hide for today" on the daily note: until midnight in the user's time zone. */
 export const hideDailyNote = action(z.object({}), async () => {
   await hideNote({ timeZone: await userTimeZone() });
+  return null;
+});
+
+/** Starts an experiment (experiments.ts): new applications get version A or B from now on. */
+export const startExperiment = action(experimentSchema.omit({ startedAt: true }), async (experiment, { toast }) => {
+  await saveSettings({ experiment: { ...experiment, startedAt: new Date().toISOString() } });
+  toast("Started. Each new application gets version A or B: its page says which.");
+  return null;
+});
+
+/** Stops the experiment: new applications get no version; the ones made keep theirs. */
+export const stopExperiment = action(z.object({}), async () => {
+  await saveSettings({ experiment: null });
   return null;
 });

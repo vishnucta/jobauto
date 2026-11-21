@@ -652,6 +652,14 @@ model Application {
   prep                Json?
   /// The prompt version that wrote `prep`, e.g. "prepare-call@1".
   prepWith            String?
+  /// The work sample for this job (workSampleSchema in src/lib/work-sample.ts): "My first 90 days", once written.
+  workSample          Json?
+  /// The prompt version that wrote `workSample`, e.g. "write-work-sample@1".
+  workSampleWith      String?
+  /// The experiment running when it was made (experiments.ts), by name, and
+  /// which version it got: "A" or "B". Null outside an experiment.
+  experiment          String?
+  arm                 String?
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
@@ -1267,6 +1275,28 @@ model Employer {
   updatedAt     DateTime  @updatedAt
 
   @@index([name])
+}
+
+// ─── Her network (jobauto fork) ──────────────────────────────────────────────
+
+/// One of her LinkedIn connections, from the Connections.csv LinkedIn's own
+/// data export gives her: who, where they work and what they do there, so a
+/// posting at their employer can say "you know someone here". A new import
+/// replaces them all. Kept only here: not in exports, never sent to an AI.
+model Connection {
+  id          String    @id @default(cuid())
+  firstName   String    @default("")
+  lastName    String    @default("")
+  company     String    @default("")
+  position    String    @default("")
+  /// Their LinkedIn profile; always http(s), or empty.
+  url         String    @default("")
+  connectedOn DateTime?
+  /// The company's name folded for matching (network.ts companyKey).
+  companyKey  String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([companyKey])
 }
 
 // ─── Anlagen (jobauto fork) ──────────────────────────────────────────────────

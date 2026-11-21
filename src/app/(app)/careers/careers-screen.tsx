@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
+import { KnownPeople } from "@/components/known-people";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
@@ -13,13 +14,16 @@ import { Toggle } from "@/components/ui/toggle";
 import { useJob } from "@/hooks/use-job";
 import { BOARD_NAMES, type BoardKind } from "@/lib/careers/boards";
 import type { CareersCheckResult } from "@/lib/careers/check-result";
+import type { FieldEmployer } from "@/lib/careers/field-employers";
 import type { EmployerView } from "@/lib/careers/store-types";
 import { formatDateTime } from "@/lib/dates";
 import { libraryHref } from "@/lib/job-search/search";
 import { CAREERS_SOURCE } from "@/lib/job-search/sources";
+import type { Person } from "@/lib/network";
 
 import { FindWorkLinks, type JobsCounts } from "../jobs/find-work-links";
 import { addEmployer, checkCareers, deleteEmployer, saveEmployer, switchEmployer } from "./actions";
+import { FieldEmployersCard } from "./field-employers-card";
 
 export type CareersScreenProps = {
   employers: EmployerView[];
@@ -29,6 +33,10 @@ export type CareersScreenProps = {
   suggestedWords: string;
   today: string;
   timeZone: string;
+  /** The people she knows at each employer, by its name (network.ts); missing in older callers. */
+  network?: Record<string, Person[]>;
+  /** Employers in her field (field-employers.ts); empty or missing while her profile isn't in it. */
+  fieldEmployers?: readonly FieldEmployer[];
 };
 
 type Draft = { name: string; careersUrl: string; keywords: string; places: string };
@@ -42,7 +50,7 @@ const boardName = (ats: string) => BOARD_NAMES[ats as BoardKind] ?? ats;
  * and an application sent in the first days is read first. New ones land in
  * Positions; a screen of its own under it, which Find jobs had as a tab.
  */
-export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone }: CareersScreenProps) {
+export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone, network = {}, fieldEmployers = [] }: CareersScreenProps) {
   const router = useRouter();
   const [employers, setEmployers] = useState(initial);
   // The check under way, and which employers it reads.
@@ -65,6 +73,7 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
     if (result.ok) setCheck({ jobId: result.data.jobId, ids: ids ?? null });
   };
   const checking = (id: string) => check !== null && (check.ids === null || check.ids.includes(id));
+  const added = (employer: EmployerView) => setEmployers((list) => [...list, employer].sort((a, b) => a.name.localeCompare(b.name)));
   const replace = (saved: EmployerView) => setEmployers((list) => list.map((employer) => (employer.id === saved.id ? saved : employer)));
 
   return (
@@ -81,7 +90,11 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
           carry job data.
         </p>
 
-        <AddEmployer suggestedWords={suggestedWords} onAdded={(employer) => setEmployers((list) => [...list, employer].sort((a, b) => a.name.localeCompare(b.name)))} />
+        <AddEmployer suggestedWords={suggestedWords} onAdded={added} />
+
+        {fieldEmployers.length > 0 && (
+          <FieldEmployersCard employers={fieldEmployers} followed={new Set(employers.map((employer) => employer.careersUrl))} suggestedWords={suggestedWords} network={network} onFollowed={added} />
+        )}
 
         {employers.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
@@ -97,6 +110,7 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
             <EmployerCard
               key={employer.id}
               employer={employer}
+              people={network[employer.name] ?? []}
               now={now}
               timeZone={timeZone}
               checking={checking(employer.id)}
@@ -158,6 +172,7 @@ function EmployerCard({
   onCheck,
   onSaved,
   onRemoved,
+  people,
 }: {
   employer: EmployerView;
   now: Date;
@@ -168,6 +183,8 @@ function EmployerCard({
   onCheck: () => void;
   onSaved: (employer: EmployerView) => void;
   onRemoved: () => void;
+  /** The people she knows there. */
+  people: readonly Person[];
 }) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -225,6 +242,8 @@ function EmployerCard({
       ) : (
         <p className="text-meta text-muted">{checking ? (step ?? "Checking…") : last}</p>
       )}
+
+      <KnownPeople people={people} compact />
 
       {editing ? (
         <form onSubmit={(event) => void save(event)} aria-label={`Edit ${employer.name}`} className="grid gap-x-4 gap-y-3 sm:grid-cols-2">

@@ -1,0 +1,104 @@
+/* The Kurzprofil (jobauto fork): one page in the base resume's fonts and accent. */
+
+.page {
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 3);
+  padding-bottom: calc(var(--u) * 14);
+  border-bottom: 2px solid var(--accent);
+}
+
+.kicker {
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.name {
+  font-family: var(--head-font);
+  font-size: calc(var(--u) * 24);
+  line-height: 1.15;
+  color: var(--doc-ink);
+}
+
+.headline {
+  font-size: 1.05em;
+  color: var(--doc-ink);
+}
+
+.contact {
+  font-size: 0.9em;
+  color: var(--doc-muted);
+}
+
+.facts {
+  display: grid;
+  gap: calc(var(--u) * 5);
+  margin-top: calc(var(--u) * 16);
+}
+
+.fact {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 130) 1fr;
+  gap: calc(var(--u) * 10);
+  break-inside: avoid;
+}
+
+.fact dt {
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
+.section {
+  margin-top: calc(var(--u) * 18);
+}
+
+.section h2 {
+  margin-bottom: calc(var(--u) * 6);
+  font-family: var(--head-font);
+  font-size: 1.05em;
+  color: var(--accent);
+}
+
+.line {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 130) 1fr;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 2) 0;
+  break-inside: avoid;
+}
+
+.dates {
+  color: var(--doc-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.line strong {
+  font-weight: 600;
+  color: var(--doc-ink);
+}
+
+/* The work sample (jobauto fork) shares this page: its steps, and the closing line. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 3);
+  padding-left: calc(var(--u) * 14);
+  list-style: disc;
+}
+
+.steps li {
+  break-inside: avoid;
+}
+
+.closing {
+  margin-top: calc(var(--u) * 18);
+  font-style: italic;
+  color: var(--doc-ink);
+}

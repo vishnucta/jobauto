@@ -1,8 +1,11 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
+import { forgetConnections } from "@/lib/network-data";
+import { prisma } from "@/lib/prisma";
 import { recruiterFields } from "@/lib/recruiters/fields";
 import { addStarterRecruiters, createRecruiter, removeRecruiter, setRecruiterStatus, snoozeRecruiter, updateRecruiter } from "@/lib/recruiters/store";
 import { RECRUITER_STATUSES } from "@/lib/recruiters/types";
@@ -50,4 +53,29 @@ export const addSuggestedRecruiters = action(z.object({}), async (_input, { toas
   const added = await addStarterRecruiters();
   toast(added === 0 ? "They're all on your list already." : `Added ${added} ${added === 1 ? "agency" : "agencies"}.`);
   return { added };
+});
+
+// Her LinkedIn network (jobauto fork): imports go through /api/network.
+
+/**
+ * "Ask for a referral": someone she knows at an employer goes onto
+ * Recruiters as a referral contact, with the message ready there. One
+ * already there is answered with.
+ */
+export const askForReferral = action(z.object({ connectionId: id }), async ({ connectionId }) => {
+  const person = await prisma.connection.findUnique({ where: { id: connectionId } });
+  if (!person) throw new ActionError("That connection is no longer imported. Import your LinkedIn connections again.");
+  const name = `${person.firstName} ${person.lastName}`.trim();
+  const known = await prisma.recruiter.findFirst({ where: { kind: "REFERRAL", name: person.company, contactName: name }, select: { id: true } });
+  if (known) return { recruiterId: known.id, added: false };
+  const added = await createRecruiter({ kind: "REFERRAL", name: person.company, contactName: name, email: "", website: person.url, speciality: person.position, relation: "We're connected on LinkedIn", notes: "" });
+  return { recruiterId: added.id, added: true };
+});
+
+/** "Forget them": her imported connections are deleted. */
+export const forgetNetwork = action(z.object({}), async (_input, { toast }) => {
+  await forgetConnections();
+  revalidatePath("/", "layout");
+  toast("Your LinkedIn connections are deleted from Dossier.");
+  return null;
 });

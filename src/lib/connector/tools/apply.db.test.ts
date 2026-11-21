@@ -300,7 +300,7 @@ describe("the Apply tab's tools in the Claude connector", () => {
       link: `https://dossier.example/applications/${ledgerly}?tab=apply`,
     });
     expect(saved.json.answers).not.toHaveProperty("street_saved");
-    expect((await loadSettings()).applyAnswers).toEqual({ ...DEFAULT_APPLY_ANSWERS, salary: "60.000 € brutto/Jahr", germanLevel: "B2", autoSubmit: true });
+    expect((await loadSettings()).applyAnswers).toEqual({ ...DEFAULT_APPLY_ANSWERS, salary: "60.000 € brutto/Jahr", germanLevel: "B2", autoSubmit: true, confirmed: true });
 
     const again = await tool("save_apply_answers", { salary: "", notice_period: " 3 Monate zum Monatsende ", work_permit: false });
     expect(again.json).toMatchObject({ answers: { salary: "", notice_period: "3 Monate zum Monatsende", work_permit: false, german_level: "B2", press_send: true }, link: "https://dossier.example/applications" });

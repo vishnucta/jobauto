@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus, ApplicationOrigin, ApplicationStatus, type Tone } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { summaryText, tailoringSummary } from "@/lib/ai/tailoring-summary";
@@ -7,8 +8,10 @@ import { calendarDay } from "@/lib/application-documents";
 import type { Extracted, Match } from "@/lib/application-data";
 import { documentLabels } from "@/lib/document-labels";
 import { documentLanguage } from "@/lib/document-language";
+import { postingWriteLanguage, profileGerman } from "@/lib/german-need";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
+import { nextArm, runWhere, type Arm, type Experiment } from "@/lib/experiments";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
@@ -44,12 +47,15 @@ type ApplicationReading = {
  * Who's creating it, and the claim that stops a second click, a retry or a
  * second run from making two applications: the write-documents job for New
  * application, the candidate (DRAFTING → DRAFTED) for the agent. Claude chat
- * saves through the connector (#221), where one call makes one application.
+ * saves through the connector (#221), where one call makes one application;
+ * Prepare application on Find jobs (jobauto fork) makes one for its posting,
+ * which its job checks before it writes.
  */
-type ApplicationClaim =
+export type ApplicationClaim =
   | { kind: "manual"; writeJobId: string; readJobId: string; postingId: string | null; startupId?: string | null }
   | { kind: "agent"; candidateId: string; score: number }
-  | { kind: "connector"; postingId: string | null };
+  | { kind: "connector"; postingId: string | null }
+  | { kind: "prepare"; postingId: string };
 
 export type CreateApplicationInput = {
   reading: ApplicationReading;
@@ -70,12 +76,24 @@ export type CreateApplicationInput = {
 
 const CLAIMED = "application:";
 
+/** While an experiment runs, a new application gets the version with fewer so far (experiments.ts, jobauto fork). */
+async function experimentVersion(tx: Prisma.TransactionClient, experiment: Experiment | null): Promise<{ experiment?: string; arm?: Arm }> {
+  if (!experiment) return {};
+  const arm = nextArm({
+    A: await tx.application.count({ where: { ...runWhere(experiment), arm: "A" } }),
+    B: await tx.application.count({ where: { ...runWhere(experiment), arm: "B" } }),
+  });
+  return { experiment: experiment.name, arm };
+}
+
 /** Creates the application once; creating again with the same claim returns the one that exists. */
 export async function createApplicationFromDocuments({ reading, documents, match, details, postingUrl, tone, note, language: chosen, claim, profileId: asked }: CreateApplicationInput): Promise<string> {
   const profileId = await profileIdOr(asked);
   const [settings, profile, own] = await Promise.all([loadSettings(), loadProfile(profileId), loadProfileSettings(profileId)]);
   const { extracted, extractedWith, matchedWith } = reading;
-  const language = (chosen === undefined ? settings.docLanguage : chosen) ?? extracted.language ?? "English";
+  // "The posting's language" (null), German only when the job needs German she has (german-need.ts).
+  const postingLanguage = settings.germanOnlyWhenFit ? postingWriteLanguage(extracted.language, reading.posting, profileGerman(profile.languages)) : extracted.language;
+  const language = (chosen === undefined ? settings.docLanguage : chosen) ?? postingLanguage ?? "English";
   // E8-11: every part of the letter is a unit. The AI wrote the recipient
   // and greeting; the sender and signature come from the profile, and the
   // date is written now, in the letter's language.
@@ -121,11 +139,19 @@ export async function createApplicationFromDocuments({ reading, documents, match
         data: { status: AgentCandidateStatus.DRAFTED, error: null },
       });
       if (count === 0) throw new ActionError("That posting is no longer waiting for a draft.");
+    } else if (claim.kind === "prepare") {
+      // Locked (by a write that changes nothing), so two preparations of one posting make one application.
+      await tx.$executeRaw`UPDATE "Posting" SET id = id WHERE id = ${claim.postingId}`;
+      const linked = await tx.posting.findUnique({ where: { id: claim.postingId }, select: { applicationId: true } });
+      if (linked?.applicationId) return { id: linked.applicationId, isNew: false };
     }
+
+    const version = await experimentVersion(tx, settings.experiment);
 
     const application = await tx.application.create({
       data: {
         profileId,
+        ...version,
         // An agent draft stays on the Agent screen until it's approved (#195).
         ...(claim.kind === "agent" ? { origin: ApplicationOrigin.AGENT, agentScore: claim.score, awaitingReview: true } : {}),
         title: details.title || [details.role, details.company].filter(Boolean).join(" · ") || "Untitled application",
@@ -235,9 +261,13 @@ export type DraftApplicationInput = {
  */
 export async function createDraftApplication(input: DraftApplicationInput): Promise<{ id: string; isNew: boolean }> {
   const profileId = await profileIdOr(input.profileId);
-  const settings = await loadSettings();
+  const [settings, profile] = await Promise.all([loadSettings(), loadProfile(profileId)]);
   const { details, reading } = input;
-  const language = (input.language === null ? null : input.language.trim() || settings.docLanguage) || reading.extracted.language || "English";
+  // "The posting's language", German only when the job needs German she has (german-need.ts, jobauto fork).
+  const postingLanguage = settings.germanOnlyWhenFit
+    ? postingWriteLanguage(reading.extracted.language, reading.posting, profileGerman(profile.languages))
+    : reading.extracted.language;
+  const language = (input.language === null ? null : input.language.trim() || settings.docLanguage) || postingLanguage || "English";
   const created = await prisma.$transaction(async (tx) => {
     // Claim the reading first: a second click waits here, then finds it taken.
     const { count } = await tx.job.updateMany({ where: { id: input.readJobId, key: null }, data: { key: `${CLAIMED}pending` } });
@@ -246,9 +276,11 @@ export async function createDraftApplication(input: DraftApplicationInput): Prom
       if (claimed.key?.startsWith(CLAIMED) && claimed.key !== `${CLAIMED}pending`) return { id: claimed.key.slice(CLAIMED.length), isNew: false };
       throw new ActionError("This application is already being created.");
     }
+    const version = await experimentVersion(tx, settings.experiment);
     const application = await tx.application.create({
       data: {
         profileId,
+        ...version,
         title: details.title || [details.role, details.company].filter(Boolean).join(" · ") || "Untitled application",
         company: details.company,
         role: details.role,

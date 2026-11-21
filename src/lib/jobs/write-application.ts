@@ -8,6 +8,7 @@ import { getAiProvider } from "@/lib/ai";
 import { summaryText, tailoringSummary } from "@/lib/ai/tailoring-summary";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { tailorResume, writeCoverLetter } from "@/lib/ai/tasks";
+import { createApplicationFromDocuments, type ApplicationClaim, type ApplicationDetails } from "@/lib/application-create";
 import { calendarDay } from "@/lib/application-documents";
 import { extractedOf, matchSchema, unitsSchema, type Extracted, type Unit } from "@/lib/application-data";
 import { documentLabels } from "@/lib/document-labels";
@@ -18,13 +19,16 @@ import { newFrame, withFrame } from "@/lib/letter-frame";
 import { emit } from "@/lib/notifications/notify";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
-import { loadProfileSettings } from "@/lib/profiles";
+import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
+import { readinessLines } from "@/lib/recruiter-eye";
 import { withoutSectionsOff } from "@/lib/resume-sections";
-import { DOCUMENTS_TO_WRITE } from "@/lib/settings";
+import { DOCUMENTS_TO_WRITE, type DocumentsToWrite } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
 
 import { WRITE_APPLICATION_STEPS } from "./application-steps";
-import { defineJob } from "./runner";
+import { readPostingJob } from "./read-posting";
+import { defineJob, type JobContext } from "./runner";
+import { writeDocumentsJob } from "./write-documents";
 
 /** The key of writing a new application's documents, to find it again from its page. */
 export const writeApplicationJobKey = (applicationId: string) => `writing:${applicationId}`;
@@ -117,7 +121,9 @@ export const writeApplicationJob = defineJob({
       if (!has(DocumentKind.COVER_LETTER)) {
         // Salary and start date, when the posting asks for them, from the standard answers (jobauto fork).
         const availability = letterAvailability(posting, settings.applyAnswers).say;
-        const written = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting, availability }, taskOptions);
+        // What settles a German recruiter's doubts, from the standard answers (recruiter-eye.ts, jobauto fork).
+        const readiness = readinessLines(profile, settings.applyAnswers);
+        const written = await writeCoverLetter(provider, { profile, extracted, match, tone: application.tone, facts, posting, availability, readiness }, taskOptions);
         // E8-11: the AI wrote the recipient and greeting; the sender and signature come from the profile, and the date is today's.
         letter = withFrame(
           written.data,
@@ -155,3 +161,73 @@ export const writeApplicationJob = defineJob({
     return { applicationId };
   },
 });
+
+// ─── From a posting, in one go (jobauto fork) ────────────────────────────────
+// The other way of writing an application from a posting in the background:
+// read it, write the documents with Settings' tone, and create the
+// application under its claim. The agent's drafts (Agent screen, Today's
+// three) and Prepare it for me on Positions come here; New application
+// writes into the Draft it made first, with writeApplicationJob above.
+
+/** The application's details from what was read, as New application fills them in. */
+export function detailsFrom(extracted: Extracted): ApplicationDetails {
+  return {
+    title: extracted.title ?? [extracted.role, extracted.company].filter(Boolean).join(" · "),
+    company: extracted.company ?? "",
+    role: extracted.role ?? "",
+    location: extracted.location ?? "",
+    mode: extracted.mode ?? "",
+    salary: extracted.salary ?? "",
+    deadline: extracted.deadline ?? "",
+  };
+}
+
+/** Reads the posting, writes its documents and creates the application; returns its id. */
+export async function writeApplication(
+  {
+    posting,
+    postingUrl,
+    name,
+    write,
+    claim,
+    profileId: asked,
+    scored,
+  }: {
+    /** The posting's whole text, as postingText() gives it. */
+    posting: string;
+    postingUrl: string;
+    /** Who it's for, in the steps shown while it's written. */
+    name: string;
+    write?: DocumentsToWrite;
+    claim: ApplicationClaim;
+    /** The profile it's written from (E24-6); the first when it's missing. */
+    profileId?: string | null;
+    /** The posting as Positions keeps it: its score for that profile, when there is one, answers How you match with no new call (E25-7). */
+    scored?: { source: string; externalId: string };
+  },
+  context: JobContext,
+): Promise<string> {
+  const profileId = await profileIdOr(asked);
+  await context.step(`Reading the posting from ${name}`);
+  const reading = await readPostingJob.run({ posting, profileId, scored }, context);
+  await context.step(`Writing the draft for ${name}`);
+  const settings = await loadSettings();
+  const documents = await writeDocumentsJob.run(
+    { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: write ?? settings.documentsToWrite, profileId },
+    context,
+  );
+  const applicationId = await createApplicationFromDocuments({
+    reading: { posting, ...reading },
+    documents,
+    match: reading.match,
+    details: detailsFrom(reading.extracted),
+    postingUrl,
+    tone: settings.defaultTone,
+    note: "",
+    claim,
+    profileId,
+  });
+  // The job holds nothing of the application, but goes with it all the same.
+  await prisma.job.updateMany({ where: { id: context.id }, data: { applicationId } });
+  return applicationId;
+}

@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { loadProfile } from "@/lib/profile-data";
 import { openProfileId } from "@/lib/profiles";
 import { prisma } from "@/lib/prisma";
+import { loadSettings } from "@/lib/settings-data";
+import { networkSummary } from "@/lib/network-data";
 import { outreachFacts } from "@/lib/recruiters/facts";
 import { listRecruiters } from "@/lib/recruiters/store";
 
@@ -18,14 +20,16 @@ export const metadata: Metadata = { title: "Recruiters" };
  * own mail.
  */
 export default async function RecruitersPage() {
-  const [recruiters, profileId, employers] = await Promise.all([listRecruiters(), openProfileId(), prisma.employer.count()]);
+  const [recruiters, profileId, employers, settings, network] = await Promise.all([listRecruiters(), openProfileId(), prisma.employer.count(), loadSettings(), networkSummary()]);
   const profile = await loadProfile(profileId);
   return (
     <RecruitersScreen
       recruiters={recruiters}
       counts={{ recruiters: recruiters.length, employers }}
-      facts={outreachFacts(profile)}
+      // With the standard answers, an agency's first message carries a brief (jobauto fork).
+      facts={outreachFacts(profile, settings.applyAnswers)}
       profileId={profileId}
+      network={network}
       today={new Date().toISOString()}
     />
   );

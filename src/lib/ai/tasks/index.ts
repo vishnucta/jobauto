@@ -19,3 +19,5 @@ export { prepareInterview } from "./prepare-interview";
 export { writeMessage } from "./write-message";
 // Call prep (jobauto fork). The apply assistant's plan-apply-form is imported from its own module.
 export { prepareCall } from "./prepare-call";
+// Work sample (jobauto fork).
+export { writeWorkSample } from "./write-work-sample";

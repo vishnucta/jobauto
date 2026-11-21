@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, useTransition, type FormEvent } from "react";
 
 import { FilterChip, FilterChips, listingList, listingPreview, ListingRow, listingScreen, listingSplit, ListingTabs, PreviewBody, PreviewCard, PreviewFacts, PreviewHeader, PreviewReasons, RowTag, SourceBar } from "@/components/listing";
+import { KnownPeople } from "@/components/known-people";
 import { PageHeader } from "@/components/page-header";
 import { ScoreMenu } from "@/components/score-menu";
 import { toast, toastResult } from "@/components/toast";
@@ -13,6 +14,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useJob } from "@/hooks/use-job";
+import type { Person } from "@/lib/network";
 import { formatDateTime } from "@/lib/dates";
 import { postedAgo } from "@/lib/job-search/search";
 import {
@@ -46,6 +48,8 @@ export type StartupsScreenProps = {
   today: string;
   /** Each profile's name by its id when there are several (E24-6), to say which one a startup fits best; empty with one. */
   profileNames?: Record<string, string>;
+  /** The people she knows at each startup or firm, by its name (network.ts); missing in older callers. */
+  network?: Record<string, Person[]>;
 };
 
 /**
@@ -57,7 +61,7 @@ export type StartupsScreenProps = {
  * the startup's own score only sorts them (U1). Dossier sends nothing: the
  * user writes to each one.
  */
-export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, country, headline, aiReady, today, profileNames = {} }: StartupsScreenProps) {
+export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, country, headline, aiReady, today, profileNames = {}, network = {} }: StartupsScreenProps) {
   const router = useRouter();
   const [jobId, setJobId] = useState(refreshJobId);
   const [starting, startTransition] = useTransition();
@@ -218,6 +222,7 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
                 aiReady={aiReady}
                 today={today}
                 profileName={selected.profileId ? profileNames[selected.profileId] : undefined}
+                people={network[selected.company] ?? []}
               />
             )}
           </div>
@@ -273,6 +278,7 @@ function StartupPreview({
   aiReady,
   today,
   profileName,
+  people,
 }: {
   startup: StartupView;
   /** Every profile, when there are several, for Score's menu (#524). */
@@ -282,6 +288,8 @@ function StartupPreview({
   today: string;
   /** The profile it fits best, when there are several. */
   profileName?: string;
+  /** The people she knows there (jobauto fork, network.ts). */
+  people: readonly Person[];
 }) {
   const router = useRouter();
   const headingId = useId();
@@ -427,6 +435,7 @@ function StartupPreview({
           to write an application to them.
         </p>
       )}
+      <KnownPeople people={people} />
       {blocked && (
         <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
           Their site says they don&apos;t take unsolicited applications: {startup.noApplicationsFrom}. Apply through a posted job instead.

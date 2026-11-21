@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 
 import { FitDetails } from "@/components/fit-details";
 import { GermanBadge, GermanNote } from "@/components/german-badge";
+import { KnownPeople } from "@/components/known-people";
 import { ScoreMenu } from "@/components/score-menu";
 import { listingList, listingPreview, ListingRow, listingSplit, PreviewBody, PreviewCard, PreviewFacts, PreviewHeader, RowTag } from "@/components/listing";
 import { ScoreRing } from "@/components/score-ring";
@@ -20,9 +21,11 @@ import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import { isBoardLink } from "@/lib/dedupe";
 import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
+import type { PrepareApplicationResult } from "@/lib/jobs/prepare-application-types";
 import type { JobView } from "@/lib/jobs/runner";
 import { postedAgo, postingKey, type FoundPosting, type LibraryFilters, type PostingState, type ProfileFit, type ShownPosting } from "@/lib/job-search/search";
 import { CAREERS_SOURCE, CLIENT_SOURCE, isAddedSource, portalNames, postingPage, sourceInfo } from "@/lib/job-search/sources";
+import type { Person } from "@/lib/network";
 
 import {
   dismissFoundPosting,
@@ -30,6 +33,7 @@ import {
   loadLibraryPage,
   markPostingsSeen,
   moveBackPostings,
+  prepareApplication,
   removeAllArchived,
   removeArchivedPostings,
   restorePosting,
@@ -61,6 +65,10 @@ export type PostingResultsProps = {
   profiles?: { id: string; name: string }[];
   /** The profile's German, which each posting's is read against; open postings that need far more are hidden until shown (jobauto fork). */
   german?: ProfileGerman;
+  /** The people she knows at each employer, by the posting's company (network.ts, jobauto fork). */
+  network?: Record<string, Person[]>;
+  /** Dossier's own AI model can write: "Prepare it for me" makes the application in one click, in the background (jobauto fork). */
+  canPrepare?: boolean;
 };
 
 /** What a score job gives: the posting's best score and all its scores (E25-5). */
@@ -107,10 +115,13 @@ export function PostingResults(props: PostingResultsProps) {
   // A refresh brings the library as it is now (a portal answered, Mark all as seen): take it, keeping
   // what's under way here, such as a score being worked out.
   const [given, setGiven] = useState(props.postings);
+  // Who she knows at each employer (jobauto fork): the first page's from the server, Show more's added to it.
+  const [network, setNetwork] = useState(props.network ?? {});
   if (props.postings !== given) {
     setGiven(props.postings);
     setPostings(props.postings);
     setMore(props.more);
+    setNetwork(props.network ?? {});
   }
   const [loadingMore, setLoadingMore] = useState(false);
   const [showOut, setShowOut] = useState(false);
@@ -147,6 +158,8 @@ export function PostingResults(props: PostingResultsProps) {
   // Postings selected in the Archive, by postingKey, and whether "Remove all" is asking.
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [confirmingRemoveAll, setConfirmingRemoveAll] = useState(false);
+  // Postings whose application is being prepared (jobauto fork), with the step under way, by postingKey.
+  const [preparing, setPreparing] = useState<Record<string, { jobId: string; step: string | null }>>({});
   // Postings being scored (#208), with the step under way, by postingKey.
   const [scoring, setScoring] = useState<Record<string, { jobId: string; step: string | null }>>({});
 
@@ -246,6 +259,34 @@ export function PostingResults(props: PostingResultsProps) {
     setScoring((current) => (current[key] ? { ...current, [key]: { ...current[key], step: job.step } } : current));
   };
 
+  const ready = (key: string, title: string, applicationId: string) => {
+    setPreparing((current) => without(current, key));
+    updateState(key, { applicationId });
+    toast(`Ready to read: ${title || "your application"}.`, { action: { label: "Open", onClick: () => router.push(`/applications/${applicationId}`) } });
+  };
+
+  /** "Prepare it for me" (jobauto fork): the application is read, written and created in the background; she goes on browsing. */
+  const prepare = async (posting: ShownPosting) => {
+    const key = postingKey(posting);
+    if (preparing[key]) return;
+    setPreparing((current) => ({ ...current, [key]: { jobId: "", step: null } }));
+    const result = toastResult(await prepareApplication({ posting: withoutState(posting) }));
+    if (!result.ok) return void setPreparing((current) => without(current, key));
+    const { jobId, applicationId } = result.data;
+    if (applicationId) return ready(key, posting.title, applicationId);
+    setPreparing((current) => ({ ...current, [key]: { jobId: jobId ?? "", step: null } }));
+  };
+
+  const preparingChanged = (posting: ShownPosting, job: JobView<PrepareApplicationResult>) => {
+    const key = postingKey(posting);
+    if (job.status === "DONE" && job.result) return ready(key, posting.title, job.result.applicationId);
+    if (job.status === "DONE" || job.status === "FAILED") {
+      setPreparing((current) => without(current, key));
+      return void toast(job.error ?? "The application couldn't be prepared. Try again, or start it step by step.");
+    }
+    setPreparing((current) => (current[key] ? { ...current, [key]: { ...current[key], step: job.step } } : current));
+  };
+
   /** Out of the Archive (Move back, Remove): out of this list, and the counts change. */
   const leaveArchive = (gone: readonly ShownPosting[]) => {
     const keys = new Set(gone.map(postingKey));
@@ -299,6 +340,7 @@ export function PostingResults(props: PostingResultsProps) {
     const seen = new Set(postings.map(postingKey));
     setPostings([...postings, ...result.data.postings.filter((posting) => !seen.has(postingKey(posting)))]);
     setMore(result.data.more);
+    setNetwork((current) => ({ ...current, ...result.data.network }));
   };
 
   const counted = archive
@@ -314,6 +356,10 @@ export function PostingResults(props: PostingResultsProps) {
       {Object.entries(scoring).map(([key, { jobId }]) =>
         jobId ? <ScoreWatcher key={jobId} jobId={jobId} onChange={(job) => scoringChanged(key, job)} /> : null,
       )}
+      {Object.entries(preparing).map(([key, { jobId }]) => {
+        const posting = postings.find((entry) => postingKey(entry) === key);
+        return jobId && posting ? <PrepareWatcher key={jobId} jobId={jobId} onChange={(job) => preparingChanged(posting, job)} /> : null;
+      })}
       {/* The 600 px list (E32-1), beside the preview on wide windows. */}
       <div className={listingList}>
         <p className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-1 px-5 pt-3 pb-1 text-meta text-muted", visible.length === 0 && tooMuchGerman === 0 && "hidden")}>
@@ -393,6 +439,7 @@ export function PostingResults(props: PostingResultsProps) {
           ref={detail}
           posting={selected}
           german={german}
+          people={network[selected.company] ?? []}
           now={now}
           onSave={() => void save(selected)}
           onUnsave={() => void unsave(selected)}
@@ -405,8 +452,17 @@ export function PostingResults(props: PostingResultsProps) {
           onMoveBack={() => void moveBackFromArchive([selected])}
           onRemove={() => void removeFromArchive([selected])}
         >
+          {offersPrepare(selected, props.canPrepare) && (
+            <Button size="sm" aria-disabled={preparing[postingKey(selected)] ? true : undefined} onClick={preparing[postingKey(selected)] ? undefined : () => void prepare(selected)}>
+              {preparing[postingKey(selected)] ? (preparing[postingKey(selected)].step ?? "Preparing…") : "Prepare it for me"}
+            </Button>
+          )}
           {!selected.state.dismissed && (
-            <StartButton starting={starting === postingKey(selected)} onClick={() => void start(withoutState(selected), postingKey(selected))} />
+            <StartButton
+              secondary={offersPrepare(selected, props.canPrepare)}
+              starting={starting === postingKey(selected)}
+              onClick={() => void start(withoutState(selected), postingKey(selected))}
+            />
           )}
           {!selected.state.dismissed && selected.state.agent && <AgentDraft agent={selected.state.agent} />}
         </PostingDetail>
@@ -428,11 +484,30 @@ function ScoreWatcher({ jobId, onChange }: { jobId: string; onChange: (job: JobV
   return null;
 }
 
-/** "Start application →" on a posting (E14-8). */
-function StartButton({ starting, onClick }: { starting: boolean; onClick: () => void }) {
+/** Follows an application being prepared in the background (jobauto fork). */
+function PrepareWatcher({ jobId, onChange }: { jobId: string; onChange: (job: JobView<PrepareApplicationResult>) => void }) {
+  useJob<PrepareApplicationResult>(jobId, 0, onChange);
+  return null;
+}
+
+/**
+ * "Prepare it for me" (jobauto fork) is offered on a posting with no
+ * application yet, while Dossier's own AI model can write. Not on one the
+ * job agent scored or drafted: its Prepare draft (E22-8) writes that
+ * posting's draft for review on the Agent screen, and one posting gets one
+ * draft.
+ */
+function offersPrepare(posting: ShownPosting, canPrepare = false): boolean {
+  const { dismissed, applicationId, agent } = posting.state;
+  const agentDrafts = agent !== null && (agent.status === "SCORED" || agent.status === "DRAFTING" || agent.status === "DRAFTED");
+  return canPrepare && !dismissed && !applicationId && !agentDrafts;
+}
+
+/** "Start application →" on a posting (E14-8); beside "Prepare it for me", it's the way to do it step by step (jobauto fork). */
+function StartButton({ starting, onClick, secondary = false }: { starting: boolean; onClick: () => void; secondary?: boolean }) {
   return (
-    <Button size="sm" aria-disabled={starting || undefined} onClick={starting ? undefined : onClick}>
-      {starting ? "Starting…" : "Start application →"}
+    <Button variant={secondary ? "secondary" : "primary"} size="sm" aria-disabled={starting || undefined} onClick={starting ? undefined : onClick}>
+      {starting ? "Starting…" : secondary ? "Step by step →" : "Start application →"}
     </Button>
   );
 }
@@ -570,6 +645,7 @@ function PostingDetail({
   ref,
   posting,
   german,
+  people,
   now,
   onSave,
   onUnsave,
@@ -587,6 +663,8 @@ function PostingDetail({
   posting: ShownPosting;
   /** The profile's German, which the posting's is read against (jobauto fork). */
   german: ProfileGerman;
+  /** The people she knows at its employer (jobauto fork). */
+  people: readonly Person[];
   now: Date;
   onSave: () => void;
   onUnsave: () => void;
@@ -723,7 +801,7 @@ function PostingDetail({
 
       {state.applicationId && (
         <p role="note" className="rounded-card bg-track px-4 py-3 text-meta">
-          You&apos;ve applied for this.{" "}
+          You have an application for this.{" "}
           <Link href={`/applications/${state.applicationId}`} className="underline underline-offset-2">
             Open the application
           </Link>
@@ -751,6 +829,8 @@ function PostingDetail({
           </button>
         </p>
       )}
+      {/* Who she knows at its employer (jobauto fork). */}
+      <KnownPeople people={people} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <PreviewCard label="How it fits">

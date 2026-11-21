@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ntfyTarget } from "@/lib/ntfy-address";
 import { saveChannel } from "@/lib/notifications/store";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 
@@ -8,21 +9,8 @@ import { loadSettings, saveSettings } from "@/lib/settings-data";
 // Notifications (E26) replaced them; a saved address moves into an ntfy
 // channel once, at start (instrumentation.ts).
 
-/** The ntfy server to publish to, and the topic: the address's last path part. */
-export function ntfyTarget(address: string): { server: string; topic: string } | null {
-  let url: URL;
-  try {
-    url = new URL(address.trim());
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-  if (url.username || url.password || url.search || url.hash) return null;
-  const parts = url.pathname.split("/").filter(Boolean);
-  const topic = parts.pop();
-  if (!topic || !/^[\w-]{1,64}$/.test(topic)) return null;
-  return { server: `${url.origin}/${parts.map((part) => `${part}/`).join("")}`, topic };
-}
+// The address itself is read in ntfy-address.ts, which the browser can use too.
+export { ntfyTarget };
 
 /**
  * Moves the phone alerts' topic into Settings → Notifications as an ntfy

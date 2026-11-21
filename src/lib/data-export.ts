@@ -24,7 +24,7 @@ import { workplaceFrom } from "@/lib/profile-workplace";
 // behind: they belong to the server or the mailbox, not the user's data.
 
 export const EXPORT_FORMAT = "dossier-export";
-/** Bump when the file's shape changes; imports refuse versions they don't know. 2 added Find jobs' postings and keys (E14-9), 3 projects (PRO-13) and the job agent (E16), 4 facts (PRO-14, APP-15), 5 publications (#218), the profile photo's theme and application options (#224) and Startups (#222), 6 the line about a role's company (#257), 7 skill groups (#280), 8 certifications (#293) and volunteering (#294), 9 resume section order (#297), custom sections (#298) and what sent applications were sent with (#299), and the board's order (public issue 60), 10 the tailored resume's score (#370), 11 the job agent's recurring searches and which found each candidate (public PR 61), 12 the positions library and the portals (E22, E23), 13 several profiles (E24-1), 14 the gaps the user doesn't have (E30-5), 15 interview rounds, offers and drafted messages (E30-6, E30-7, E30-8), 16 the job agent's coverage per candidate and why it skipped one (E32-2, E32-5), 17 (jobauto fork) upstream's 16 with the fork's Recruiters, careers pages, call prep and who added a search, so Dossier itself refuses the file rather than drop them. The fork's own numbers came before: its 6 was upstream's 5 with Recruiters and searches of several sources (`sources`, `cursors`, `problems`, no `source`), its 12 upstream's 11 with those, careers pages and call prep. Every field either side added is optional and read by what the file holds, not by its number, so a 6 or 12 of either kind reads the right way. */
+/** Bump when the file's shape changes; imports refuse versions they don't know. 2 added Find jobs' postings and keys (E14-9), 3 projects (PRO-13) and the job agent (E16), 4 facts (PRO-14, APP-15), 5 publications (#218), the profile photo's theme and application options (#224) and Startups (#222), 6 the line about a role's company (#257), 7 skill groups (#280), 8 certifications (#293) and volunteering (#294), 9 resume section order (#297), custom sections (#298) and what sent applications were sent with (#299), and the board's order (public issue 60), 10 the tailored resume's score (#370), 11 the job agent's recurring searches and which found each candidate (public PR 61), 12 the positions library and the portals (E22, E23), 13 several profiles (E24-1), 14 the gaps the user doesn't have (E30-5), 15 interview rounds, offers and drafted messages (E30-6, E30-7, E30-8), 16 the job agent's coverage per candidate and why it skipped one (E32-2, E32-5), 17 (jobauto fork) upstream's 16 with the fork's Recruiters, careers pages, call prep, who added a search, and an application's work sample and the experiment it was made under, so Dossier itself refuses the file rather than drop them. The fork's own numbers came before: its 6 was upstream's 5 with Recruiters and searches of several sources (`sources`, `cursors`, `problems`, no `source`), its 12 upstream's 11 with those, careers pages and call prep. Every field either side added is optional and read by what the file holds, not by its number, so a 6 or 12 of either kind reads the right way. */
 export const EXPORT_SCHEMA_VERSION = 17;
 /** The versions imports can read. */
 export const EXPORT_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -64,6 +64,9 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "alertProblem",
   // When this server last checked the careers pages.
   "careersCheckedOn",
+  // The supporter's own topic is as good as a password, and when it last went.
+  "supporterAddress",
+  "supporterSentOn",
   // The apply assistant's laptop Chrome is an address in this server's network.
   "applyBrowserAddress",
   // An import must never open the MCP connector's addresses on this server (#221), or let another app sign in (#281).
@@ -301,6 +304,12 @@ const application = z.object({
   /** The phone-screen prep pack (jobauto fork); absent in files from before it. */
   prep: z.unknown().nullable().optional(),
   prepWith: text.nullable().optional(),
+  /** The work sample (jobauto fork); absent in files from before it. */
+  workSample: z.unknown().nullable().optional(),
+  workSampleWith: text.nullable().optional(),
+  /** The experiment and version it was made under (jobauto fork). */
+  experiment: text.nullable().optional(),
+  arm: text.nullable().optional(),
   awaitingReview: z.boolean().optional(),
   archivedAt: optionalDate,
   createdAt: date,

@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DashboardFigures } from "@/lib/dashboard";
 
-import { rememberQuietDays, rememberWeeklyTarget } from "./actions";
+import { rememberQuietDays, rememberWeeklyTarget, startExperiment, stopExperiment } from "./actions";
 import { Dashboard } from "./dashboard";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null, useSearchParams: () => new URLSearchParams() }));
-vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })), startExperiment: vi.fn(async () => ({ ok: true, data: null })), stopExperiment: vi.fn(async () => ({ ok: true, data: null })) }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
 
 const figures: DashboardFigures = {
@@ -210,5 +210,32 @@ describe("This week and What's working (jobauto fork)", () => {
   it("leaves What's working out until something is sent", () => {
     render(<Dashboard {...props} working={{ sent: 0, replies: 0, early: true, groups: [] }} />);
     expect(screen.queryByRole("region", { name: "What's working" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Experiment (jobauto fork)", () => {
+  it("starts one from an idea, with two versions", async () => {
+    render(<Dashboard {...props} experiment={null} />);
+    const card = screen.getByRole("region", { name: "Experiment" });
+    await userEvent.click(within(card).getByRole("button", { name: "Letter language" }));
+    expect(within(card).getByLabelText("Version B")).toHaveValue("German letter");
+    await userEvent.click(within(card).getByRole("button", { name: "Start" }));
+    expect(startExperiment).toHaveBeenCalledWith({ name: "Letter language", a: "English letter", b: "German letter" });
+  });
+
+  it("shows how each version has done, how far from telling it is, and stops", async () => {
+    const running = {
+      experiment: { name: "Letter language", a: "English letter", b: "German letter", startedAt: "2026-11-20T10:00:00.000Z" },
+      results: [
+        { arm: "A" as const, label: "A: English letter", sent: 3, replies: 1 },
+        { arm: "B" as const, label: "B: German letter", sent: 2, replies: 0 },
+      ],
+    };
+    render(<Dashboard {...props} experiment={running} />);
+    const card = screen.getByRole("region", { name: "Experiment: Letter language" });
+    expect(within(card).getByRole("row", { name: "A: English letter 3 sent 1 moved on" })).toBeInTheDocument();
+    expect(card).toHaveTextContent("Too early to tell: send 2 more of A and 3 more of B.");
+    await userEvent.click(within(card).getByRole("button", { name: "Stop it" }));
+    expect(stopExperiment).toHaveBeenCalled();
   });
 });

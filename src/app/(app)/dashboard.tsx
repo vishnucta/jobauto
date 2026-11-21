@@ -7,7 +7,10 @@ import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { statusHref } from "@/lib/applications-list";
 import { DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import type { DayPeriod } from "@/lib/greeting";
+import type { SetupStep } from "@/lib/setup-checklist";
+import type { TodayItem } from "@/lib/today";
 import type { Insights } from "@/lib/insights";
+import type { ArmResult, Experiment } from "@/lib/experiments";
 import { STATUSES } from "@/lib/status";
 import type { WeeklyProgress } from "@/lib/weekly-target";
 
@@ -19,6 +22,9 @@ import { NeedsYou } from "./needs-you";
 import { PeriodControl, PeriodProvider, PeriodScoped } from "./period-filter";
 import { WeeklyTarget } from "./weekly-target";
 import { WhatsWorking } from "./whats-working";
+import { ExperimentCard } from "./experiment-card";
+import { SetupCard } from "./setup-card";
+import { TodayCard } from "./today-card";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -30,7 +36,9 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * scopes: the funnel, week by week, and where things stand. On the right,
  * this week, which it doesn't: Needs you, the weekly target (jobauto fork)
  * and the calendar. Below about 1500px they stack, the left zone first.
- * What's working (jobauto fork) runs across both, below them.
+ * What's working (jobauto fork) runs across both, below them. Today's three
+ * and Start here (jobauto fork) run across both above them, and the
+ * experiment (jobauto fork) comes last.
  */
 export function Dashboard({
   figures,
@@ -44,6 +52,9 @@ export function Dashboard({
   note,
   week,
   working,
+  experiment,
+  todaysThree,
+  setup,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -64,6 +75,12 @@ export function Dashboard({
   week?: WeeklyProgress;
   /** What's working (jobauto fork), from every sent application; left out until one is sent. */
   working?: Insights;
+  /** The experiment running, with its results so far; null when none runs, missing in older callers. */
+  experiment?: { experiment: Experiment; results: ArmResult[] } | null;
+  /** Today's three (today.ts); missing in older callers. */
+  todaysThree?: TodayItem[];
+  /** Start here (setup-checklist.ts); missing in older callers. */
+  setup?: SetupStep[];
 }) {
   const { sent, heardBack } = figures.overall;
   const thisWeek = figures.needsYou.filter((item) => item.soon).length;
@@ -91,6 +108,9 @@ export function Dashboard({
 
       <div className="@container px-12 pt-7 pb-[72px]">
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 @min-[1500px]:grid-cols-[minmax(0,1fr)_580px]">
+          {/* What gets applications out today, and the ways in not used yet (jobauto fork): first, across both zones. Before the first application, only when something waits. */}
+          {todaysThree && (todaysThree.length > 0 || !empty) && <TodayCard items={todaysThree} />}
+          {setup && <SetupCard steps={setup} />}
           {empty ? (
             <Welcome />
           ) : (
@@ -125,6 +145,8 @@ export function Dashboard({
           </section>
           {/* Every sent application counts here, whatever the period, so it sits below both zones, across them. */}
           {!empty && working && working.sent > 0 && <WhatsWorking insights={working} />}
+          {/* The experiment running (jobauto fork) counts every application since it started, whatever the period. */}
+          {!empty && experiment !== undefined && <ExperimentCard running={experiment} />}
         </div>
       </div>
     </>

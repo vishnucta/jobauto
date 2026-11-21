@@ -9,9 +9,11 @@ import { handOffFoundPosting, handsOffToClaude } from "@/lib/connector/handoff";
 import { loadJobSearchConfig, portalSetup, savePortals } from "@/lib/job-search/config";
 import { fullText } from "@/lib/job-search/find";
 import { foundPostingSchema, LIBRARY_SHOWS, LIBRARY_SORTS, POSTED_WITHIN, searchQuerySchema, sourceIdSchema } from "@/lib/job-search/search";
+import { startPreparing } from "@/lib/jobs/prepare-application";
 import { scoreProfilesSchema, startScoring } from "@/lib/jobs/score-posting";
 import { scoreLevelsProblem, type LevelsProblem } from "@/lib/profiles";
 import { libraryIds, listLibrary, markAllSeen, markSeen, splitPosting } from "@/lib/library";
+import { peopleAt } from "@/lib/network-data";
 import { COVERS } from "@/lib/posting-coverage";
 import { removeSearch, retryPortal, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { dismissPosting, savePosting, storePosting, unmarkPosting } from "@/lib/postings";
@@ -52,10 +54,10 @@ const libraryFilters = z.object({
   sort: z.enum(LIBRARY_SORTS).default("fit"),
 });
 
-/** "Show more" in the library: its next page through the same filters. */
+/** "Show more" in the library: its next page through the same filters, with who she knows at its employers (jobauto fork). */
 export const loadLibraryPage = action(z.object({ filters: libraryFilters, offset: z.number().int().min(0).max(100_000) }), async ({ filters, offset }) => {
   const { postings, more } = await listLibrary(filters, { offset });
-  return { postings, more };
+  return { postings, more, network: await peopleAt(postings.map((posting) => posting.company)) };
 });
 
 /** Opened: no longer new. */
@@ -145,6 +147,19 @@ export const startApplicationFrom = action(z.object({ posting: foundPostingSchem
   const text = await fullText(posting);
   const stored = await storePosting(text ? { ...posting, description: text, complete: true } : posting);
   return { postingId: stored.id };
+});
+
+/**
+ * "Prepare application" (jobauto fork): keeps the posting with its whole
+ * text, then reads it, writes the documents and creates the Draft in the
+ * background, in one go. Answers with the job to follow, or the application
+ * when the posting has one already.
+ */
+export const prepareApplication = action(z.object({ posting: foundPostingSchema }), async ({ posting }) => {
+  if (!(await isAiUsable())) throw new ActionError("Set up an AI provider in Settings → AI provider first, or start the application step by step.");
+  const text = await fullText(posting);
+  const stored = await storePosting(text ? { ...posting, description: text, complete: true } : posting);
+  return { postingId: stored.id, ...(await startPreparing(stored.id)) };
 });
 
 /** Brings a dismissed posting back, into Saved again when it was there (Undo). */

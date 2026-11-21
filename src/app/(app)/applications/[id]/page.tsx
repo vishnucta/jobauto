@@ -35,8 +35,12 @@ import { sectionName } from "@/lib/resume-sections";
 import { loadThemes } from "@/lib/theme-data";
 import { userTimeZone } from "@/lib/time-zone";
 import { callPrepOf, prepJobKey } from "@/lib/call-prep";
+import { workSampleJobKey, workSampleOf } from "@/lib/work-sample";
 import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
+import { recruiterDoubts } from "@/lib/recruiter-eye";
+import { armLabel, inRun } from "@/lib/experiments";
+import { peopleAt } from "@/lib/network-data";
 
 import { ApplicationView } from "./application-view";
 import { metaLine, roleLabel } from "./meta";
@@ -95,6 +99,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
 
   const apply = await loadApplyTab(application, profile, settings, timeZone);
   const prepJobs = await findUnfinishedJobs(prepJobKey(id));
+  const sampleJobs = await findUnfinishedJobs(workSampleJobKey(id));
   const anlagen = (await listAttachments()).filter((attachment) => attachment.enabled).map((attachment) => attachment.name);
   const match = readJson(matchSchema, application.match);
   const messages = application.messages
@@ -253,8 +258,21 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       initialTab={tabFrom(tab)}
       apply={apply}
       prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
+      workSample={{ sample: workSampleOf(application.workSample), jobId: sampleJobs.at(-1)?.id ?? null }}
       anlagen={anlagen}
       letterAsks={letterAvailability(application.postingText, settings.applyAnswers).missing}
+      known={(await peopleAt([application.company]))[application.company] ?? []}
+      version={
+        (application.arm === "A" || application.arm === "B") && settings.experiment && inRun(settings.experiment, application)
+          ? { experiment: settings.experiment.name, label: armLabel(settings.experiment, application.arm) }
+          : null
+      }
+      doubts={recruiterDoubts({
+        profile,
+        answers: settings.applyAnswers,
+        posting: application.postingText,
+        documents: [resume, letter].flatMap((document) => document?.units ?? []).map((unit) => unit.text).join("\n"),
+      })}
       aiReady={aiReady}
       rewriting={rewriting}
       messages={messages}

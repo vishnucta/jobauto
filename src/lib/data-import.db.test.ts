@@ -410,6 +410,17 @@ describe("importExport (E10-6)", () => {
     expect(await prisma().postingSearch.findFirstOrThrow()).toMatchObject({ addedBy: "Claude Code", portals: [{ id: "CLIENT" }] });
   });
 
+  it("keeps an application's work sample and the experiment it was made under, and leaves the LinkedIn network out (jobauto fork)", async () => {
+    const { id } = await prisma().application.findFirstOrThrow({ where: { company: "Northstar Health" } });
+    const sample = { title: "My first 90 days", situation: "", phases: [{ heading: "Weeks 1 to 4", steps: ["Learn the reporting calendar"] }], proof: [], closing: "", unverified: [], inMappe: true };
+    await prisma().application.update({ where: { id }, data: { workSample: sample, workSampleWith: "write-work-sample@1", experiment: "Kurzprofil", arm: "B" } });
+    await prisma().connection.create({ data: { firstName: "Max", lastName: "Beispiel", company: "Northstar Health", url: "https://www.linkedin.com/in/max-beispiel-network-test", companyKey: "northstar health" } });
+    expect(await snapshot()).not.toContain("max-beispiel-network-test");
+    const file = await asFile();
+    await importExport(prisma(), file);
+    expect(await prisma().application.findUniqueOrThrow({ where: { id } })).toMatchObject({ workSample: sample, workSampleWith: "write-work-sample@1", experiment: "Kurzprofil", arm: "B" });
+  });
+
   it("reads the fork's own version 6 files from before the merge: recruiters and several sources, without upstream's 6 to 11 (bewerbung fork)", async () => {
     await prisma().recruiter.create({ data: { id: "rec-1", name: "Hays", events: { create: { id: "ev-1", text: "Added", at: now } } } });
     const file = await asFile();

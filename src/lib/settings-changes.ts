@@ -199,6 +199,7 @@ export const settingChoicesSchema = z.strictObject({
   docLanguage: z.string().trim().min(1).max(60).nullable().optional(),
   fileNamePattern: z.string().max(200).optional(),
   includeRefs: z.boolean().optional(),
+  germanOnlyWhenFit: z.boolean().optional(),
   documentsToWrite: z.enum(DOCUMENTS_TO_WRITE).optional(),
   nightlyBackup: z.boolean().optional(),
   jobRetentionHours: z.number().refine(isJobRetention).optional(),
@@ -207,6 +208,8 @@ export const settingChoicesSchema = z.strictObject({
   archiveAfterDays: z.number().refine(isArchiveDays).optional(),
   alertMinScore: z.number().int().min(0).max(100).optional(),
   weeklyTarget: z.number().int().min(0).max(50).optional(),
+  supporterDay: z.number().int().min(1).max(7).optional(),
+  supporterHour: z.number().int().min(0).max(23).optional(),
 });
 export type SettingChoices = z.output<typeof settingChoicesSchema>;
 

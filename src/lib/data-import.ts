@@ -210,6 +210,7 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
           resumeFit: json(application.resumeFit),
           messageDraft: json(application.messageDraft),
           prep: json(application.prep),
+          workSample: json(application.workSample),
         })),
       });
       await tx.statusEvent.createMany({

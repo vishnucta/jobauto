@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { listProfiles, openProfileId } from "@/lib/profiles";
 import { isAiUsable } from "@/lib/ai/config";
 import { profileGerman } from "@/lib/german-need";
+import { loadHiddenTitles } from "@/lib/hidden-titles-data";
+import { peopleAt } from "@/lib/network-data";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { enabledPortals, loadJobSearchConfig, portalSetup } from "@/lib/job-search/config";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -29,19 +31,23 @@ export const metadata: Metadata = { title: "Positions" };
  * search written in the URL (?q=…) only fills in the form.
  *
  * Kept from Find jobs (jobauto fork): search words from the profile last
- * opened, as chips in the form; the German each posting asks for against
- * the profile's; links to Recruiters and Careers pages, which have screens
- * of their own.
+ * opened, as chips in the form, and the titles employers use for its skills;
+ * the German each posting asks for against the profile's; who she knows at
+ * each employer; "Prepare it for me"; links to Recruiters and Careers pages,
+ * which have screens of their own.
  */
 export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const params = await searchParams;
   const filters = libraryFromParams(params);
   const typed = queryFromParams(params);
-  const [config, timeZone, counts, scoreInClaude, settings, profiles, profileId, recruiters, employers] = await Promise.all([
+  const aiUsable = isAiUsable();
+  const [config, timeZone, counts, scoreInClaude, canPrepare, settings, profiles, profileId, recruiters, employers] = await Promise.all([
     loadJobSearchConfig(),
     userTimeZone(),
     countLibrary(),
-    isAiUsable().then(handsOffToClaude),
+    aiUsable.then(handsOffToClaude),
+    // Dossier's own AI model can write: postings offer "Prepare it for me" (jobauto fork).
+    aiUsable,
     loadSettings(),
     listProfiles(),
     // The search words' profile: the one last opened, as New application picks it (E24-6).
@@ -63,6 +69,12 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   const enabled = enabledPortals(config);
   // What an AI client or a careers page added was no search of the user's: the form doesn't start from it.
   const searched = foundSearch && !isAddedSource(foundSearch.source) ? foundSearch.query : null;
+  const [network, alsoAdvertised] = await Promise.all([
+    // Who she knows at the employers on screen (jobauto fork); Show more brings the next pages' own.
+    peopleAt(library.postings.map((posting) => posting.company)),
+    // Titles of jobs seen that ask for the profile's skills but its searches miss (jobauto fork).
+    loadHiddenTitles(profile, now),
+  ]);
 
   return (
     <JobsScreen
@@ -73,8 +85,11 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       // The profile's own search words, as one-click chips in the form; named when there are several profiles.
       suggestions={searchChips(searchWords(profile, now))}
       suggestionsFrom={profiles.length > 1 ? (profiles.find((entry) => entry.id === profileId)?.name ?? null) : null}
+      alsoAdvertised={alsoAdvertised}
       // German is shared by every profile: each posting's is read against it.
       german={profileGerman(profile.languages)}
+      network={network}
+      canPrepare={canPrepare}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       query={typed ?? searched ?? (await latestQuery()) ?? (await profileSearch())}

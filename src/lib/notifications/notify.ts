@@ -31,8 +31,8 @@ const RETRY_MINUTES = [1, 5, 30] as const;
 const KEEP_DELIVERIES = 200;
 const MINUTE_MS = 60_000;
 
-/** Where links point (N1): DOSSIER_PUBLIC_URL, else the address Dossier was last opened at; none on the desktop app's "On this computer". */
-async function linkBase(): Promise<string | null> {
+/** Where links point (N1): DOSSIER_PUBLIC_URL, else the address Dossier was last opened at; none on the desktop app's "On this computer". The supporter digest's link too (jobauto fork). */
+export async function linkBase(): Promise<string | null> {
   if (isDesktopApp()) return null;
   const base = env.DOSSIER_PUBLIC_URL ?? (await loadSettings()).lastOrigin;
   return base ? base.replace(/\/+$/, "") : null;

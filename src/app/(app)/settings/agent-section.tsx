@@ -6,9 +6,11 @@ import { useState } from "react";
 import { useTrackSave } from "@/components/save-tracker";
 import { toastResult } from "@/components/toast";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import type { SavedAgentSearch } from "@/lib/agent/search";
+import type { AgentPortalsView } from "@/lib/agent/source";
 import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
 import type { Country } from "@/lib/job-search/countries";
 import type { JobSource, SearchQuery } from "@/lib/job-search/search";
@@ -16,6 +18,7 @@ import type { Scorer } from "@/lib/scoring/scorers";
 
 import { saveAgentSettings } from "../agent/actions";
 import { RecurringSearches, type SearchProfile } from "./recurring-searches";
+import { SupporterDigest, type SupporterDigestSettings } from "./supporter-digest";
 import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
 import { COVERS, COVERS_LABELS, type Covers } from "@/lib/posting-coverage";
@@ -30,6 +33,8 @@ export type AgentSettings = {
   autoDraft: boolean;
   /** Which new matches get a Strong new matches message, through Settings → Notifications (jobauto fork). */
   strongCovers: Covers;
+  /** The agent's own portals (agent/source.ts, jobauto fork); null or missing is Automatic. */
+  portals?: string[] | null;
 };
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -45,6 +50,7 @@ export function AgentSection({
   initial,
   source,
   sources,
+  portals,
   scoring,
   countries,
   timeZone,
@@ -52,12 +58,15 @@ export function AgentSection({
   searches,
   suggestedQuery,
   profiles = [],
+  supporter,
 }: {
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
   source: JobSource | null;
-  /** The portals the agent asks, which its search form follows (#517). */
+  /** The portals the agent asks, which its search form follows (#517): its own when it has some (jobauto fork). */
   sources: readonly JobSource[];
+  /** What "Searches with" offers (agent/source.ts, jobauto fork): what Automatic asks, and the portals she could choose. */
+  portals?: AgentPortalsView;
   /** What scores the postings (Settings → Scoring), and whether it's set up. */
   scoring: { scorer: Scorer; ready: boolean };
   countries: readonly Country[];
@@ -69,6 +78,8 @@ export function AgentSection({
   suggestedQuery?: SearchQuery;
   /** Every profile, with what a search tied to it starts with (E24-6). */
   profiles?: SearchProfile[];
+  /** The weekly digest for her supporter (jobauto fork); missing in older callers. */
+  supporter?: SupporterDigestSettings;
 }) {
   const track = useTrackSave();
   const [settings, setSettings] = useState(initial);
@@ -80,6 +91,12 @@ export function AgentSection({
       if (!toastResult(result).ok) setSettings(previous);
     });
   };
+  // Its own portals (jobauto fork), kept in the order Settings → Job search lists them.
+  const own = settings.portals ?? null;
+  const inOrder = (ids: readonly string[]) => (portals?.choices ?? []).map((choice) => choice.id).filter((id) => ids.includes(id));
+  const nameOf = (id: string) => portals?.choices.find((choice) => choice.id === id)?.name ?? id;
+  // On Automatic with only the Bundesagentur switched on, a portal she has a key for stands in (source.ts).
+  const standIn = !source && !own && (portals?.automatic.length ?? 0) > 0;
 
   return (
     <>
@@ -87,7 +104,9 @@ export function AgentSection({
         Once a day it runs all enabled searches, scores the new postings against your profile, and keeps the best on the Agent screen. It never sends or applies.
       </SettingsSectionIntro>
 
-      {source === "ARBEITSAGENTUR" ? (
+      {own && sources.length === 0 ? (
+        <SetupNote before="None of the portals chosen for the agent below can be searched now. Check their keys in " section="jobs" after=", or choose others." />
+      ) : source === "ARBEITSAGENTUR" && !standIn ? (
         // It searches on its own, which the BA's terms forbid most clearly (#223).
         <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
           The agent doesn&apos;t search the Bundesagentur für Arbeit. Choose JSearch, SerpApi, Adzuna or FreeHire in{" "}
@@ -96,7 +115,7 @@ export function AgentSection({
           </Link>{" "}
           for it. Manual Find jobs searches are unaffected.
         </p>
-      ) : !source ? (
+      ) : !source && !standIn && !own ? (
         <SetupNote before="The agent searches the source you choose in " section="jobs" after=", which is off. Choose one first." />
       ) : scoring.ready ? null : scoring.scorer === "JEV" ? (
         <SetupNote before="The agent scores postings with Jev, which needs your TypeSafe key in " section="scoring" after="." />
@@ -118,6 +137,49 @@ export function AgentSection({
           onCheckedChange={(enabled) => change({ enabled })}
         />
       </Card>
+
+      {/* The agent's own portals (jobauto fork): Automatic, or portals of its own, switched on in Settings → Job search or not. */}
+      {portals && (
+        <Card padding="none" className="flex flex-col gap-3 px-7 py-[22px]">
+          <Select
+            label="Searches with"
+            className="max-w-[420px]"
+            value={own ? "own" : ""}
+            onChange={(event) =>
+              change({ portals: event.target.value ? (portals.automatic.length > 0 ? [...portals.automatic] : portals.choices.slice(0, 1).map((choice) => choice.id)) : null })
+            }
+          >
+            <option value="">Automatic{portals.automatic.length > 0 ? ` (${portals.automatic.map(nameOf).join(", ")})` : ""}</option>
+            <option value="own" disabled={!own && portals.choices.length === 0}>
+              Portals of its own
+            </option>
+          </Select>
+          {own && (
+            <div role="group" aria-label="The job agent's portals" className="flex flex-col gap-2">
+              {portals.choices.map((choice) => {
+                const on = own.includes(choice.id);
+                return (
+                  <Checkbox
+                    key={choice.id}
+                    label={choice.name}
+                    checked={on}
+                    // At least one: Automatic is the way back to none of its own.
+                    disabled={on && own.length === 1}
+                    onChange={(event) => change({ portals: event.target.checked ? inOrder([...own, choice.id]) : own.filter((id) => id !== choice.id) })}
+                  />
+                );
+              })}
+            </div>
+          )}
+          <p className="text-meta text-muted">
+            {own
+              ? "The agent asks only these, switched on in Settings → Job search or not, so its requests stay apart from your searches in Positions. Each portal you have a key for, and FreeHire, can be chosen; never the Bundesagentur für Arbeit."
+              : standIn
+                ? "Settings → Job search has only the Bundesagentur für Arbeit switched on, which the agent may not search on its own, so it uses a portal you have a key for."
+                : "Automatic asks every portal switched on in Settings → Job search, except the Bundesagentur für Arbeit. Choose portals of its own to keep the agent apart from your searches."}
+          </p>
+        </Card>
+      )}
 
       <RecurringSearches initial={searches} suggestedQuery={suggestedQuery} sources={sources} countries={countries} profiles={profiles} />
 
@@ -190,8 +252,10 @@ export function AgentSection({
         </Select>
       </Card>
 
+      {supporter && <SupporterDigest initial={supporter} />}
+
       <p className="text-meta text-muted">
-        One shared daily schedule for all enabled searches, in {timeZone}. Each search asks every portal switched on in Settings → Job search that covers its country for the first page (never the Bundesagentur für Arbeit), and what it finds lands in Positions. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} requests to each portal in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}
+        One shared daily schedule for all enabled searches, in {timeZone}. Each search asks every portal the agent searches with that covers its country for the first page (never the Bundesagentur für Arbeit), and what it finds lands in Positions. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} requests to each portal in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}
         {settings.autoDraft ? ` and prepares up to ${plural(settings.maxDrafts, "draft", "drafts")}` : ""}. Scoring uses the provider in Settings → Scoring; drafts use your AI provider. Both receive your profile; the portals only get the search.
       </p>
     </>

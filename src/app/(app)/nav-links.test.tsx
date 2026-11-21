@@ -32,6 +32,7 @@ describe("NavLinks", () => {
       "Dashboard",
       "Applications",
       "Inbox",
+      "Interview practice",
       "Positions",
       "Startups",
       "Agent",

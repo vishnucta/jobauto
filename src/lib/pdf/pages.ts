@@ -15,3 +15,6 @@ export const printBasePath = (fit = 0, profileId?: string) => {
   const params = new URLSearchParams({ ...(profileId ? { profile: profileId } : {}), ...(fit > 0 ? { fit: String(fit) } : {}) }).toString();
   return params ? `/print/base?${params}` : "/print/base";
 };
+
+/** A profile's Kurzprofil print path (jobauto fork), signed like the base resume's. */
+export const printKurzprofilPath = (profileId?: string) => (profileId ? `/print/kurzprofil?${new URLSearchParams({ profile: profileId })}` : "/print/kurzprofil");

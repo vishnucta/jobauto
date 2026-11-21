@@ -15,7 +15,7 @@ vi.mock("@/lib/profile-data", async () => {
   return { loadProfile: async () => demoProfile() };
 });
 // Shared settings: the standard answers (jobauto fork). The Base resume's own are the profile's (E24-1).
-vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => ({ applyAnswers: { salary: "", startDate: "", noticePeriod: "" } }) }));
+vi.mock("@/lib/settings-data", () => ({ loadSettings: async () => ({ applyAnswers: { salary: "", startDate: "", noticePeriod: "", workPermit: true, germanCourse: "", degreeRecognition: "" } }) }));
 vi.mock("@/lib/profiles", () => ({ loadProfileSettings: async () => ({ resumeSections: { order: [], off: [] }, skillOrder: "relevance" }) }));
 vi.mock("./runner", () => ({ defineJob: <T,>(definition: T) => definition }));
 

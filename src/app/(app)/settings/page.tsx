@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 
 import { loadAiConfig, loadAiSettingsView } from "@/lib/ai/config";
+import { agentPortalsView } from "@/lib/agent/source";
 import { agentPortal, jobSearchView, loadJobSearchConfig } from "@/lib/job-search/config";
 import { portalUpdates } from "@/lib/portals/updates";
 import { COUNTRIES } from "@/lib/job-search/countries";
@@ -58,6 +59,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
   const params = await searchParams;
   const section = settingsSectionFromParam(params.section);
   const [settings, status, aiView] = await Promise.all([loadSettings(), loadSettingsStatus(), section === "ai" ? loadAiSettingsView() : null]);
+  const jobConfig = section === "agent" ? await loadJobSearchConfig() : null;
 
   return (
     <SettingsScreen
@@ -86,12 +88,15 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             maxScores: settings.agentMaxScores,
             maxDrafts: settings.agentMaxDrafts,
             autoDraft: settings.agentAutoDraft,
+            portals: settings.agentPortals,
           }}
           searches={await listAgentSearches()}
+          supporter={{ address: settings.supporterAddress, day: settings.supporterDay, hour: settings.supporterHour }}
           suggestedQuery={(await loadSearch())?.query}
           profiles={await Promise.all((await listProfiles()).map(async (profile) => ({ ...profile, defaults: await profileSearchDefaults(profile.id) })))}
-          source={agentPortal(await loadJobSearchConfig())}
-          sources={agentPortals(await loadJobSearchConfig())}
+          source={agentPortal(jobConfig!)}
+          sources={agentPortals(jobConfig!, settings.agentPortals)}
+          portals={agentPortalsView(jobConfig!, settings.agentPortals)}
           scoring={await scoringReadiness()}
           countries={COUNTRIES}
           timeZone={await lastKnownTimeZone()}
@@ -155,6 +160,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             customLanguages: settings.customLanguages,
             fileNamePattern: settings.fileNamePattern,
             includeRefs: settings.includeRefs,
+            germanOnlyWhenFit: settings.germanOnlyWhenFit,
             documentsToWrite: settings.documentsToWrite,
           }}
           preview={await filePreview()}

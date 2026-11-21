@@ -19,7 +19,7 @@ vi.mock("@/lib/profile-data", async () => {
   return { loadProfile: async () => demoProfile(), loadFactTexts: async () => ["Relocating in January."] };
 });
 vi.mock("@/lib/settings-data", () => ({
-  loadSettings: async () => ({ dateFormat: "DAY_MONTH_YEAR", docLanguage: null, applyAnswers: { salary: "", startDate: "", noticePeriod: "" } }),
+  loadSettings: async () => ({ dateFormat: "DAY_MONTH_YEAR", docLanguage: null, applyAnswers: { salary: "", startDate: "", noticePeriod: "", workPermit: true, germanCourse: "", degreeRecognition: "" } }),
 }));
 vi.mock("@/lib/profiles", () => ({
   loadProfileSettings: async () => ({ resumeSections: { order: [], off: [] }, skillOrder: "auto", baseThemeId: null }),

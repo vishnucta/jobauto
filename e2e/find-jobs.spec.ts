@@ -56,8 +56,10 @@ test("searches, keeps postings, and starts an application from one", async ({ pa
   await expect(page).toHaveURL(/\/jobs\?(.*&)?show=saved/);
   await expect(page.getByText("1 saved posting")).toBeVisible();
 
-  // Start an application from it: the posting is filled in, to check first.
-  await page.getByRole("button", { name: "Start application →" }).click();
+  // Start an application from it: the posting is filled in, to check first. With an AI model of
+  // Dossier's own, "Prepare it for me" comes first and this is the step-by-step way (jobauto fork).
+  await expect(page.getByRole("button", { name: "Prepare it for me" })).toBeVisible();
+  await page.getByRole("button", { name: "Step by step →" }).click();
   await expect(page).toHaveURL(/\/new$/);
   await expect(page.getByLabel("Job posting")).toHaveValue(/^Ledgerly: Senior Product Designer, Payments\n\nRotterdam · EUR 75,000–90,000 a year\n\nLedgerly is hiring/);
   await expect(page.getByLabel(/^Link to the posting/)).toHaveValue("https://jobs.example/e2e-ledgerly");

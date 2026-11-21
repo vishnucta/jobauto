@@ -7,7 +7,10 @@ import { agentDraftJob } from "@/lib/agent/draft";
 import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
 import { englishCopyJob } from "@/lib/jobs/english-copy";
+import { prepareApplicationJob } from "@/lib/jobs/prepare-application";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
+import { preparePracticeJob } from "@/lib/jobs/prepare-practice";
+import { writeWorkSampleJob } from "@/lib/jobs/write-work-sample";
 import { matchScore } from "@/lib/application-data";
 import { libraryHref } from "@/lib/job-search/search";
 import { applyJob, applyPageJob } from "@/lib/jobs/apply";
@@ -246,6 +249,20 @@ const KINDS: Record<string, Tell> = {
       next: "get_call_prep reads the pack.",
     };
   },
+  [preparePracticeJob.type]: (task, linkTo) => ({
+    task: "Preparing a practice call",
+    result: resultOf(preparePracticeJob, task) ? { prepared: true } : undefined,
+    link: linkTo("/practice"),
+  }),
+  [writeWorkSampleJob.type]: (task, linkTo) => {
+    const applicationId = inputOf(writeWorkSampleJob, task)?.applicationId;
+    return {
+      task: "Writing a work sample (first 90 days)",
+      about: { application_id: applicationId },
+      result: resultOf(writeWorkSampleJob, task) ? { written: true } : undefined,
+      link: applicationId ? linkTo(`/applications/${applicationId}?tab=sample`) : undefined,
+    };
+  },
   [englishCopyJob.type]: (task, linkTo) => {
     const applicationId = inputOf(englishCopyJob, task)?.applicationId;
     return {
@@ -271,6 +288,15 @@ const KINDS: Record<string, Tell> = {
       about: { candidate_id: inputOf(agentDraftJob, task)?.candidateId },
       result: draft ? { application_id: draft.applicationId } : undefined,
       link: linkTo("/agent"),
+    };
+  },
+  [prepareApplicationJob.type]: (task, linkTo) => {
+    const prepared = resultOf(prepareApplicationJob, task);
+    return {
+      task: "Preparing an application from a saved posting",
+      about: { posting_id: inputOf(prepareApplicationJob, task)?.postingId },
+      result: prepared ? { application_id: prepared.applicationId, sent_by: prepared.route } : undefined,
+      link: linkTo(prepared ? `/applications/${prepared.applicationId}` : "/jobs"),
     };
   },
   [scorePostingJob.type]: async (task, linkTo) => {

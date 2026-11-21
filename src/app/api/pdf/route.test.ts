@@ -79,6 +79,12 @@ describe("GET /api/pdf", () => {
     expect(vi.mocked(renderPdf).mock.calls.map(([path]) => path)).toEqual(["/print/base?profile=first"]);
   });
 
+  it("renders a profile's Kurzprofil, the first one's without &profile= (jobauto fork)", async () => {
+    expect((await get("?doc=kurzprofil")).status).toBe(200);
+    expect((await get("?doc=kurzprofil&profile=p2")).status).toBe(200);
+    expect(vi.mocked(renderPdf).mock.calls.map(([path]) => path)).toEqual(["/print/kurzprofil?profile=first", "/print/kurzprofil?profile=p2"]);
+  });
+
   it("answers 404 for documents it doesn't know", async () => {
     expect((await get("?doc=resume:abc")).status).toBe(404);
     expect((await get("")).status).toBe(404);

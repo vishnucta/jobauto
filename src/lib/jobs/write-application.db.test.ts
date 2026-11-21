@@ -21,7 +21,7 @@ vi.mock("@/lib/profile-data", async () => {
   return { loadProfile: async () => demoProfile(), loadFactTexts: async () => ["Relocating in January."] };
 });
 // The standard answers the letter states when a posting asks (jobauto fork).
-const answers = vi.hoisted(() => ({ salary: "", startDate: "", noticePeriod: "" }));
+const answers = vi.hoisted(() => ({ salary: "", startDate: "", noticePeriod: "", workPermit: true, germanCourse: "", degreeRecognition: "" }));
 vi.mock("@/lib/settings-data", () => ({
   loadSettings: async () => ({ dateFormat: "DAY_MONTH_YEAR", docLanguage: null, includeRefs: true, strict: true, showDiff: true, applyAnswers: answers }),
 }));
@@ -75,6 +75,16 @@ describe("writeApplicationJob (E31-4)", () => {
     const letter = JSON.stringify(mock.calls.find((call) => call.json?.name === "cover_letter")?.messages);
     expect(letter).toContain("Salary expectation: 58.000 € brutto/Jahr");
     expect(letter).toContain("Earliest start: 1. März 2027");
+  });
+
+  it("tells the letter what settles a German recruiter's doubts, from the standard answers (jobauto fork)", async () => {
+    Object.assign(answers, { germanCourse: "B2 course, exam in March" });
+    const mock = provider.current as MockProvider;
+    await writeApplicationJob.run({ applicationId: "app-1", write: "letter" }, context());
+    Object.assign(answers, { germanCourse: "" });
+    const letter = JSON.stringify(mock.calls.find((call) => call.json?.name === "cover_letter")?.messages);
+    expect(letter).toContain("What settles a German employer's usual doubts");
+    expect(letter).toContain("B2 course, exam in March");
   });
 
   it("writes only the one asked for, skipping its step", async () => {

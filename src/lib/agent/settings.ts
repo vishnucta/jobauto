@@ -3,11 +3,13 @@ import "server-only";
 import { z } from "zod";
 
 import { ActionError } from "@/lib/action";
-import type { SearchQuery } from "@/lib/job-search/search";
+import { sourceIdSchema, type SearchQuery } from "@/lib/job-search/search";
 import { COVERS, coversFromScore, type Covers } from "@/lib/posting-coverage";
 import { saveSettings } from "@/lib/settings-data";
 
+import { AGENT_MAX_SLOTS_PER_RUN, MAX_AGENT_SEARCHES } from "./limits";
 import { agentSearchSetupProblem, type SavedAgentSearch } from "./search";
+import { agentMayAsk } from "./source";
 import { listAgentSearches, saveAgentSearch } from "./searches";
 
 // Settings → Job agent (E16-7), from the screen or from Claude: each change
@@ -28,6 +30,14 @@ export const agentSettingsChangeSchema = z
     autoDraft: z.boolean().optional(),
     /** Which new matches get a Strong new matches message (jobauto fork). */
     strongCovers: z.enum(COVERS).optional(),
+    /** The agent's own portals, never the Bundesagentur; null is Automatic (source.ts, jobauto fork). */
+    portals: z
+      .array(sourceIdSchema.refine(agentMayAsk, "The job agent doesn't search the Bundesagentur für Arbeit."))
+      .min(1, "Choose at least one portal for the job agent.")
+      // Three searches on each fit one run's slots.
+      .max(AGENT_MAX_SLOTS_PER_RUN / MAX_AGENT_SEARCHES)
+      .nullable()
+      .optional(),
   })
   .strict();
 export type AgentSettingsChange = z.output<typeof agentSettingsChangeSchema> & {
@@ -82,5 +92,6 @@ export async function updateAgentSettings({ query, ...changes }: AgentSettingsCh
     agentMaxDrafts: changes.maxDrafts,
     agentAutoDraft: changes.autoDraft,
     alertMinScore: changes.strongCovers === undefined ? undefined : STRONG_MINIMUM[changes.strongCovers],
+    agentPortals: changes.portals === undefined ? undefined : changes.portals && [...new Set(changes.portals)],
   });
 }

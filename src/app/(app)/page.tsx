@@ -6,10 +6,12 @@ import { waitingByApplication } from "@/lib/google/inbox-data";
 import { loadDashboard } from "@/lib/dashboard-data";
 import { noteDay, noteState } from "@/lib/daily-note";
 import { longDate } from "@/lib/dates";
-import { loadInsights, loadWeeklyProgress } from "@/lib/insights-data";
+import { loadExperiment, loadInsights, loadWeeklyProgress } from "@/lib/insights-data";
 import { dayPeriod, hourIn } from "@/lib/greeting";
 import { loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
+import { loadSetupSteps } from "@/lib/setup-checklist-data";
+import { loadToday } from "@/lib/today-data";
 import { userTimeZone } from "@/lib/time-zone";
 
 import { Dashboard } from "./dashboard";
@@ -29,11 +31,14 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   const now = new Date();
   const range = periodFromParam(param) ?? settings.dashboardPeriod;
   const replies = await waitingByApplication().catch(() => undefined);
-  const [figures, name, week, working] = await Promise.all([
+  const [figures, name, week, working, experiment, todaysThree, setup] = await Promise.all([
     loadDashboard({ period: range, quietDays: settings.quietDays, timeZone, replies }),
     loadProfileName(),
     loadWeeklyProgress(timeZone ?? "UTC", now),
     loadInsights(),
+    loadExperiment(),
+    loadToday(),
+    loadSetupSteps(),
   ]);
   return (
     <Dashboard
@@ -47,6 +52,9 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
       empty={figures.total === 0}
       week={week}
       working={working}
+      experiment={experiment}
+      todaysThree={todaysThree}
+      setup={setup}
       calendar={
         <Suspense fallback={<CalendarSkeleton />}>
           <DashboardCalendar date={date} now={now} />

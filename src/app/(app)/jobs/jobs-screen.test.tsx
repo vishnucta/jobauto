@@ -532,7 +532,7 @@ describe("the positions library (E22-5)", () => {
   });
 
   it("loads the library's next page through the same filters", async () => {
-    vi.mocked(loadLibraryPage).mockResolvedValue({ ok: true, data: { postings: [posting("c")], more: false } });
+    vi.mocked(loadLibraryPage).mockResolvedValue({ ok: true, data: { postings: [posting("c")], more: false, network: {} } });
     renderScreen({ library: { postings: [posting("a"), posting("b")], total: 3, more: true } });
     expect(screen.getByText("3 postings, showing 2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show more" }));
@@ -606,6 +606,15 @@ describe("search words from the profile, in the form (jobauto fork)", () => {
   it("shows no row without words", () => {
     renderScreen();
     expect(screen.queryByRole("group", { name: "Search words from your profile" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Titles employers use for your skills" })).not.toBeInTheDocument();
+  });
+
+  it("offers the titles employers use for her skills as one-click search words", async () => {
+    renderScreen({ alsoAdvertised: [{ title: "Middle Office Specialist", postings: 3 }] });
+    const group = screen.getByRole("group", { name: "Titles employers use for your skills" });
+    await userEvent.click(within(group).getByRole("button", { name: "Middle Office Specialist 3" }));
+    expect(screen.getByLabelText("What")).toHaveValue("Middle Office Specialist");
+    expect(runJobSearch).not.toHaveBeenCalled();
   });
 });
 

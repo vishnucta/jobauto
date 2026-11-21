@@ -8,6 +8,8 @@ import { loadTaskOptions } from "@/lib/ai/task-options";
 import { tailorResume, writeCoverLetter } from "@/lib/ai/tasks";
 import { extractedSchema, matchSchema, unitsSchema } from "@/lib/application-data";
 import { letterAvailability } from "@/lib/letter-availability";
+import { postingWriteLanguage, profileGerman } from "@/lib/german-need";
+import { readinessLines } from "@/lib/recruiter-eye";
 import { loadProfile } from "@/lib/profile-data";
 import { withoutSectionsOff } from "@/lib/resume-sections";
 import { DOCUMENTS_TO_WRITE } from "@/lib/settings";
@@ -58,7 +60,10 @@ export const writeDocumentsJob = defineJob({
     const profile = withoutSectionsOff(fullProfile, own.resumeSections);
     // "Anything I should know?" is the application's first fact (APP-15).
     const facts = note.trim() ? [note.trim()] : [];
-    const taskOptions = { ...options, ...(language === undefined ? {} : { language }), signal };
+    // "The posting's language" (null), German only when the job needs German she has (german-need.ts).
+    const postingLanguage = settings.germanOnlyWhenFit ? postingWriteLanguage(extracted.language, posting, profileGerman(fullProfile.languages)) : extracted.language;
+    const chosen = language === undefined ? options.language : language;
+    const taskOptions = { ...options, language: chosen ?? postingLanguage, signal };
     const skipped = { data: [], promptVersion: "" };
     // Skills in the user's own order once they set one (public issue 62).
     const resume =
@@ -69,7 +74,7 @@ export const writeDocumentsJob = defineJob({
     if (write === "both") await step(WRITE_DOCUMENTS_STEPS[1]);
     // Salary and start date, when the posting asks for them, from the standard answers.
     const availability = letterAvailability(posting, settings.applyAnswers).say;
-    const letter = write === "resume" ? skipped : await writeCoverLetter(provider, { profile, extracted, match, tone, facts, posting, availability }, taskOptions);
+    const letter = write === "resume" ? skipped : await writeCoverLetter(provider, { profile, extracted, match, tone, facts, posting, availability, readiness: readinessLines(profile, settings.applyAnswers) }, taskOptions);
 
     return { resume: resume.data, resumeWith: resume.promptVersion, letter: letter.data, letterWith: letter.promptVersion };
   },

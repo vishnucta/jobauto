@@ -154,9 +154,9 @@ export async function loadAgentView(now = new Date()): Promise<AgentView> {
     description: candidate.description,
   });
   const last = settings.agentRuns[0];
-  const slots = planSlots(agentPlan(searches, config));
+  const slots = planSlots(agentPlan(searches, config, settings.agentPortals));
   // With nothing to run yet, whether a request to each portal would fit.
-  const eligible = nextSourceBudgetAt(settings.agentRuns, now, slots.length > 0 ? slots : agentPortals(config));
+  const eligible = nextSourceBudgetAt(settings.agentRuns, now, slots.length > 0 ? slots : agentPortals(config, settings.agentPortals));
   const covers = agentCoversOf(settings);
   const bestFirst = (rows: typeof scored) => rows.map((candidate) => ({ candidate, coverage: candidateCoverage(candidate), at: candidate.createdAt.getTime() })).sort(byBestFit).map(({ candidate }) => candidate);
   const finds = bestFirst(scored.filter((candidate) => passes(candidateCoverage(candidate), covers))).map(view);
@@ -172,7 +172,7 @@ export async function loadAgentView(now = new Date()): Promise<AgentView> {
 
   return {
     searches,
-    budget: agentPortals(config).map((portal) => ({ portal, name: sourceInfo(portal).name, used: sourceRequestsInPastDay(settings.agentRuns, now, portal) })),
+    budget: agentPortals(config, settings.agentPortals).map((portal) => ({ portal, name: sourceInfo(portal).name, used: sourceRequestsInPastDay(settings.agentRuns, now, portal) })),
     nextEligibility: eligible > now ? formatDateTime(eligible, timeZone, now) : "Now",
     timeZone,
     searchHistory: searches.flatMap((search) => {

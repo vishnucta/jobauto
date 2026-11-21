@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
 import { FactList } from "@/components/fact-list";
 import type { FactItem } from "@/lib/profile";
@@ -38,11 +38,14 @@ export function PostingTab({
   posting,
   facts,
   setFacts,
+  children,
 }: {
   applicationId: string;
   posting: PostingData;
   facts: FactItem[];
   setFacts: (change: (facts: FactItem[]) => FactItem[]) => void;
+  /** More cards after the posting's own, e.g. the recruiter's eye. */
+  children?: ReactNode;
 }) {
   const factsHint = useId();
   return (
@@ -92,6 +95,7 @@ export function PostingTab({
         </span>
         <span>Pasted {posting.pasted}</span>
       </div>
+      {children}
       <div className="flex w-full max-w-[640px] flex-col gap-[22px] rounded-panel border border-line-card bg-card px-[30px] py-7">
         <div className="flex flex-col gap-2.5">
           <h2 className="text-[15px] font-medium">Original posting</h2>

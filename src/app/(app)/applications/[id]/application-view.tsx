@@ -14,6 +14,7 @@ import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { KnownPeople } from "@/components/known-people";
 import {
   DocumentKind,
   type ApplicationStatus,
@@ -33,6 +34,8 @@ import { documentLabels } from "@/lib/document-labels";
 import { copyText } from "@/lib/copy-text";
 import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { missingWords } from "@/lib/letter-availability";
+import type { Doubt } from "@/lib/recruiter-eye";
+import type { Person } from "@/lib/network";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
 import type { ApplyTabData } from "@/lib/apply/view";
@@ -94,6 +97,9 @@ import { WriteMissingDocument } from "./write-missing-document";
 import { ApplicationHeader } from "./application-header";
 import { ApplyTab } from "./apply-tab";
 import { PrepTab, type PrepTabData } from "./prep-tab";
+import { RecruiterEyeCard } from "./recruiter-eye-card";
+import { WorkSampleTab, type WorkSampleTabData } from "./work-sample-tab";
+import { SendGuide } from "./send-guide";
 import { EnglishCopy } from "./english-copy";
 import { ApplicationMenu } from "./application-menu";
 import { ConversationTab } from "./conversation-tab";
@@ -295,10 +301,18 @@ export type ApplicationViewProps = {
   apply: ApplyTabData;
   /** The Call prep tab (jobauto fork). */
   prep: PrepTabData;
+  /** The Work sample tab (jobauto fork); missing in older callers. */
+  workSample?: WorkSampleTabData;
   /** The Anlagen that go with it, by name, for a German letter's list. */
   anlagen?: readonly string[];
   /** What the posting asks the letter to state that has no standard answer yet: salary, start date (letter-availability.ts). */
   letterAsks?: readonly ("salary" | "start")[];
+  /** What a German recruiter may wonder, answered or not (recruiter-eye.ts), for the Job posting tab. */
+  doubts?: readonly Doubt[];
+  /** The people she knows at its employer (network.ts). */
+  known?: readonly Person[];
+  /** The experiment's version this application gets, while the experiment runs (experiments.ts). */
+  version?: { experiment: string; label: string } | null;
 };
 
 /**
@@ -359,8 +373,12 @@ export function ApplicationView({
   suggestions,
   apply,
   prep,
+  workSample = { sample: null, jobId: null },
   anlagen = [],
   letterAsks = [],
+  doubts = [],
+  known = [],
+  version = null,
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -1319,6 +1337,8 @@ export function ApplicationView({
             </TabsTrigger>
             {gmail && (gmail.reading || gmail.emails.length > 0) && <TabsTrigger value="conversation">Conversation{dot(waiting > 0 ? `${waiting} new` : null)}</TabsTrigger>}
             <TabsTrigger value="prep">Call prep{dot(null)}</TabsTrigger>
+            {/* "My first 90 days" for this job (jobauto fork). */}
+            <TabsTrigger value="sample">Work sample{dot(null)}</TabsTrigger>
             <TabsTrigger value="posting">Job posting{dot(null)}</TabsTrigger>
             {/* In the ⋯ menu on narrow windows (E30-3). */}
             <TabsTrigger value="notes" className="max-[1500px]:hidden">
@@ -1359,6 +1379,24 @@ export function ApplicationView({
           </>
         }
       />
+
+      {/* An experiment's version, and how to send a draft (jobauto fork): above the Fit column and the canvas. */}
+      {version && application.status === "DRAFT" && (
+        <p role="note" className="flex-none border-b border-line bg-selected px-10 py-2.5 text-meta">
+          <span className="font-medium">Experiment “{version.experiment}”:</span> this one is version {version.label}. Write it that way before you send it.
+        </p>
+      )}
+      {application.status === "DRAFT" && !application.awaitingReview && !writingApp && (resume || letter) && (
+        <SendGuide
+          plan={apply.plan}
+          hasResume={Boolean(resume)}
+          hasLetter={Boolean(letter)}
+          hasEmail={Boolean(emailUnits)}
+          waitingInBrowser={apply.attempts[0]?.status === "WAITING"}
+          letterAsks={letterAsks}
+          onTab={selectTab}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
       <FitColumn match={match} open={fitOpen} onOpenChange={setFitOpen}>
@@ -1594,6 +1632,18 @@ export function ApplicationView({
           <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} />
         </TabsContent>
 
+        <TabsContent value="sample" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
+          <WorkSampleTab
+            applicationId={application.id}
+            data={workSample}
+            aiReady={aiReady}
+            theme={letterTheme ?? null}
+            name={profile.basics.name}
+            paper={paper}
+            language={application.language}
+          />
+        </TabsContent>
+
         <TabsContent value="prep" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           <PrepTab applicationId={application.id} data={prep} aiReady={aiReady} company={application.company} />
         </TabsContent>
@@ -1603,7 +1653,15 @@ export function ApplicationView({
         </TabsContent>
 
         <TabsContent value="posting" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
-          <PostingTab applicationId={application.id} posting={posting} facts={facts} setFacts={setFacts} />
+          <PostingTab applicationId={application.id} posting={posting} facts={facts} setFacts={setFacts}>
+            {/* The people she knows there, and what a German recruiter may wonder (jobauto fork). */}
+            {known.length > 0 && (
+              <div className="w-full max-w-[640px]">
+                <KnownPeople people={known} />
+              </div>
+            )}
+            <RecruiterEyeCard doubts={doubts} onOpenAnswers={() => selectTab("apply")} />
+          </PostingTab>
         </TabsContent>
 
         <TabsContent value="notes" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import { AiProvider, Creativity, DateFormat, PaperSize, Tone } from "@/generated/prisma/enums";
 import { announcementFeedSchema } from "@/lib/announcements/contract";
-import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
+import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
+import { callPrepSchema } from "@/lib/call-prep";
+import { experimentSchema } from "@/lib/experiments";
 import { setupGuideSchema } from "@/lib/setup-guide";
 import { SCORERS } from "@/lib/scoring/scorers";
 import { startupsRefreshSchema } from "@/lib/startups/types";
@@ -167,6 +169,8 @@ const settingsSchema = z.object({
   customLanguages: stringList.catch([]),
   fileNamePattern: z.string().catch("{name} – {company} – {doc}"),
   includeRefs: flag(false),
+  /** With "the posting's language": German only when the job needs German she has (german-need.ts postingWriteLanguage). */
+  germanOnlyWhenFit: flag(true),
   /** What New application writes unless chosen there (#367). */
   documentsToWrite: z.enum(DOCUMENTS_TO_WRITE).catch("both"),
   nightlyBackup: flag(true),
@@ -184,6 +188,8 @@ const settingsSchema = z.object({
   applicationsSort: z.string().catch("updated"),
   /** The dashboard's period as last left (E9-8). */
   dashboardPeriod: z.enum(["30d", "90d", "all"]).catch("all"),
+  /** The experiment running (experiments.ts); null when none is. */
+  experiment: json(experimentSchema).nullable().catch(null),
   /** Applications to send each week, Monday to Sunday (weekly-target.ts); 0 is no target. */
   weeklyTarget: z.coerce.number().int().min(0).max(50).catch(0),
   /** Days without news before Needs you suggests a follow-up (E9-9). */
@@ -246,6 +252,12 @@ const settingsSchema = z.object({
   agentMaxDrafts: z.coerce.number().int().min(0).max(10).catch(3),
   /** Whether a run prepares drafts for its best postings, or only scores them (off by default, #197). */
   agentAutoDraft: flag(false),
+  /**
+   * The job agent's own portals (jobauto fork, agent/source.ts), by portal id,
+   * switched on in Settings → Job search or not; null is Automatic: every
+   * portal switched on there but the Bundesagentur's.
+   */
+  agentPortals: json(z.array(z.string().min(1).max(80)).max(50)).nullable().catch(null),
   /** The latest runs, newest first. They belong to the install: exports leave them out (INSTALL_SETTINGS). */
   agentRuns: json(z.array(agentRunSchema)).catch([]),
   // The fork's phone alerts (jobauto) gave way to Notifications (E26): the
@@ -255,8 +267,19 @@ const settingsSchema = z.object({
   alertAddress: z.string().nullable().catch(null),
   /** Strong new matches (the job agent's notification of them): postings that cover what this 0–100 score maps to (coversFromScore). */
   alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
+  // The supporter digest (supporter-digest.ts): an ntfy topic of the
+  // supporter's own, the weekday (1 = Monday) and hour it goes, and the day
+  // it last went. The topic is as good as a password and belongs to the
+  // install, as does the day, so exports leave both out (INSTALL_SETTINGS).
+  supporterAddress: z.string().nullable().catch(null),
+  supporterDay: z.coerce.number().int().min(1).max(7).catch(1),
+  supporterHour: z.coerce.number().int().min(0).max(23).catch(8),
+  supporterSentOn: z.string().nullable().catch(null),
   /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
   careersCheckedOn: z.string().nullable().catch(null),
+  /** Interview practice (jobs/prepare-practice.ts): the call prep pack from her profile alone, and the prompt that wrote it. */
+  practicePrep: json(callPrepSchema).nullable().catch(null),
+  practicePrepWith: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh
   // only runs while it's in use, and what the last refresh found. They belong
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).
@@ -281,7 +304,8 @@ const settingsSchema = z.object({
   // The apply assistant (Phase A, src/lib/apply): the standard answers
   // employers' forms ask for and the profile doesn't hold, and whether it
   // may press Send itself.
-  applyAnswers: json(applyAnswersSchema).catch(DEFAULT_APPLY_ANSWERS),
+  // Answers that were saved are hers; the defaults alone are unconfirmed (permitClaimed).
+  applyAnswers: json(applyAnswersSchema.transform((answers): ApplyAnswers => ({ ...answers, confirmed: true }))).catch({ ...DEFAULT_APPLY_ANSWERS, confirmed: false }),
   /**
    * The laptop's Chrome the browser window opens in, e.g. "http://100.101.102.103:9222",
    * when the app runs on a server without a screen; null opens it on the computer

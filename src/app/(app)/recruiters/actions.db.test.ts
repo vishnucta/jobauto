@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestClient, resetDatabase } from "@/test/db";
 
-import { addRecruiter, addSuggestedRecruiters, deleteRecruiter, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
+import { addRecruiter, addSuggestedRecruiters, askForReferral, deleteRecruiter, forgetNetwork, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -57,5 +57,29 @@ describe("the Recruiters actions", () => {
     expect(await deleteRecruiter({ id })).toEqual({ ok: true, data: null, toast: "Recruiter removed." });
     expect(await addSuggestedRecruiters({})).toEqual({ ok: true, data: { added: 4 }, toast: "Added 4 agencies." });
     expect(await addSuggestedRecruiters({})).toEqual({ ok: true, data: { added: 0 }, toast: "They're all on your list already." });
+  });
+});
+
+describe("asking her network for a referral (jobauto fork)", () => {
+  it("puts the connection on Recruiters as a referral contact, once, and forgets the network on request", async () => {
+    const person = await prisma().connection.create({
+      data: { firstName: "Sam", lastName: "Beispiel", company: "Berenberg", position: "Head of Regulatory Reporting", url: "https://www.linkedin.com/in/sam", companyKey: "berenberg" },
+    });
+    const first = await askForReferral({ connectionId: person.id });
+    expect(first).toMatchObject({ ok: true, data: { added: true } });
+    expect(await prisma().recruiter.findFirstOrThrow()).toMatchObject({
+      kind: "REFERRAL",
+      name: "Berenberg",
+      contactName: "Sam Beispiel",
+      speciality: "Head of Regulatory Reporting",
+      website: "https://www.linkedin.com/in/sam",
+      relation: "We're connected on LinkedIn",
+    });
+    expect(await askForReferral({ connectionId: person.id })).toMatchObject({ ok: true, data: { added: false } });
+    expect(await prisma().recruiter.count()).toBe(1);
+
+    expect(await forgetNetwork({})).toMatchObject({ ok: true });
+    expect(await prisma().connection.count()).toBe(0);
+    expect(await askForReferral({ connectionId: person.id })).toMatchObject({ ok: false });
   });
 });
