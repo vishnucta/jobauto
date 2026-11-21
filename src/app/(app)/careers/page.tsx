@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 
+import { FIELD_EMPLOYERS } from "@/lib/careers/field-employers";
 import { listEmployers } from "@/lib/careers/store";
+import { REPORTING_PROFILE } from "@/lib/hidden-titles";
 import { peopleAt } from "@/lib/network-data";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { countSearches } from "@/lib/posting-searches";
@@ -21,6 +23,9 @@ export const metadata: Metadata = { title: "Careers pages" };
 export default async function CareersPage() {
   const now = new Date();
   const [employers, profile, postingCounts, searches, recruiters, timeZone] = await Promise.all([listEmployers(), loadProfile(), countPostings(), countSearches(), prisma.recruiter.count(), userTimeZone()]);
+  // Employers in her field, while her profile is in it (field-employers.ts).
+  const profileText = [profile.basics.headline, profile.basics.summary, ...profile.experience.flatMap((role) => [role.role, role.bullets]), ...profile.skills.map((skill) => skill.name)].join(" ");
+  const field = REPORTING_PROFILE.test(profileText) ? FIELD_EMPLOYERS : [];
   return (
     <CareersScreen
       employers={employers}
@@ -28,7 +33,8 @@ export default async function CareersPage() {
       suggestedWords={searchChips(searchWords(profile, now)).join(", ")}
       today={now.toISOString()}
       timeZone={timeZone ?? "UTC"}
-      network={await peopleAt(employers.map((employer) => employer.name))}
+      network={await peopleAt([...employers.map((employer) => employer.name), ...field.map((employer) => employer.name)])}
+      fieldEmployers={field}
     />
   );
 }

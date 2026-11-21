@@ -14,6 +14,7 @@ import { Toggle } from "@/components/ui/toggle";
 import { useJob } from "@/hooks/use-job";
 import { BOARD_NAMES, type BoardKind } from "@/lib/careers/boards";
 import type { CareersCheckResult } from "@/lib/careers/check-result";
+import type { FieldEmployer } from "@/lib/careers/field-employers";
 import type { EmployerView } from "@/lib/careers/store-types";
 import { formatDateTime } from "@/lib/dates";
 import type { Person } from "@/lib/network";
@@ -21,6 +22,7 @@ import { searchRunHref } from "@/lib/job-search/search";
 
 import { JobsTabs, type JobsCounts } from "../jobs/jobs-tabs";
 import { addEmployer, checkCareers, deleteEmployer, saveEmployer, switchEmployer } from "./actions";
+import { FieldEmployersCard } from "./field-employers-card";
 
 export type CareersScreenProps = {
   employers: EmployerView[];
@@ -32,6 +34,8 @@ export type CareersScreenProps = {
   timeZone: string;
   /** The people she knows at each employer, by its name (network.ts); missing in older callers. */
   network?: Record<string, Person[]>;
+  /** Employers in her field (field-employers.ts); empty or missing while her profile isn't in it. */
+  fieldEmployers?: readonly FieldEmployer[];
 };
 
 type Draft = { name: string; careersUrl: string; keywords: string; places: string };
@@ -44,7 +48,7 @@ const boardName = (ats: string) => BOARD_NAMES[ats as BoardKind] ?? ats;
  * checked once a day. Jobs show there days before the job boards have them,
  * and an application sent in the first days is read first.
  */
-export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone, network = {} }: CareersScreenProps) {
+export function CareersScreen({ employers: initial, counts, suggestedWords, today, timeZone, network = {}, fieldEmployers = [] }: CareersScreenProps) {
   const router = useRouter();
   const [employers, setEmployers] = useState(initial);
   // The check under way, and which employers it reads.
@@ -67,6 +71,7 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
     if (result.ok) setCheck({ jobId: result.data.jobId, ids: ids ?? null });
   };
   const checking = (id: string) => check !== null && (check.ids === null || check.ids.includes(id));
+  const added = (employer: EmployerView) => setEmployers((list) => [...list, employer].sort((a, b) => a.name.localeCompare(b.name)));
   const replace = (saved: EmployerView) => setEmployers((list) => list.map((employer) => (employer.id === saved.id ? saved : employer)));
 
   return (
@@ -83,7 +88,11 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
           carry job data.
         </p>
 
-        <AddEmployer suggestedWords={suggestedWords} onAdded={(employer) => setEmployers((list) => [...list, employer].sort((a, b) => a.name.localeCompare(b.name)))} />
+        <AddEmployer suggestedWords={suggestedWords} onAdded={added} />
+
+        {fieldEmployers.length > 0 && (
+          <FieldEmployersCard employers={fieldEmployers} followed={new Set(employers.map((employer) => employer.careersUrl))} suggestedWords={suggestedWords} network={network} onFollowed={added} />
+        )}
 
         {employers.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
