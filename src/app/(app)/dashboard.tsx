@@ -7,6 +7,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import type { ApplicationStatus } from "@/generated/prisma/enums";
 import { DASHBOARD_PERIODS, DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import type { DayPeriod } from "@/lib/greeting";
+import type { SetupStep } from "@/lib/setup-checklist";
 import type { TodayItem } from "@/lib/today";
 import type { Insights } from "@/lib/insights";
 import type { ArmResult, Experiment } from "@/lib/experiments";
@@ -21,6 +22,7 @@ import { QuietDays } from "./quiet-days";
 import { WeeklyTarget } from "./weekly-target";
 import { WhatsWorking } from "./whats-working";
 import { ExperimentCard } from "./experiment-card";
+import { SetupCard } from "./setup-card";
 import { TodayCard } from "./today-card";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
@@ -39,6 +41,7 @@ export function Dashboard({
   working,
   experiment,
   today,
+  setup,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -59,6 +62,8 @@ export function Dashboard({
   experiment?: { experiment: Experiment; results: ArmResult[] } | null;
   /** Today's three (today.ts); missing in older callers. */
   today?: TodayItem[];
+  /** Start here (setup-checklist.ts); missing in older callers. */
+  setup?: SetupStep[];
 }) {
   const { sent, heardBack } = figures;
   // The summary follows the time filter, so it says which period it covers.
@@ -85,6 +90,7 @@ export function Dashboard({
         <Columns calendar={calendar}>
           <div className="flex min-w-0 flex-col gap-5">
             {today && today.length > 0 && <TodayCard items={today} />}
+            {setup && <SetupCard steps={setup} />}
             <Welcome />
           </div>
         </Columns>
@@ -93,6 +99,7 @@ export function Dashboard({
           <Columns calendar={calendar}>
             <PeriodScoped className="grid max-w-[1200px] grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] items-start gap-5">
               {today && <TodayCard items={today} />}
+              {setup && <SetupCard steps={setup} />}
               <Funnel figures={figures} />
               {week && <WeeklyTarget progress={week} />}
               <ActivityChart weeks={figures.weeks} />
