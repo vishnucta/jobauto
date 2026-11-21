@@ -2,6 +2,9 @@ import "server-only";
 
 import { z } from "zod";
 
+import { companyKey, sameCompany } from "@/lib/network";
+import { networkSummary, peopleAt } from "@/lib/network-data";
+import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { outreachFacts } from "@/lib/recruiters/facts";
@@ -31,6 +34,9 @@ import { chooseProfile, failure, profileInput, text, type ToolContext } from "..
 // mail. "Contacted" and "replied" are the user's word, so they are recorded
 // only when the user says so. A recruiter's address and notes are read one
 // recruiter at a time, as a startup's addresses are, and never in the list.
+// Her LinkedIn network, imported on the tab, is never sent to an AI (as its
+// card promises): Claude learns only how many people she knows at an
+// employer, and those she asked for a referral, who are on the list.
 
 const GONE = "That recruiter is no longer in the list.";
 const NOT_WAITING = "Only a recruiter you're waiting to hear from can be snoozed.";
@@ -279,6 +285,61 @@ export function registerRecruiterTools({ server, linkTo }: ToolContext): void {
         has_email: recruiter.email !== "",
         next: "Nothing has been sent. The user sends it from their own mail, then tells you, and you record it with set_recruiter_status.",
         link,
+      });
+    },
+  );
+
+  server.registerTool(
+    "get_network_matches",
+    {
+      title: "Who the user knows at an employer",
+      description:
+        "Whether the user knows someone at an employer, from the LinkedIn connections imported on Find work → Recruiters, as \"You know someone here\" on a posting or application says: " +
+        "how many people, and those already asked for a referral (on the Recruiters list). Give an application, a posting from list_postings, or company names. " +
+        "Who the connections are is never given to an AI: the user sees them on the screen and asks for a referral there, which adds the person to Recruiters.",
+      inputSchema: z.object({
+        application_id: z.string().min(1).max(100).optional(),
+        posting_id: z.string().min(1).max(100).optional().describe("A posting from list_postings"),
+        companies: z.array(z.string().trim().min(1).max(300)).max(50).optional().describe("Employers' names, e.g. from a search"),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ application_id, posting_id, companies = [] }) => {
+      const asked = [...companies];
+      let where = link;
+      if (application_id) {
+        const application = await prisma.application.findUnique({ where: { id: application_id }, select: { company: true } });
+        if (!application) return failure("That application no longer exists.");
+        asked.push(application.company);
+        // Its Job posting tab says who, with "Ask for a referral".
+        where = linkTo(`/applications/${application_id}?tab=posting`);
+      }
+      if (posting_id) {
+        const posting = await prisma.posting.findUnique({ where: { id: posting_id }, select: { company: true } });
+        if (!posting) return failure("That posting is no longer in Dossier.");
+        asked.push(posting.company);
+        if (!application_id) where = linkTo("/jobs");
+      }
+      const wanted = [...new Set(asked.map((company) => company.trim()).filter(Boolean))];
+      if (wanted.length === 0) return failure("Give application_id, posting_id or companies, with an employer's name.");
+      if ((await networkSummary()).people === 0) {
+        return text({ imported: false, message: "No LinkedIn connections are imported. The user imports Connections.csv from LinkedIn's data export on Find work → Recruiters.", link });
+      }
+      const [known, recruiters] = await Promise.all([peopleAt(wanted), listRecruiters()]);
+      const referrals = recruiters.filter((recruiter) => recruiter.kind === "REFERRAL");
+      return text({
+        imported: true,
+        employers: wanted.map((company) => {
+          const key = companyKey(company);
+          const referred = referrals.filter((recruiter) => sameCompany(key, companyKey(recruiter.name)));
+          return {
+            company,
+            people_you_know: known[company]?.length ?? 0,
+            asked_for_referral: referred.length > 0 ? referred.map((recruiter) => ({ id: recruiter.id, contact_name: recruiter.contactName || undefined, status: recruiter.status })) : undefined,
+          };
+        }),
+        next: "Where people_you_know isn't 0, the user sees who on the screen and can ask for a referral there.",
+        link: where,
       });
     },
   );

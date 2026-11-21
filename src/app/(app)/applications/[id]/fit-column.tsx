@@ -180,7 +180,8 @@ function RequirementList({
  * The Fit column (E30-3, design 3b): 380 px on wide windows; below about
  * 1500 px, a 68 px rail with the ring and a mark per requirement, which
  * opens the full column over the document. Esc or a click outside closes
- * it.
+ * it. On a phone (jobauto fork) the rail is a "How you fit" button across
+ * the top of the document, which opens the column over the whole screen.
  */
 export function FitColumn({
   match,
@@ -203,17 +204,26 @@ export function FitColumn({
       <aside aria-label="How you fit" className="hidden w-[380px] flex-none overflow-y-auto border-r border-line px-6 py-[22px] min-[1500px]:block">
         {children}
       </aside>
-      <div className="relative flex w-[68px] flex-none border-r border-line min-[1500px]:hidden">
+      <div className="relative flex w-[68px] flex-none border-r border-line min-[1500px]:hidden max-sm:w-full max-sm:border-r-0 max-sm:border-b">
         <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
-          <Dialog.Trigger className="flex w-full flex-col items-center gap-2.5 overflow-y-auto py-[22px] hover:bg-hover">
-            <span className="sr-only">Show how you fit:</span> <ScoreRing hit={hit} total={total} size="lg" />
-            <span aria-hidden="true" className="flex flex-col items-center gap-2 pt-1">
+          <Dialog.Trigger
+            // Named once for every width: the rail and the phone's button show it differently.
+            aria-label={`Show how you fit: ${total > 0 ? `${hit} of ${total} requirements covered` : "No requirements to cover yet"}`}
+            className="flex w-full flex-col items-center gap-2.5 overflow-y-auto py-[22px] hover:bg-hover max-sm:flex-row max-sm:gap-3 max-sm:px-4 max-sm:py-2.5"
+          >
+            <span className="sr-only">Show how you fit:</span> <ScoreRing hit={hit} total={total} size="lg" className="max-sm:hidden" />
+            <span aria-hidden="true" className="flex flex-col items-center gap-2 pt-1 max-sm:hidden">
               {match?.items.map((item, index) => <Mark key={index} result={item.result} />)}
+            </span>
+            {/* The phone's button: the small ring and what it opens. */}
+            <span aria-hidden="true" className="flex items-center gap-2.5 text-sm font-medium text-ink sm:hidden">
+              <ScoreRing hit={hit} total={total} size="sm" />
+              How you fit
             </span>
           </Dialog.Trigger>
           <Dialog.Content
             aria-describedby={undefined}
-            className="absolute inset-y-0 left-0 z-30 w-[380px] max-w-[calc(100vw-80px)] overflow-y-auto border-r border-line-card bg-surface px-6 py-[22px] shadow-menu focus:outline-none"
+            className="absolute inset-y-0 left-0 z-30 w-[380px] max-w-[calc(100vw-80px)] overflow-y-auto border-r border-line-card bg-surface px-6 py-[22px] shadow-menu focus:outline-none max-sm:fixed max-sm:inset-0 max-sm:z-50 max-sm:w-auto max-sm:max-w-none max-sm:border-r-0 max-sm:px-4 max-sm:pt-14"
           >
             <Dialog.Title className="sr-only">How you fit</Dialog.Title>
             <Dialog.Close aria-label="Close" className="absolute top-3 right-3 grid size-8 place-items-center rounded-control text-muted hover:bg-hover hover:text-ink">

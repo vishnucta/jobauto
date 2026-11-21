@@ -105,6 +105,7 @@ describe("stored settings", () => {
       latestVersionUrl: null,
       updateCheckDay: null,
       updateDismissed: null,
+      portalsOffNoteDone: false,
       announcementFeed: null,
       announcementsDismissed: [],
       googleClientId: null,

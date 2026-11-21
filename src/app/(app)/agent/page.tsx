@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { loadAgentView } from "@/lib/agent/view";
+import { loadScoringOff } from "@/lib/scoring-off-data";
 
 import { AgentScreen } from "./agent-screen";
 import { AGENT_TABS, type AgentTab } from "./tabs";
@@ -12,5 +13,7 @@ export default async function AgentPage({ searchParams }: PageProps<"/agent">) {
   const { tab } = await searchParams;
   // The tab is in the URL (E32-5): Drafts to review, Best finds or Skipped.
   const shown = AGENT_TABS.find((key) => key === tab) as AgentTab | undefined;
-  return <AgentScreen view={await loadAgentView()} tab={shown ?? "drafts"} />;
+  // Scoring waits while a profile its searches score against has no levels (jobauto fork): a notice says so.
+  const [view, scoringOff] = await Promise.all([loadAgentView(), loadScoringOff("agent")]);
+  return <AgentScreen view={view} tab={shown ?? "drafts"} scoringOff={scoringOff} />;
 }

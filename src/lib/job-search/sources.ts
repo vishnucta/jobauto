@@ -40,6 +40,40 @@ export type JobSearchSettingsView = {
   freehire: { host: string };
 };
 
+/**
+ * "Key saved", "Key from the server" or "Note accepted": what a portal's card
+ * says once it could be searched, so one that's off shows it only needs
+ * switching on (jobauto fork); null until then, and for a portal with
+ * nothing to keep (FreeHire's tag says it needs no key).
+ */
+export function keptLabel(portal: PortalView): string | null {
+  if (portal.consent) return portal.acceptedAt ? "Note accepted" : null;
+  const keys = portal.fields.flatMap((field) => (field.type === "secret" ? [field.keyState] : []));
+  // Adzuna's app ID goes with its key.
+  if (keys.length === 0 || portal.fields.some((field) => field.type === "text" && !field.value.trim())) return null;
+  if (keys.every((state) => state === "env")) return "Key from the server";
+  return keys.every((state) => state === "set" || state === "env") ? "Key saved" : null;
+}
+
+/** A portal with its key saved or from the server (jobauto fork); not the Bundesagentur's accepted note, nor a withdrawn one. */
+export const hasPortalKey = (portal: PortalView): boolean => !portal.withdrawal && !portal.consent && keptLabel(portal) !== null;
+
+/**
+ * The portals that have their key but are switched off (jobauto fork), for
+ * the one-time note after the 1.15 upgrade: their names, or null when there
+ * are none, or once any portal with its key is on.
+ */
+export function portalsLeftOff(portals: readonly PortalView[]): string[] | null {
+  const keyed = portals.filter(hasPortalKey);
+  if (keyed.length === 0 || keyed.some((portal) => portal.on)) return null;
+  return keyed.map((portal) => portal.name);
+}
+
+/** The note's first sentence: "You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble." */
+export function portalsLeftOffNote(names: readonly string[]): string {
+  return names.length === 1 ? `You have a key for ${names[0]}, which is off.` : `You have keys for ${names.length} portals that are off: ${names.join(", ")}.`;
+}
+
 /** Where to get a JSearch key, by where it's from. */
 export const JSEARCH_KEY_URLS: Record<JSearchHost, string> = {
   openwebninja: "https://www.openwebninja.com/api/jsearch",

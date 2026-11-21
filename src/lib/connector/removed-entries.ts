@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ProfilePhoto } from "@/lib/photo";
-import type { EducationItem, ExperienceItem, ProjectItem, PublicationItem, ReferenceItem } from "@/lib/profile";
+import type { CertificationItem, CustomItem, EducationItem, ExperienceItem, ProjectItem, PublicationItem, ReferenceItem } from "@/lib/profile";
 
 // What the connector's remove_profile_entry took out, kept so it can put it
 // back (jobauto fork). The screen's Undo keeps a removed entry in the
@@ -22,8 +22,11 @@ export type Removed = { title: string; position: number; profileId: string } & (
   | { kind: "experience"; entry: ExperienceItem }
   | { kind: "project"; entry: ProjectItem }
   | { kind: "education"; entry: EducationItem }
+  | { kind: "certification"; entry: CertificationItem }
   | { kind: "publication"; entry: PublicationItem }
   | { kind: "reference"; entry: ReferenceItem }
+  // An item of a section the user made (#298), with the section it goes back into.
+  | { kind: "section_item"; entry: CustomItem; sectionId: string }
   | { kind: "photo"; entry: ProfilePhoto }
 );
 

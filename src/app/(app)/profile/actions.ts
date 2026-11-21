@@ -7,20 +7,26 @@ import { CustomSectionCountsAs, CustomSectionFormat, LanguageLevel } from "@/gen
 import { action, ActionError } from "@/lib/action";
 import { rewriteSectionOnDrafts } from "@/lib/custom-section-drafts";
 import { prisma } from "@/lib/prisma";
-import { findOrCreateSkill, firstSort, nextSort } from "@/lib/profile-entries";
+import { findOrCreateSkill } from "@/lib/profile-entries";
 import { applyProfileImportJob, discardProfileImports } from "@/lib/jobs/import-profile";
 import { isPhotoDataUrl, PHOTO_MAX_LENGTH } from "@/lib/photo";
 import {
   addOrUpdateLanguage,
   deletePhoto,
+  newCertification,
+  newCustomItem,
   newEducation,
   newExperience,
   newProject,
   newPublication,
   newReference,
   photoOnResumesRow,
+  reorderCertificationList,
+  reorderCustomItemList,
   reorderPublicationList,
   reorderSection,
+  restoreCertificationEntry,
+  restoreCustomItemEntry,
   restoreEducationEntry,
   restoreExperienceEntry,
   restoreProjectEntry,
@@ -413,9 +419,7 @@ const certificationItem = (entry: z.infer<typeof certificationFields>) => ({
 });
 
 /** "+ Add a certification": a blank entry at the top, where the newest usually goes. */
-export const createCertification = action(z.object({ profileId }), async ({ profileId }) =>
-  certificationItem(await prisma.certification.create({ data: { profileId: await ownProfile(profileId), sort: await firstSort(prisma.certification, { profileId }) } })),
-);
+export const createCertification = action(z.object({ profileId }), async ({ profileId }) => certificationItem(await newCertification(await ownProfile(profileId))));
 
 /** Autosaves a certification. Saving one that was just removed does nothing. */
 export const saveCertification = action(certificationFields, async ({ id, ...data }) => {
@@ -430,24 +434,12 @@ export const removeCertification = action(z.object({ id }), async ({ id }) => {
 
 /** Puts a removed certification back; the list then saves its place in the order. */
 export const restoreCertification = action(certificationFields.extend({ profileId }), async ({ profileId, ...entry }) =>
-  certificationItem(
-    await prisma.certification.upsert({
-      where: { id: entry.id },
-      create: { ...entry, profileId: await ownProfile(profileId), sort: await nextSort(prisma.certification, { profileId }) },
-      update: {},
-    }),
-  ),
+  certificationItem(await restoreCertificationEntry(await ownProfile(profileId), entry)),
 );
 
 /** Saves the certifications' order: `ids` is every certification, in the new order. */
 export const reorderCertifications = action(z.object({ profileId, ids: z.array(id) }), async ({ profileId, ids }) => {
-  await prisma.$transaction(async (tx) => {
-    const known = new Set((await tx.certification.findMany({ where: { profileId }, select: { id: true } })).map((entry) => entry.id));
-    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((entryId) => known.has(entryId))) {
-      throw new ActionError("The list changed in the meantime. Reload the page and try again.");
-    }
-    for (const [sort, entryId] of ids.entries()) await tx.certification.update({ where: { id: entryId }, data: { sort } });
-  });
+  await reorderCertificationList(profileId, ids);
   return null;
 });
 
@@ -563,9 +555,9 @@ export const saveCustomSection = action(
 
 /** "+ Add an item": at the end of the section, since nothing in it says what's newest. */
 export const createCustomItem = action(z.object({ sectionId: id, title: text(3000).optional() }), async ({ sectionId, title = "" }) => {
-  const last = await prisma.customItem.aggregate({ where: { sectionId }, _max: { sort: true } });
-  if (!(await prisma.customSection.count({ where: { id: sectionId } }))) throw new ActionError(SECTION_GONE);
-  return customItem(await prisma.customItem.create({ data: { sectionId, title, sort: (last._max.sort ?? -1) + 1 } }));
+  const item = await newCustomItem(sectionId, { title });
+  if (!item) throw new ActionError(SECTION_GONE);
+  return customItem(item);
 });
 
 /** Autosaves an item. Saving one that was just removed does nothing. */
@@ -580,21 +572,15 @@ export const removeCustomItem = action(z.object({ id }), async ({ id: itemId }) 
 });
 
 /** Puts a removed item back; the list then saves its place in the order. */
-export const restoreCustomItem = action(customItemFields, async (entry) => {
-  if (!(await prisma.customSection.count({ where: { id: entry.sectionId } }))) throw new ActionError(SECTION_GONE);
-  const last = await prisma.customItem.aggregate({ where: { sectionId: entry.sectionId }, _max: { sort: true } });
-  return customItem(await prisma.customItem.upsert({ where: { id: entry.id }, create: { ...entry, sort: (last._max.sort ?? -1) + 1 }, update: {} }));
+export const restoreCustomItem = action(customItemFields, async ({ sectionId, ...entry }) => {
+  const item = await restoreCustomItemEntry(sectionId, entry);
+  if (!item) throw new ActionError(SECTION_GONE);
+  return customItem(item);
 });
 
 /** Saves a section's order: `ids` is each of its items, in the new order. */
 export const reorderCustomItems = action(z.object({ sectionId: id, ids: z.array(id) }), async ({ sectionId, ids }) => {
-  await prisma.$transaction(async (tx) => {
-    const known = new Set((await tx.customItem.findMany({ where: { sectionId }, select: { id: true } })).map((entry) => entry.id));
-    if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((entryId) => known.has(entryId))) {
-      throw new ActionError("The list changed in the meantime. Reload the page and try again.");
-    }
-    for (const [sort, entryId] of ids.entries()) await tx.customItem.update({ where: { id: entryId }, data: { sort } });
-  });
+  await reorderCustomItemList(sectionId, ids);
   return null;
 });
 

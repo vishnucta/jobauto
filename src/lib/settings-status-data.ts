@@ -19,6 +19,7 @@ import { listChannels, listDeliveries } from "@/lib/notifications/store";
 import { prisma } from "@/lib/prisma";
 import { isPrivateAddress } from "@/lib/private-host";
 import { scoringProblem } from "@/lib/scoring";
+import { loadScoringOff } from "@/lib/scoring-off-data";
 import { loadScoringConfig } from "@/lib/scoring/config";
 import { SCORER_INFO } from "@/lib/scoring/scorers";
 import type { AgentRun, AiTest, SettingsData } from "@/lib/settings";
@@ -117,7 +118,7 @@ async function googleInputs(): Promise<StatusInputs["google"]> {
 export async function loadSettingsStatus(now = new Date()): Promise<SettingsStatus> {
   const settings = await loadSettings();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const [ai, jobs, agent, google, scoringConfig, scoredThisMonth, channels, deliveries, backups, applications] = await Promise.all([
+  const [ai, jobs, agent, google, scoringConfig, scoredThisMonth, channels, deliveries, backups, applications, levelsOff] = await Promise.all([
     aiInputs(settings),
     jobsInputs(),
     agentInputs(settings, now),
@@ -128,13 +129,15 @@ export async function loadSettingsStatus(now = new Date()): Promise<SettingsStat
     listDeliveries(),
     listBackups(),
     prisma.application.count({ where: { awaitingReview: false } }),
+    // Scoring is off while a profile has no levels (jobauto fork).
+    loadScoringOff(),
   ]);
   const update = availableUpdate(settings);
   return settingsStatus({
     now,
     ai,
     documents: { paper: settings.paper === "LETTER" ? "Letter" : "A4", language: settings.docLanguage ?? "The posting's language", tone: TONES[settings.defaultTone].label },
-    scoring: { name: SCORER_INFO[scoringConfig.scorer].name, problem: await scoringProblem(scoringConfig), scoredThisMonth },
+    scoring: { name: SCORER_INFO[scoringConfig.scorer].name, problem: await scoringProblem(scoringConfig), scoredThisMonth, levelsOff: levelsOff && { reason: levelsOff.reason, href: levelsOff.href } },
     jobs,
     agent,
     google,

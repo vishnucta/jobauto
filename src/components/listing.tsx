@@ -53,7 +53,8 @@ export function SourceBar({
         <span aria-hidden="true" className="flex-none text-muted">
           {icon}
         </span>
-        <ul aria-label="What it looks for" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        {/* On a phone the chips take the row and the buttons go under them (jobauto fork). */}
+        <ul aria-label="What it looks for" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-sm:basis-[calc(100%-1.75rem)]">
           {chips.map((chip, index) => (
             <li key={index} className="rounded-[7px] bg-track px-2.5 py-1 text-[13px] text-ink">
               {chip}

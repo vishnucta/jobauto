@@ -42,7 +42,9 @@ function composerPlaceholder(mode: ComposerMode, tab: Tab, status: ApplicationSt
  * The composer (E30-10, design 3b): floating at the bottom of the canvas,
  * with suggestion chips, Change or Ask, and the box. Enter sends, and
  * Shift+Enter starts a new line. What's above it, the latest change and the
- * history, comes from the page (`above`).
+ * history, comes from the page (`above`). On a phone (jobauto fork) it
+ * is just the box until it has focus: the chips, Change or Ask and what's
+ * above come back while she's using it, so the document keeps the screen.
  */
 export function Composer({
   tab,
@@ -95,10 +97,13 @@ export function Composer({
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-4 @max-[780px]/page:fixed @max-[780px]/page:bottom-3">
-      <div className="pointer-events-auto flex w-full max-w-[760px] flex-col gap-2.5">
-        {above}
-        <section aria-label="Composer" className="flex flex-col gap-2.5 rounded-[16px] border border-line-strong bg-card py-3 pr-3 pl-4 shadow-menu">
-          <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="group/composer pointer-events-auto flex w-full max-w-[760px] flex-col gap-2.5">
+        {above && <div className="contents max-sm:hidden max-sm:group-focus-within/composer:contents">{above}</div>}
+        <section
+          aria-label="Composer"
+          className="flex flex-col gap-2.5 rounded-[16px] border border-line-strong bg-card py-3 pr-3 pl-4 shadow-menu max-sm:gap-0 max-sm:py-1.5 max-sm:group-focus-within/composer:gap-2.5 max-sm:group-focus-within/composer:py-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2 max-sm:hidden max-sm:group-focus-within/composer:flex">
             <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
               {!aiReady ? (
                 <p className="py-1 text-meta text-muted">

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { companyKey } from "@/lib/network";
 import { loadProfile } from "@/lib/profile-data";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
@@ -220,5 +221,53 @@ describe("the Recruiters tools' hints", () => {
       expect(hints[name], name).toMatchObject({ readOnlyHint: false, destructiveHint: false, openWorldHint: false });
     }
     expect(hints.remove_recruiter).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+  });
+});
+
+describe("get_network_matches", () => {
+  const person = (firstName: string, lastName: string, company: string, position: string) =>
+    prisma().connection.create({ data: { firstName, lastName, company, position, url: `https://www.linkedin.com/in/${firstName.toLowerCase()}`, companyKey: companyKey(company) } });
+
+  it("only reads", async () => {
+    const { tools } = (await call("tools/list", {})) as { tools: { name: string; annotations?: Record<string, boolean> }[] };
+    expect(tools.find((entry) => entry.name === "get_network_matches")?.annotations).toEqual({ readOnlyHint: true });
+  });
+
+  it("says when no connections are imported", async () => {
+    expect((await tool("get_network_matches", { companies: ["Berenberg"] })).json).toEqual({
+      imported: false,
+      message: expect.stringContaining("Connections.csv"),
+      link: LINK,
+    });
+  });
+
+  it("counts the people the user knows at an employer, and names only those asked for a referral, who are on Recruiters", async () => {
+    await person("Jane", "Doe", "Berenberg Bank GmbH & Co. KG", "Head of Finance");
+    await person("Erika", "Mustermann", "Berenberg", "Regulatory Reporting Lead");
+    await person("Max", "Mustermann", "Initech", "Controller");
+    // Jane was asked for a referral on the screen: she's a contact now, as askForReferral adds her.
+    const referral = await recruiter({ kind: "REFERRAL", name: "Berenberg Bank GmbH & Co. KG", contactName: "Jane Doe" });
+    const application = await prisma().application.create({ data: { title: "Analyst", company: "Berenberg" } });
+    const posting = await prisma().posting.create({ data: { source: "JSEARCH", externalId: "p1", title: "Analyst", company: "Acme AG" } });
+
+    const answer = await tool("get_network_matches", { application_id: application.id, posting_id: posting.id, companies: ["Berenberg"] });
+    expect(answer.json).toEqual({
+      imported: true,
+      employers: [
+        { company: "Berenberg", people_you_know: 2, asked_for_referral: [{ id: referral.id, contact_name: "Jane Doe", status: expect.any(String) }] },
+        { company: "Acme AG", people_you_know: 0 },
+      ],
+      next: expect.stringContaining("ask for a referral there"),
+      link: `https://dossier.example/applications/${application.id}?tab=posting`,
+    });
+    // Who they are stays in Dossier: never the names, positions or profiles of the connections.
+    for (const hidden of ["Erika", "Mustermann", "Head of Finance", "Regulatory Reporting Lead", "linkedin.com"]) expect(answer.text).not.toContain(hidden);
+    expect((await tool("get_network_matches", { posting_id: posting.id })).json).toMatchObject({ link: "https://dossier.example/jobs" });
+  });
+
+  it("says what's missing", async () => {
+    expect(await tool("get_network_matches")).toMatchObject({ isError: true, text: "Give application_id, posting_id or companies, with an employer's name." });
+    expect(await tool("get_network_matches", { application_id: "gone" })).toMatchObject({ isError: true, text: "That application no longer exists." });
+    expect(await tool("get_network_matches", { posting_id: "gone" })).toMatchObject({ isError: true, text: "That posting is no longer in Dossier." });
   });
 });

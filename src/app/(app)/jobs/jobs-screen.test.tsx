@@ -839,3 +839,35 @@ describe("what the job agent found (E22-8)", () => {
     expect(screen.getByText("Nothing from the job agent here yet. What its runs find lands here, best first.")).toBeInTheDocument();
   });
 });
+
+describe("Positions while scoring is off (jobauto fork)", () => {
+  const profiles = [{ id: "p1", name: "Erika Mustermann" }];
+  const scoringOff = {
+    title: "Scoring is off: choose the levels your profile is for.",
+    body: "Until then no posting gets a score: Best fit can't sort, How you fit doesn't run, and the job agent and strong-match alerts wait.",
+    reason: "Choose the levels your profile is for. Nothing is scored until you do.",
+    href: "/profile?section=target&profile=p1",
+    profileId: "p1",
+    canGuess: false,
+  };
+
+  it("says what it's scored against while scoring is on, with no notice", () => {
+    render(<JobsScreen {...screenProps} profiles={profiles} />);
+    expect(screen.getByText("Postings from every portal you switched on, each listed once, scored against Erika Mustermann.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Scoring is off" })).not.toBeInTheDocument();
+  });
+
+  it("says scoring is off above the list, with where to choose the levels, and nothing about what it's scored against", () => {
+    render(<JobsScreen {...screenProps} profiles={profiles} scoringOff={scoringOff} />);
+    expect(screen.getByText("Postings from every portal you switched on, each listed once.")).toBeInTheDocument();
+    expect(screen.queryByText(/scored against/)).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Scoring is off" })).toHaveTextContent("Scoring is off: choose the levels your profile is for.");
+    expect(screen.getByRole("link", { name: "Choose levels" })).toHaveAttribute("href", "/profile?section=target&profile=p1");
+  });
+
+  it("names the portals with a key that are off, once", () => {
+    render(<JobsScreen {...screenProps} portalsOff={["JSearch", "SerpApi", "Adzuna", "Jooble"]} />);
+    expect(screen.getByText(/You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble\. Switch them on in/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
+  });
+});

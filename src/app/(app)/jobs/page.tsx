@@ -6,7 +6,8 @@ import { profileGerman } from "@/lib/german-need";
 import { loadHiddenTitles } from "@/lib/hidden-titles-data";
 import { peopleAt } from "@/lib/network-data";
 import { handsOffToClaude } from "@/lib/connector/handoff";
-import { enabledPortals, loadJobSearchConfig, portalSetup } from "@/lib/job-search/config";
+import { enabledPortals, jobSearchView, loadJobSearchConfig, portalSetup } from "@/lib/job-search/config";
+import { portalsOffNote } from "@/lib/job-search/portals-off";
 import { COUNTRIES } from "@/lib/job-search/countries";
 import { isAddedSource } from "@/lib/job-search/sources";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
@@ -16,6 +17,7 @@ import { listSearches, loadSearch } from "@/lib/posting-searches";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
+import { loadScoringOff } from "@/lib/scoring-off-data";
 import { userTimeZone } from "@/lib/time-zone";
 
 import { JobsScreen } from "./jobs-screen";
@@ -60,11 +62,15 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   // An agent run's several searches (E26-4) have no one search to show above the list.
   const ids = foundSearchIds(filters.found);
   const oneSearch = ids?.length === 1 ? ids[0] : null;
-  const [library, searches, foundSearch, profile] = await Promise.all([
+  const [library, searches, foundSearch, profile, scoringOff, portalsOff] = await Promise.all([
     listLibrary(filters, { now }),
     listSearches({ timeZone, now }),
     oneSearch ? loadSearch(oneSearch, { timeZone, now }) : null,
     loadProfile(profileId),
+    // Scoring waits while a profile has no levels (jobauto fork): a notice says so above the list.
+    loadScoringOff(),
+    // The one-time note about portals with a key that are off (jobauto fork).
+    portalsOffNote(jobSearchView(config).portals),
   ]);
   const enabled = enabledPortals(config);
   // What an AI client or a careers page added was no search of the user's: the form doesn't start from it.
@@ -79,6 +85,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   return (
     <JobsScreen
       sources={enabled}
+      scoringOff={scoringOff}
+      portalsOff={portalsOff}
       arbeitsagenturNote={enabled.includes("ARBEITSAGENTUR") && !portalSetup(config, "ARBEITSAGENTUR")?.acceptedAt}
       scoreInClaude={scoreInClaude}
       profiles={profiles}

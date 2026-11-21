@@ -41,7 +41,8 @@ export function SetupCard({ steps }: { steps: SetupStep[] }) {
       <ul className="flex flex-col divide-y divide-line">
         {open.map((step) => (
           <li key={step.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-1 flex-col">
+            {/* On a phone the button goes under its text, which keeps the width (jobauto fork). */}
+            <div className="flex min-w-0 flex-1 flex-col max-sm:basis-full">
               <span className="font-medium">{step.title}</span>
               <span className="text-meta text-muted">{step.why}</span>
             </div>

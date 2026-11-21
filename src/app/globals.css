@@ -269,3 +269,28 @@
 @utility h-panel {
   height: calc(100dvh - 9px);
 }
+
+/* On a phone (jobauto fork), below Tailwind's sm (40rem): the screens' side
+   insets (px-10 and the dashboard's px-12, on every screen's sections and
+   lists, mx-10 on their notices) and the cards' 28px padding (p-7, px-7) are
+   16px, so the content gets the width; and a jump stops below the shell's
+   48px bar (the page bar scrolls away there). Unlayered, so it wins over the
+   utilities. */
+@media (width < 40rem) {
+  html {
+    scroll-padding-top: 64px;
+  }
+  #main :is(.px-12, .px-10, .px-7) {
+    padding-inline: 1rem;
+  }
+  #main .p-7 {
+    padding: 1rem;
+  }
+  #main .mx-10 {
+    margin-inline: 1rem;
+  }
+  /* The daily note's band, out to the dashboard's edges. */
+  #main .-mx-12 {
+    margin-inline: -1rem;
+  }
+}

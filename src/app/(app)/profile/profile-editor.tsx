@@ -186,7 +186,7 @@ export function ProfileEditor({
 
       <div className="flex flex-wrap items-start gap-x-12 gap-y-10 px-10 pt-2 pb-20">
         <div className="flex w-full flex-col gap-6 lg:w-[340px] lg:flex-none">
-          <StrengthMeter profile={profile} />
+          <StrengthMeter profile={profile} levels={levels} />
           {/* "Jobs it's for" (PR4): under the meter, folded; it says when the levels or the workplace need a look. */}
           <Link
             href={sectionHref("target", profileId)}

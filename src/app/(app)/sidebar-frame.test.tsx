@@ -14,10 +14,13 @@ vi.mock("next/link", () => ({
 }));
 
 let systemDark = false;
+// Narrower than 40rem: the sidebar is a drawer (jobauto fork).
+let phone = false;
 beforeEach(() => {
   systemDark = false;
+  phone = false;
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: query.includes("dark") && systemDark,
+    matches: (query.includes("dark") && systemDark) || (query.includes("40rem") && phone),
     addEventListener: () => {},
     removeEventListener: () => {},
   }));
@@ -58,6 +61,99 @@ describe("SidebarFrame", () => {
   it("starts collapsed when it was left that way", () => {
     renderSidebar(true);
     expect(screen.getByRole("complementary")).toHaveAttribute("data-collapsed", "true");
+  });
+});
+
+describe("SidebarFrame on a phone (jobauto fork)", () => {
+  beforeEach(() => {
+    phone = true;
+  });
+
+  // The page beside the drawer, as in the layout.
+  function renderShell(initialCollapsed = false) {
+    return render(
+      <div>
+        <SidebarFrame initialCollapsed={initialCollapsed} brand={<span>Dossier</span>}>
+          <NavLinks />
+        </SidebarFrame>
+        <main data-testid="page">The page</main>
+      </div>,
+    );
+  }
+  const menu = () => screen.getByRole("button", { name: "Open menu" });
+  const isOpen = () => menu().getAttribute("aria-expanded") === "true";
+
+  it("starts closed on every page, from a menu button that names the drawer", () => {
+    renderShell();
+    expect(menu()).toHaveAttribute("aria-expanded", "false");
+    expect(menu()).toHaveAttribute("aria-controls", screen.getByRole("complementary").id);
+    expect(screen.getByRole("complementary")).toHaveClass("max-sm:invisible");
+  });
+
+  it("opens at full width, whatever the laptop's folded state, and leaves that state alone", async () => {
+    document.cookie = "dossier_sidebar=collapsed; path=/";
+    renderShell(true);
+    expect(screen.getByRole("complementary")).not.toHaveAttribute("data-collapsed");
+    await userEvent.click(menu());
+    expect(isOpen()).toBe(true);
+    expect(screen.getByRole("complementary")).toHaveClass("max-sm:visible");
+    expect(screen.getByRole("link", { name: "Applications" })).not.toHaveAttribute("title");
+    expect(document.cookie).toContain("dossier_sidebar=collapsed");
+  });
+
+  it("keeps focus in the drawer while it's open, and gives it back to the menu button on Esc", async () => {
+    renderShell();
+    await userEvent.click(menu());
+    expect(screen.getByRole("button", { name: "Close menu" })).toHaveFocus();
+    // The page beside it can't be reached.
+    expect(screen.getByTestId("page").inert).toBe(true);
+    await userEvent.keyboard("{Escape}");
+    expect(isOpen()).toBe(false);
+    expect(screen.getByTestId("page").inert).toBe(false);
+    expect(menu()).toHaveFocus();
+  });
+
+  it("closes from its close button or a tap beside it", async () => {
+    const { container } = renderShell();
+    await userEvent.click(menu());
+    await userEvent.click(screen.getByRole("button", { name: "Close menu" }));
+    expect(isOpen()).toBe(false);
+
+    await userEvent.click(menu());
+    await userEvent.click(container.querySelector("[data-drawer-backdrop]")!);
+    expect(isOpen()).toBe(false);
+    expect(container.querySelector("[data-drawer-backdrop]")).toBeNull();
+  });
+
+  it("closes when a link in it is followed, or the page changes", async () => {
+    const { rerender } = renderShell();
+    await userEvent.click(menu());
+    // jsdom can't follow the link; the click is what counts.
+    const stay = (event: Event) => event.preventDefault();
+    document.addEventListener("click", stay);
+    await userEvent.click(screen.getByRole("link", { name: "Applications" }));
+    document.removeEventListener("click", stay);
+    expect(isOpen()).toBe(false);
+
+    await userEvent.click(menu());
+    pathname = "/jobs";
+    rerender(
+      <div>
+        <SidebarFrame initialCollapsed={false} brand={<span>Dossier</span>}>
+          <NavLinks />
+        </SidebarFrame>
+        <main data-testid="page">The page</main>
+      </div>,
+    );
+    expect(isOpen()).toBe(false);
+  });
+
+  it("is the laptop's sidebar on a wider window: no drawer to open", async () => {
+    phone = false;
+    renderShell(true);
+    expect(screen.getByRole("complementary")).toHaveAttribute("data-collapsed", "true");
+    await userEvent.click(menu());
+    expect(isOpen()).toBe(false);
   });
 });
 

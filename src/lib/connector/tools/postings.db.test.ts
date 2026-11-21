@@ -332,6 +332,49 @@ describe("Positions through the Claude connector", () => {
     });
   });
 
+  it("shows the same job apart again, marks postings seen, and removes them from the Archive, as Positions' buttons do", async () => {
+    const search = await storeSearch([found("p1", "Product Designer"), found("p2", "Brand Designer")]);
+    // The same job on another portal is shown once, with the other portal in also_on (E22-6).
+    const adzuna = await prisma().postingSearch.create({
+      data: { source: "ADZUNA", query: { keywords: "designer", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, portals: [], found: 1 },
+    });
+    await keepFound(adzuna.id, "ADZUNA", [{ ...found("a1", "Product Designer"), source: "ADZUNA", url: "https://adzuna.example/a1" }]);
+    const p1 = await prisma().posting.findFirstOrThrow({ where: { externalId: "p1" } });
+    expect((await tool("list_postings", { view: "new" })).json).toMatchObject({ new: { total: 2 } });
+    expect(((await tool("list_postings", { view: "new" })).json.new as { postings: Record<string, unknown>[] }).postings).toContainEqual(
+      expect.objectContaining({ posting_id: p1.id, new: true, also_on: [expect.any(String)] }),
+    );
+
+    // Not the same job: the other posting is in the list on its own; asked again, there's nothing to show apart.
+    expect((await tool("update_postings", { changes: [{ action: "not_same_job", posting_id: p1.id }] })).json).toMatchObject({ updated: [{ posting_id: p1.id, shown_apart: 1 }] });
+    expect((await tool("list_postings", { view: "open" })).json).toMatchObject({ open: { total: 3 } });
+    expect((await tool("update_postings", { changes: [{ action: "not_same_job", posting_id: p1.id }] })).json).toMatchObject({
+      updated: [{ posting_id: p1.id }],
+      notes: ["Product Designer: it isn't shown as the same job as another."],
+    });
+
+    // Seen one by one, from the search by number, or all of the new ones at once.
+    expect((await tool("update_postings", { search_id: search.id, changes: [{ action: "seen", number: 2 }] })).json).toMatchObject({ updated: [{ number: 2, title: "Brand Designer", new: false }] });
+    expect((await tool("update_postings", { all_seen: true })).json).toMatchObject({ updated: [], marked_seen: 2 });
+    expect((await tool("list_postings", { view: "new" })).json).toMatchObject({ new: { total: 0 } });
+
+    // Remove (E22-7): only from the Archive, for good.
+    const p2 = await prisma().posting.findFirstOrThrow({ where: { externalId: "p2" } });
+    await prisma().posting.update({ where: { id: p2.id }, data: { archivedAt: new Date() } });
+    expect((await tool("update_postings", { changes: [{ action: "remove", posting_id: p2.id }] })).json).toMatchObject({
+      updated: [{ posting_id: p2.id, title: "Brand Designer", removed: true }],
+      link: "https://dossier.example/jobs?tab=archive",
+    });
+    expect(await prisma().posting.findUniqueOrThrow({ where: { id: p2.id } })).toMatchObject({ removedAt: expect.any(Date), description: "" });
+    expect((await tool("list_postings", { view: "archive" })).json).toMatchObject({ archive: { total: 0 } });
+    const kept = await tool("update_postings", { changes: [{ action: "remove", posting_id: p1.id }] });
+    expect(kept.json).toMatchObject({ notes: ["Product Designer: only a posting in the Archive can be removed."] });
+    expect(kept.json.updated).toEqual([expect.not.objectContaining({ removed: true })]);
+    expect(await prisma().posting.findUniqueOrThrow({ where: { id: p1.id } })).toMatchObject({ removedAt: null });
+
+    expect(await tool("update_postings", {})).toMatchObject({ isError: true, text: "Give the changes to make, or all_seen." });
+  });
+
   it("removes a search, and keeps what it found in Positions", async () => {
     const search = await storeSearch([found("p1", "Product Designer")]);
     await savePosting(found("p1", "Product Designer"));

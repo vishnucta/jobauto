@@ -76,7 +76,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const statusCounts = new Map(byStatus.map((group) => [group.status, group._count._all]));
 
   return (
-    <div className="flex min-h-screen">
+    // On a phone the sidebar is a drawer and its bar runs across the top (jobauto fork).
+    <div className="flex min-h-screen max-sm:flex-col">
       <a
         href="#main"
         className="fixed top-3 left-3 z-50 -translate-y-[200%] rounded-control bg-primary px-4 py-2.5 text-sm font-medium text-on-primary hover:text-on-primary focus:translate-y-0"

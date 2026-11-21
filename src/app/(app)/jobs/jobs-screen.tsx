@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState, useTransition, type FormEvent } fro
 import { Search, SlidersHorizontal } from "lucide-react";
 
 import { ArbeitsagenturNote } from "@/components/arbeitsagentur-note";
+import { PortalsOffNote } from "@/components/portals-off-note";
 import { FilterChip, FilterChips, listingScreen, type ListingTab, ListingTabs, SourceBar } from "@/components/listing";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
@@ -37,8 +38,11 @@ import {
 import { isAddedSource, knownPortals, searchSourcesName, sourceInfo } from "@/lib/job-search/sources";
 import { useJob } from "@/hooks/use-job";
 import { COVERS, COVERS_LABELS } from "@/lib/posting-coverage";
+import type { ScoringOffNotice } from "@/lib/scoring-off";
 
 import { acceptArbeitsagenturNote, markAllPostingsSeen, removeJobSearch, retryPortalSearch, runJobSearch, showMorePostings } from "./actions";
+import { ScoringOffNotice as ScoringOff } from "../scoring-off-notice";
+
 import { FindWorkLinks, type JobsCounts } from "./find-work-links";
 import { PostingResults } from "./posting-results";
 import { countryCoverage, RemoteOnlyField, searchCost, SearchFields } from "./search-fields";
@@ -89,6 +93,10 @@ export type JobsScreenProps = {
   canPrepare?: boolean;
   /** How many recruiters and careers pages there are, for the links to their screens (jobauto fork). */
   elsewhere?: JobsCounts;
+  /** Scoring is off while a profile has no levels (scoring-off.ts, jobauto fork): the notice above the list; null when it's on. */
+  scoringOff?: ScoringOffNotice | null;
+  /** Portals with a key that are switched off, for the one-time note (portals-off.ts, jobauto fork); null once it's done. */
+  portalsOff?: readonly string[] | null;
 };
 
 const SETTINGS_HREF = "/settings?section=jobs";
@@ -122,6 +130,8 @@ export function JobsScreen({
   network = {},
   canPrepare = false,
   elsewhere = { recruiters: 0, employers: 0 },
+  scoringOff = null,
+  portalsOff = null,
 }: JobsScreenProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -185,7 +195,8 @@ export function JobsScreen({
     <div className={listingScreen}>
       <PageHeader
         title="Positions"
-        description={`Postings from every portal you switched on, each listed once${profiles.length === 1 ? `, scored against ${profiles[0].name}` : ""}.`}
+        // Nothing is "scored against" a profile while scoring is off (jobauto fork).
+        description={`Postings from every portal you switched on, each listed once${profiles.length === 1 && !scoringOff ? `, scored against ${profiles[0].name}` : ""}.`}
         actions={
           <>
             <FindWorkLinks counts={elsewhere} />
@@ -196,6 +207,8 @@ export function JobsScreen({
           </>
         }
       />
+      {scoringOff && <ScoringOff off={scoringOff} className="mx-10 mb-5 max-w-[960px]" />}
+      {portalsOff && <PortalsOffNote names={portalsOff} className="mx-10 mb-5 max-w-[960px]" />}
       {arbeitsagenturNote && <ArbeitsagenturNote accepted={false} onAccept={acceptArbeitsagentur} className="mx-10 mb-5 max-w-[760px]" />}
       <div className="flex flex-col gap-3 px-10 pb-4">
         {sources.length > 0 ? (

@@ -296,6 +296,10 @@ const settingsSchema = z.object({
   latestVersionUrl: z.string().nullable().catch(null),
   updateCheckDay: z.string().nullable().catch(null),
   updateDismissed: z.string().nullable().catch(null),
+  // The one-time note that portals with a key are off (jobauto fork,
+  // portals-off.ts): done once dismissed, or once one of them is on. It goes
+  // with this server's keys, so exports leave it out (INSTALL_SETTINGS).
+  portalsOffNoteDone: flag(false),
   // The backend's notices (announcements/check.ts): its last answer, and the
   // ones dismissed here. They belong to the install, not its data, so exports
   // leave them out (INSTALL_SETTINGS).

@@ -39,6 +39,13 @@ export async function setUpcomingInterview(applicationId: string, at: Date | nul
   await prisma.interview.create({ data: { applicationId, round: (rounds.at(-1)?.round ?? 0) + 1, at, ...filled } });
 }
 
+export type RoundFields = { minutes: number | null; place: string; people: string; notes: string };
+
+/** A round's length, place, people and notes, as typed in on the page or given through the connector; false when the round is gone. */
+export async function saveRoundDetails(applicationId: string, interviewId: string, fields: RoundFields): Promise<boolean> {
+  return (await prisma.interview.updateMany({ where: { id: interviewId, applicationId }, data: fields })).count > 0;
+}
+
 /** "Add the next round": a round without a date yet, once every round is past. Returns it, or null while one is still to come. */
 export async function addNextRound(applicationId: string, now = new Date()): Promise<{ id: string; round: number } | null> {
   const rounds = await prisma.interview.findMany({ where: { applicationId }, select: { id: true, round: true, at: true }, orderBy: { round: "asc" } });

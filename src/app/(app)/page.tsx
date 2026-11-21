@@ -11,6 +11,7 @@ import { dayPeriod, hourIn } from "@/lib/greeting";
 import { loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { loadSetupSteps } from "@/lib/setup-checklist-data";
+import { loadScoringOff } from "@/lib/scoring-off-data";
 import { loadToday } from "@/lib/today-data";
 import { userTimeZone } from "@/lib/time-zone";
 
@@ -31,7 +32,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   const now = new Date();
   const range = periodFromParam(param) ?? settings.dashboardPeriod;
   const replies = await waitingByApplication().catch(() => undefined);
-  const [figures, name, week, working, experiment, todaysThree, setup] = await Promise.all([
+  const [figures, name, week, working, experiment, todaysThree, setup, scoringOff] = await Promise.all([
     loadDashboard({ period: range, quietDays: settings.quietDays, timeZone, replies }),
     loadProfileName(),
     loadWeeklyProgress(timeZone ?? "UTC", now),
@@ -39,6 +40,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
     loadExperiment(),
     loadToday(),
     loadSetupSteps(),
+    // Scoring waits while a profile has no levels (jobauto fork).
+    loadScoringOff(),
   ]);
   return (
     <Dashboard
@@ -55,6 +58,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
       experiment={experiment}
       todaysThree={todaysThree}
       setup={setup}
+      scoringOff={scoringOff}
       calendar={
         <Suspense fallback={<CalendarSkeleton />}>
           <DashboardCalendar date={date} now={now} />

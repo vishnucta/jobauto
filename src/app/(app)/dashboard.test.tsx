@@ -239,3 +239,24 @@ describe("Experiment (jobauto fork)", () => {
     expect(stopExperiment).toHaveBeenCalled();
   });
 });
+
+describe("Dashboard while scoring is off (jobauto fork)", () => {
+  const scoringOff = {
+    title: "Scoring is off: choose the levels your profile is for.",
+    body: "Until then no posting gets a score: Best fit can't sort, How you fit doesn't run, and the job agent and strong-match alerts wait.",
+    reason: "Choose the levels your profile is for. Nothing is scored until you do.",
+    href: "/profile?section=target&profile=p1",
+    profileId: "p1",
+    canGuess: false,
+  };
+
+  it("says so first, across both zones, until the levels are chosen", () => {
+    const { rerender } = render(<Dashboard {...props} scoringOff={scoringOff} />);
+    const notice = screen.getByRole("region", { name: "Scoring is off" });
+    expect(notice).toHaveTextContent("Scoring is off: choose the levels your profile is for.");
+    expect(notice).toHaveClass("col-span-full");
+    expect(within(notice).getByRole("link", { name: "Choose levels" })).toHaveAttribute("href", "/profile?section=target&profile=p1");
+    rerender(<Dashboard {...props} scoringOff={null} />);
+    expect(screen.queryByRole("region", { name: "Scoring is off" })).not.toBeInTheDocument();
+  });
+});

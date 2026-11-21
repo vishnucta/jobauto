@@ -28,7 +28,14 @@ type Connection =
  * connection test. Each change saves on its own; a key is saved when you
  * leave its field and never shown again.
  */
-export function ScoringSection({ initial }: { initial: ScoringView }) {
+export function ScoringSection({
+  initial,
+  notice,
+}: {
+  initial: ScoringView;
+  /** "Scoring is off" while a profile has no levels (jobauto fork), under the intro. */
+  notice?: ReactNode;
+}) {
   const track = useTrackSave();
   const [view, setView] = useState(initial);
   const [connection, setConnection] = useState<Connection>({ status: "untested" });
@@ -64,6 +71,7 @@ export function ScoringSection({ initial }: { initial: ScoringView }) {
         Which model judges how well a posting fits a profile, for Score in Positions, New application and the job agent. Every model answers the same questions,
         and Dossier adds the answers up the same way. Drafts are always written by your AI model.
       </SettingsSectionIntro>
+      {notice}
 
       <RadioGroup.Root
         aria-label="Score postings with"

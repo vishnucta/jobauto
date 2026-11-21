@@ -26,6 +26,8 @@ import { prisma } from "@/lib/prisma";
 import { loadProfileName } from "@/lib/profile-data";
 import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig, scoringView } from "@/lib/scoring/config";
+import { loadScoringOff } from "@/lib/scoring-off-data";
+import { portalsOffNote } from "@/lib/job-search/portals-off";
 import { coversFromScore } from "@/lib/posting-coverage";
 import { agentCoversOf } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
@@ -43,6 +45,7 @@ import { GoogleSection } from "./google-section";
 import { GoogleNotice } from "./google-notice";
 import { JobSearchSection } from "./job-search-section";
 import { ScoringSection } from "./scoring-section";
+import { ScoringOffNotice } from "../scoring-off-notice";
 import { AboutSection, type AboutFacts } from "./about-section";
 import { ConnectorSection } from "./connector-section";
 import { NotificationsSection } from "./notifications-section";
@@ -75,9 +78,9 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
           <AiBehaviour initial={{ creativity: settings.creativity, strict: settings.strict, showDiff: settings.showDiff, dailyNoteAi: settings.dailyNoteAi }} />
         </>
       ) : section === "jobs" ? (
-        <JobSearchSection initial={await jobSearchViewWithUpdates()} archiveDays={settings.archiveAfterDays} />
+        <JobSearchSectionWithNote archiveDays={settings.archiveAfterDays} />
       ) : section === "scoring" ? (
-        <ScoringSection initial={scoringView(await loadScoringConfig())} />
+        <ScoringWithNotice />
       ) : section === "agent" ? (
         <AgentSection
           initial={{
@@ -174,6 +177,18 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
       )}
     </SettingsScreen>
   );
+}
+
+/** Settings → Job search, with the one-time note about portals with a key that are off (jobauto fork). */
+async function JobSearchSectionWithNote({ archiveDays }: { archiveDays: number }) {
+  const view = await jobSearchViewWithUpdates();
+  return <JobSearchSection initial={view} archiveDays={archiveDays} portalsOffNote={(await portalsOffNote(view.portals)) !== null} />;
+}
+
+/** Settings → Scoring, under "Scoring is off" while a profile has no levels (jobauto fork): its card here says so too. */
+async function ScoringWithNotice() {
+  const [config, off] = await Promise.all([loadScoringConfig(), loadScoringOff()]);
+  return <ScoringSection initial={scoringView(config)} notice={off && <ScoringOffNotice off={off} />} />;
 }
 
 /** What scores the job agent's postings, and whether it's set up (#274). */

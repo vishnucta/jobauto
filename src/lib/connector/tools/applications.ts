@@ -5,23 +5,27 @@ import { z } from "zod";
 
 import { ApplicationStatus } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
+import { isAiUsable } from "@/lib/ai/config";
 import { eraseApplication, setApplicationArchived } from "@/lib/application-lifecycle";
 import { addApplicationNote, deleteApplicationNote, noteBody, updateApplicationNote } from "@/lib/application-notes";
 import { isoInZone } from "@/lib/dates";
 import { lastEmailWriting, putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { addFact, MAX_FACTS } from "@/lib/facts";
 import { followInCalendar, interviewMoment, saveInterviewDate } from "@/lib/interview-date";
+import { findUnfinishedJobs } from "@/lib/jobs/runner";
+import { startWorkSample } from "@/lib/jobs/write-work-sample";
 import { prisma } from "@/lib/prisma";
 import { loadFacts } from "@/lib/profile-data";
 import { startupAddress } from "@/lib/startups/types";
 import { statusInfo } from "@/lib/status";
 import { undoStatusChange } from "@/lib/status-changes";
 import { lastKnownTimeZone } from "@/lib/time-zone";
+import { workSampleJobKey, workSampleOf } from "@/lib/work-sample";
 
 import { failure, started, text, type ToolContext } from "../kit";
 
 // An application's notes, interview date, facts, startup, archiving,
-// deleting, status undo and its email draft (jobauto fork): what its page,
+// deleting, status undo, its email draft and its work sample (jobauto fork): what its page,
 // the Applications board and "Write to them" on Startups do with it, except
 // its documents and the Apply tab. The tools call the library functions the
 // page's actions call, whose ActionErrors are written for the user, so
@@ -135,7 +139,7 @@ async function linkStartup(applicationId: string, startupId: string | null): Pro
 
 /** Registers these tools on the connector's server. */
 export function registerApplicationTools({ server, linkTo }: ToolContext): void {
-  const page = (id: string, tab?: "notes" | "email" | "posting") => linkTo(`/applications/${id}${tab ? `?tab=${tab}` : ""}`);
+  const page = (id: string, tab?: "notes" | "email" | "posting" | "sample") => linkTo(`/applications/${id}${tab ? `?tab=${tab}` : ""}`);
 
   server.registerTool(
     "list_notes",
@@ -352,5 +356,57 @@ export function registerApplicationTools({ server, linkTo }: ToolContext): void 
         await putBackEmail(id, jobId);
         return text({ id, done: "Put the email back.", link: page(id, "email") });
       }),
+  );
+
+  server.registerTool(
+    "get_work_sample",
+    {
+      title: "Read the work sample",
+      description:
+        "An application's work sample, “My first 90 days”, as its Work sample tab shows it: the situation, three phases of steps, where the user has done it before and a closing line, " +
+        "with the claims to check that the profile and posting don't back.",
+      inputSchema: z.object({ id: applicationId }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const application = await prisma.application.findUnique({ where: { id }, select: { workSample: true } });
+      if (!application) return failure(GONE);
+      const sample = workSampleOf(application.workSample);
+      if (!sample) {
+        const [writing] = await findUnfinishedJobs(workSampleJobKey(id));
+        if (writing) return text({ id, status: "being written", task_id: writing.id, next: "Call check_task with this task_id until it's done." });
+        return failure("This application has no work sample yet. write_work_sample writes one.");
+      }
+      return text({
+        id,
+        title: sample.title,
+        situation: sample.situation,
+        phases: sample.phases,
+        proof: sample.proof,
+        closing: sample.closing,
+        check_these: sample.unverified.length > 0 ? sample.unverified : undefined,
+        in_bewerbungsmappe: sample.inMappe,
+        link: page(id, "sample"),
+      });
+    },
+  );
+
+  server.registerTool(
+    "write_work_sample",
+    {
+      title: "Have Dossier write the work sample",
+      description:
+        "Has Dossier's own AI model write an application's work sample, “My first 90 days”, from its posting and the profile, in its documents' language, or write it again; nothing is sent. " +
+        "It needs an AI provider in Dossier's settings. Follow it with check_task, then read it with get_work_sample.",
+      inputSchema: z.object({ id: applicationId }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ id }) => {
+      // As the Work sample tab's button does.
+      if (!(await prisma.application.count({ where: { id } }))) return failure(GONE);
+      if (!(await isAiUsable())) return failure("Dossier has no AI model of its own set up. The user can set one up in Settings → AI provider.");
+      const { jobId, reused } = await startWorkSample(id);
+      return started(jobId, { application_id: id, already_under_way: reused || undefined, link: page(id, "sample") });
+    },
   );
 }

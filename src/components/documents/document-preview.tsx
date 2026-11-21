@@ -119,8 +119,9 @@ export function DocumentPreview({
       )}
     >
       <div className="flex flex-col gap-4" style={{ "--u": `min(${maxWidth / PAGE_WIDTH}px, calc(100cqw / ${PAGE_WIDTH}))` } as CSSProperties}>
-        <div className="flex w-[calc(var(--u)*640)] items-center justify-between gap-3 text-meta text-muted">
-          <span className="min-w-0">{label}</span>
+        {/* On a phone the label row takes a line and the meta (PDF and the like) goes under it (jobauto fork). */}
+        <div className="flex w-[calc(var(--u)*640)] items-center justify-between gap-3 text-meta text-muted max-sm:flex-wrap">
+          <span className="min-w-0 max-sm:basis-full">{label}</span>
           <span>{typeof meta === "function" ? meta(pages) : meta}</span>
         </div>
         {notice && <div className="w-[calc(var(--u)*640)]">{typeof notice === "function" ? notice(pages) : notice}</div>}

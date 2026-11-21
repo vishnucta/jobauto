@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { DocumentKind } from "@/generated/prisma/enums";
+import { ActionError } from "@/lib/action";
 import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { writeMessage } from "@/lib/ai/tasks";
@@ -10,12 +11,12 @@ import { extractedOf, unitsSchema } from "@/lib/application-data";
 import { emailParts } from "@/lib/application-email";
 import { formatCalendarDate, formatDay } from "@/lib/dates";
 import { profileOfApplication } from "@/lib/frozen-copy";
-import { MESSAGE_KINDS, messageDraftSchema } from "@/lib/message-draft";
+import { MESSAGE_KINDS, messageDraftSchema, type MessageDraft, type MessageKind } from "@/lib/message-draft";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts } from "@/lib/profile-data";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
-import { defineJob } from "./runner";
+import { defineJob, findUnfinishedJobs, startJob } from "./runner";
 
 /** The key of drafting an application's message, to find it again after a reload. */
 export const messageJobKey = (applicationId: string) => `message:${applicationId}`;
@@ -31,10 +32,7 @@ export const writeMessageJob = defineJob({
   result: messageDraftSchema,
   async run({ applicationId, kind }, { step, signal }) {
     await step(kind === "follow-up" ? "Drafting a follow-up" : "Drafting your answer");
-    const application = await prisma.application.findUniqueOrThrow({
-      where: { id: applicationId },
-      include: { offer: true, documents: { where: { kind: DocumentKind.EMAIL }, select: { units: true } } },
-    });
+    const application = await prisma.application.findUniqueOrThrow({ where: { id: applicationId }, include: { offer: true } });
     const [provider, options, profile, facts, timeZone] = await Promise.all([
       getAiProvider(),
       loadTaskOptions(),
@@ -56,10 +54,28 @@ export const writeMessageJob = defineJob({
       },
       { ...options, language: application.language || options.language, signal },
     );
-    // To whoever the application's email went to, when there is one.
-    const units = unitsSchema.safeParse(application.documents[0]?.units);
-    const draft = { kind, to: units.success ? emailParts(units.data).to : "", subject: data.subject, body: data.body, writtenWith: promptVersion, at: new Date().toISOString() };
-    await prisma.application.update({ where: { id: applicationId }, data: { messageDraft: draft } });
-    return draft;
+    return keepMessageDraft(applicationId, kind, { subject: data.subject, body: data.body, writtenWith: promptVersion });
   },
 });
+
+/**
+ * Keeps a drafted message on the application, over any draft before it,
+ * addressed to whoever the application's email went to, when there is one.
+ * The job keeps what the AI drafted; the Claude connector keeps what Claude
+ * wrote (jobauto fork).
+ */
+export async function keepMessageDraft(applicationId: string, kind: MessageKind, { subject, body, writtenWith }: Pick<MessageDraft, "subject" | "body" | "writtenWith">): Promise<MessageDraft> {
+  const email = await prisma.document.findFirst({ where: { applicationId, kind: DocumentKind.EMAIL }, select: { units: true } });
+  const units = unitsSchema.safeParse(email?.units);
+  const draft = { kind, to: units.success ? emailParts(units.data).to : "", subject, body, writtenWith, at: new Date().toISOString() };
+  await prisma.application.update({ where: { id: applicationId }, data: { messageDraft: draft } });
+  return draft;
+}
+
+/** Drafts one in the background, as the page's buttons do; refused while one is being drafted already. Returns the job's id. */
+export async function startMessageDraft(applicationId: string, kind: MessageKind): Promise<string> {
+  const key = messageJobKey(applicationId);
+  const [running] = await findUnfinishedJobs(key);
+  if (running) throw new ActionError("A message is being drafted already. Try again once it's done.");
+  return startJob(writeMessageJob, { applicationId, kind }, { key, applicationId });
+}

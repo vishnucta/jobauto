@@ -11,6 +11,7 @@ import type { SetupStep } from "@/lib/setup-checklist";
 import type { TodayItem } from "@/lib/today";
 import type { Insights } from "@/lib/insights";
 import type { ArmResult, Experiment } from "@/lib/experiments";
+import type { ScoringOffNotice } from "@/lib/scoring-off";
 import { STATUSES } from "@/lib/status";
 import type { WeeklyProgress } from "@/lib/weekly-target";
 
@@ -25,6 +26,7 @@ import { WhatsWorking } from "./whats-working";
 import { ExperimentCard } from "./experiment-card";
 import { SetupCard } from "./setup-card";
 import { TodayCard } from "./today-card";
+import { ScoringOffNotice as ScoringOff } from "./scoring-off-notice";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -55,6 +57,7 @@ export function Dashboard({
   experiment,
   todaysThree,
   setup,
+  scoringOff = null,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -81,6 +84,8 @@ export function Dashboard({
   todaysThree?: TodayItem[];
   /** Start here (setup-checklist.ts); missing in older callers. */
   setup?: SetupStep[];
+  /** Scoring is off while a profile has no levels (scoring-off.ts, jobauto fork); null when it's on. */
+  scoringOff?: ScoringOffNotice | null;
 }) {
   const { sent, heardBack } = figures.overall;
   const thisWeek = figures.needsYou.filter((item) => item.soon).length;
@@ -108,6 +113,8 @@ export function Dashboard({
 
       <div className="@container px-12 pt-7 pb-[72px]">
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 @min-[1500px]:grid-cols-[minmax(0,1fr)_580px]">
+          {/* Scoring is off (jobauto fork): first, across both zones, until the levels are chosen. */}
+          {scoringOff && <ScoringOff off={scoringOff} className="col-span-full" />}
           {/* What gets applications out today, and the ways in not used yet (jobauto fork): first, across both zones. Before the first application, only when something waits. */}
           {todaysThree && (todaysThree.length > 0 || !empty) && <TodayCard items={todaysThree} />}
           {setup && <SetupCard steps={setup} />}

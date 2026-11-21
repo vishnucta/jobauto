@@ -50,6 +50,8 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "aiTest",
   "updateCheckDay",
   "updateDismissed",
+  // The note about portals with a key that are off (jobauto fork): about this server's keys.
+  "portalsOffNoteDone",
   "announcementFeed",
   "announcementsDismissed",
   "googleClientId",

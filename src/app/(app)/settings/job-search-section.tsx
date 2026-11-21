@@ -16,7 +16,8 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { Toggle } from "@/components/ui/toggle";
 import type { JobSource, JSearchHost } from "@/lib/job-search/search";
-import { FREEHIRE_URL, JSEARCH_KEY_URLS, type JobSearchSettingsView, type PortalFieldView, type PortalView } from "@/lib/job-search/sources";
+import { FREEHIRE_URL, JSEARCH_KEY_URLS, keptLabel, portalsLeftOff, type JobSearchSettingsView, type PortalFieldView, type PortalView } from "@/lib/job-search/sources";
+import { PortalsOffNote } from "@/components/portals-off-note";
 import { cn } from "@/lib/cn";
 import { ARCHIVE_DAYS, DEFAULT_ARCHIVE_DAYS } from "@/lib/settings";
 
@@ -32,21 +33,6 @@ type Connection =
   | { status: "failed"; message: string };
 
 type Apply = (result: { ok: true; data: JobSearchSettingsView } | { ok: false; error: string }) => boolean;
-
-/**
- * "Key saved", "Key from the server" or "Note accepted": what a portal's card
- * says once it could be searched, so one that's off shows it only needs
- * switching on (jobauto fork); null until then, and for a portal with
- * nothing to keep (FreeHire's tag says it needs no key).
- */
-function keptLabel(portal: PortalView): string | null {
-  if (portal.consent) return portal.acceptedAt ? "Note accepted" : null;
-  const keys = portal.fields.flatMap((field) => (field.type === "secret" ? [field.keyState] : []));
-  // Adzuna's app ID goes with its key.
-  if (keys.length === 0 || portal.fields.some((field) => field.type === "text" && !field.value.trim())) return null;
-  if (keys.every((state) => state === "env")) return "Key from the server";
-  return keys.every((state) => state === "set" || state === "env") ? "Key saved" : null;
-}
 
 /** Portals whose test spends a search from the user's plan. */
 const METERED_TESTS: readonly string[] = ["JSEARCH", "SERPAPI", "JOOBLE"];
@@ -138,10 +124,21 @@ function InstalledActions({ portal, apply, track }: { portal: PortalView; apply:
   );
 }
 
-export function JobSearchSection({ initial, archiveDays = DEFAULT_ARCHIVE_DAYS }: { initial: JobSearchSettingsView; archiveDays?: number }) {
+export function JobSearchSection({
+  initial,
+  archiveDays = DEFAULT_ARCHIVE_DAYS,
+  portalsOffNote = false,
+}: {
+  initial: JobSearchSettingsView;
+  archiveDays?: number;
+  /** Whether the note about portals with a key that are off may show (jobauto fork): not dismissed yet. */
+  portalsOffNote?: boolean;
+}) {
   const track = useTrackSave();
   const [view, setView] = useState(initial);
   const [days, setDays] = useState(archiveDays);
+  // Read from the cards as they are, so it goes as soon as one is switched on.
+  const leftOff = portalsOffNote ? portalsLeftOff(view.portals) : null;
 
   const changeDays = (next: number) => {
     const before = days;
@@ -165,6 +162,7 @@ export function JobSearchSection({ initial, archiveDays = DEFAULT_ARCHIVE_DAYS }
         Where Find jobs looks for postings. Switch on as many portals as you like: a search asks all of them, and each keeps its own key.
       </SettingsSectionIntro>
       <div className="flex flex-col gap-3">
+        {leftOff && <PortalsOffNote names={leftOff} inSettings />}
         {view.portals.map((portal) => (
           <PortalCard key={portal.id} portal={portal} freehireHost={view.freehire.host} apply={apply} track={track} />
         ))}

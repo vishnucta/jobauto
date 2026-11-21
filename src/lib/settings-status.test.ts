@@ -110,3 +110,28 @@ describe("settingsStatus (E34-1)", () => {
     expect(problemsBanner(settingsStatus({ ...healthy, about: { ...healthy.about, update: "1.16.0" } }))).toEqual({ title: "One thing to look at.", summary: "Dossier 1.16.0 is out.", fix: { label: "See what's new", section: "about" } });
   });
 });
+
+describe("Scoring's card while a profile has no levels (jobauto fork)", () => {
+  const levelsOff = { reason: "Choose the levels your profile is for. Nothing is scored until you do.", href: "/profile?section=target&profile=p1" };
+
+  it("needs a look with the reason instead of On, and the banner's fix goes to the profile", () => {
+    const status = settingsStatus({ ...healthy, scoring: { ...healthy.scoring, levelsOff } });
+    expect(status.scoring).toMatchObject({
+      tone: "look",
+      state: "Your AI model",
+      meta: "Choose the levels your profile is for. Nothing is scored until you do.",
+      note: "Waiting for levels",
+      problem: { summary: "scoring is off until your profile's levels are chosen", fix: "Choose levels", href: "/profile?section=target&profile=p1" },
+    });
+    expect(problemsBanner(status)).toEqual({
+      title: "One thing to look at.",
+      summary: "Scoring is off until your profile's levels are chosen.",
+      fix: { label: "Choose levels", section: "scoring", href: "/profile?section=target&profile=p1" },
+    });
+  });
+
+  it("names a scoring model that can't run first, and is On again once the levels are chosen", () => {
+    expect(settingsStatus({ ...healthy, scoring: { ...healthy.scoring, problem: "Jev needs its key.", levelsOff } }).scoring.meta).toBe("Jev needs its key.");
+    expect(settingsStatus({ ...healthy, scoring: { ...healthy.scoring, levelsOff: null } }).scoring.tone).toBe("on");
+  });
+});

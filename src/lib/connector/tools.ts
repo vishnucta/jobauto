@@ -8,6 +8,7 @@ import { ActionError } from "@/lib/action";
 import { approveCandidate } from "@/lib/agent/draft";
 import { isAiUsable } from "@/lib/ai/config";
 import { AiError } from "@/lib/ai/errors";
+import { moveAsSentOn } from "@/lib/application-create";
 import { factorsFrom } from "@/lib/ai/tasks/score-posting";
 import { fitFromAnswers } from "@/lib/fit";
 import { GoogleError } from "@/lib/google/errors";
@@ -39,6 +40,7 @@ import { MAX_LINES } from "@/lib/scoring/posting-lines";
 import { EDUCATION_LEVELS, EXTRA_LEVELS, LOCATION_OPTIONS, REQUIREMENT_KINDS, SENIORITY_OPTIONS, WORK_LEVELS } from "@/lib/scoring/questions";
 import { statusInfo } from "@/lib/status";
 import { applyStatusChange } from "@/lib/status-changes";
+import { lastKnownTimeZone } from "@/lib/time-zone";
 import { appVersion } from "@/lib/version";
 
 import { connectorDraftJob } from "./draft";
@@ -48,6 +50,7 @@ import { registerApplicationTools } from "./tools/applications";
 import { registerApplyTools } from "./tools/apply";
 import { registerDocumentTools } from "./tools/documents";
 import { registerInboxTools } from "./tools/inbox";
+import { messageDraftView, offerView, registerInterviewTools, roundsView } from "./tools/interviews";
 import { registerPostingTools } from "./tools/postings";
 import { registerProfileTools } from "./tools/profile";
 import { registerRecruiterTools } from "./tools/recruiters";
@@ -55,6 +58,7 @@ import { registerCareersTools } from "./tools/careers";
 import { registerPrepTools } from "./tools/prep";
 import { registerSettingsTools } from "./tools/settings";
 import { registerTaskTools } from "./tools/tasks";
+import { registerTodayTools } from "./tools/today";
 import {
   reviseWrittenApplication,
   saveWrittenApplication,
@@ -153,6 +157,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         instructions:
           "Dossier is the user's own job search app: their profiles (one per kind of job they look for), tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
           "Its tools do what its screens do. Tools that read or write a profile take its name as profile (get_profile lists them); without one they use the first. " +
+          "When the user asks what to do next, get_today answers as the dashboard does: Today's three and Needs you. " +
           "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs: they ask every portal switched on in Settings and keep what they find in Positions; " +
           "keep its keywords short, as a portal treats every word as a requirement: get_search_words suggests them from the profile; " +
           "jobs you find yourself on the web go into Positions with add_found_jobs, marked as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
@@ -164,6 +169,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           "Recruiters are the agencies and recruiters on Find work → Recruiters: list_recruiters, add_recruiter, update_recruiter, set_recruiter_status, snooze_recruiter and remove_recruiter keep track of them, " +
           "and draft_recruiter_message drafts the message to write; Dossier sends nothing, so record that the user wrote or heard back only when they say so. " +
           "check_resume says whether a resume's PDF reads correctly for an applicant tracking system, names the posting's requirements, and has clean text. " +
+          "Rehearse a first call with get_call_prep for an application, or get_practice_prep before there is one; get_salary_guide fills the salary line. " +
           "Change the profile only with what the user told you or confirmed. " +
           "Work that takes a while answers with a task_id: follow it with check_task. " +
           "start_apply fills in the employer's application form in a browser window on the user's computer; the user checks it and presses Send there, then settle_apply records it. " +
@@ -283,7 +289,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       if ("error" in chosen) return failure(chosen.error);
       // As in Dossier, nothing scores against a profile until the user has chosen its levels (E24-3).
       const waiting = await levelsProblem(chosen.id);
-      if (waiting) return failure(`${waiting.message} Ask the user to choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
+      if (waiting) return failure(`${waiting.message} Ask the user which levels it's for and save them with set_profile_levels, or they choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
       const search = search_id ? await prisma.postingSearch.findUnique({ where: { id: search_id }, select: { id: true } }) : null;
       if (search_id && !search) return failure("That search is no longer kept. Search again.");
       const kept = search ? await postingsOfSearch(search.id) : [];
@@ -352,7 +358,9 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     "get_application",
     {
       title: "Read an application",
-      description: "One application with its posting, how the profile matches it, and the tailored resume and cover letter as text. Private notes and contact details are left out.",
+      description:
+        "One application with its posting, how the profile matches it, the tailored resume and cover letter as text, and once there are, its interview rounds, offer and drafted message. " +
+        "Private notes and contact details are left out.",
       inputSchema: z.object({ id: z.string().min(1).max(100) }),
       annotations: { readOnlyHint: true },
     },
@@ -371,11 +379,17 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           postingUrl: true,
           postingText: true,
           match: true,
+          sentAt: true,
           documents: { select: { kind: true, units: true } },
+          interviews: { select: { id: true, round: true, at: true, minutes: true, place: true, people: true, notes: true, prep: true } },
+          offer: true,
+          messageDraft: true,
+          workSample: true,
         },
       });
       if (!application) return failure("That application no longer exists.");
       const doc = (kind: DocumentKind) => documentText(application.documents.find((document) => document.kind === kind)?.units);
+      const timeZone = application.interviews.length > 0 ? await lastKnownTimeZone() : undefined;
       return text({
         id: application.id,
         title: application.title,
@@ -390,6 +404,13 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         match: application.match,
         resume: doc(DocumentKind.RESUME),
         cover_letter: doc(DocumentKind.COVER_LETTER),
+        // What came after applying (1.15), as its page's Interview and Offer columns keep it.
+        sent_on: application.sentAt?.toISOString().slice(0, 10),
+        interviews: timeZone ? roundsView(application.interviews, timeZone) : undefined,
+        time_zone: timeZone,
+        offer: offerView(application.offer) ?? undefined,
+        message_draft: messageDraftView(application.messageDraft),
+        work_sample: application.workSample ? "get_work_sample reads it" : undefined,
         link: linkTo(`/applications/${application.id}`),
       });
     },
@@ -550,27 +571,43 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
     "set_application_status",
     {
       title: "Move an application",
-      description: "Changes an application's status, e.g. to SENT once the user has applied, or INTERVIEW. It only records the change; nothing is sent.",
-      inputSchema: z.object({ id: z.string().min(1).max(100), status: z.enum(ApplicationStatus) }),
+      description:
+        "Changes an application's status, e.g. to SENT once the user has applied, or INTERVIEW. It only records the change; nothing is sent. " +
+        "For one sent before today, give sent_on, as Already sent it? does in New application.",
+      inputSchema: z.object({
+        id: z.string().min(1).max(100),
+        status: z.enum(ApplicationStatus),
+        sent_on: z.iso.date().optional().describe("The day it was sent, YYYY-MM-DD, while it isn't marked sent yet"),
+      }),
       annotations: { readOnlyHint: false, idempotentHint: true },
     },
-    async ({ id, status }) => {
+    async ({ id, status, sent_on }) => {
+      if (sent_on) {
+        if (status === ApplicationStatus.DRAFT) return failure("sent_on goes with SENT or a later status.");
+        // A day ahead allows for time zones east of the server's, as Already sent it? does.
+        if (Date.parse(`${sent_on}T00:00:00Z`) > Date.now() + 24 * 60 * 60 * 1000) return failure("The day it was sent can't be in the future.");
+        const before = await prisma.application.findUnique({ where: { id }, select: { sentAt: true } });
+        if (!before) return failure("That application no longer exists.");
+        if (before.sentAt) return failure(`It's marked sent on ${before.sentAt.toISOString().slice(0, 10)} already; sent_on is only for one not marked sent yet.`);
+      }
       // A job agent draft waiting for review is approved first, as moving it on the Agent screen does.
       if (status !== ApplicationStatus.DRAFT) {
         const pending = await prisma.agentCandidate.findFirst({ where: { applicationId: id, application: { awaitingReview: true } }, select: { id: true } });
         if (pending) await approveCandidate(pending.id);
       }
-      const result = await applyStatusChange(prisma, id, status);
+      const result = sent_on && status !== ApplicationStatus.DRAFT ? await moveAsSentOn(id, sent_on, status) : await applyStatusChange(prisma, id, status);
       if (result.outcome === "not-found") return failure("That application no longer exists.");
       if (result.outcome === "changed") await prepareOnStatus(id, status);
-      return text({ id, status: statusInfo(status).label, changed: result.outcome !== "unchanged" });
+      return text({ id, status: statusInfo(status).label, changed: result.outcome !== "unchanged", sent_on });
     },
   );
 
   const context: ToolContext = { server, linkTo, clientName };
+  registerTodayTools(context);
   registerProfileTools(context);
   registerDocumentTools(context);
   registerApplicationTools(context);
+  registerInterviewTools(context);
   registerApplyTools(context);
   registerPostingTools(context);
   registerRecruiterTools(context);

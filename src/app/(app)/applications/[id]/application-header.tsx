@@ -12,7 +12,8 @@ import { statusInfo } from "@/lib/status";
  * The top of an application's page in one row (E30-2, design 3b): the
  * breadcrumb "Applications / Draft · apply by Thu 19 Nov" whose parts are
  * links (public issue 112), the title "Role at Company", the tabs, and the
- * status with the one thing to do next.
+ * status with the one thing to do next. On a phone the title wraps
+ * rather than cutting off (jobauto fork).
  */
 export function ApplicationHeader({
   role,
@@ -62,7 +63,7 @@ export function ApplicationHeader({
           ]}
         />
         <div className="flex min-w-0 items-center gap-2">
-          <h1 title={at ? `${what} at ${at}` : what} className="truncate font-serif text-[26px] leading-[1.2] tracking-[-0.01em]">
+          <h1 title={at ? `${what} at ${at}` : what} className="truncate font-serif text-[26px] leading-[1.2] tracking-[-0.01em] max-sm:text-[22px] max-sm:whitespace-normal">
             {what}
             {at && (
               <>

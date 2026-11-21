@@ -6,20 +6,12 @@ import { useState } from "react";
 import { buttonClassName } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { cn } from "@/lib/cn";
-import type { NeedsYouItem } from "@/lib/dashboard";
+import { needsYouHref, type NeedsYouItem } from "@/lib/dashboard";
 
 import { QuietDays } from "./quiet-days";
 
-/** Where a row's button goes: the right tab, and the work its click starts (U3), e.g. Prepare's checklist. */
-export function needsYouHref(item: Pick<NeedsYouItem, "id" | "tab" | "action">): string {
-  const query = new URLSearchParams();
-  if (item.tab) query.set("tab", item.tab);
-  if (item.action === "Follow up") query.set("tab", "email");
-  if (item.action === "Prepare") query.set("start", "prepare");
-  if (item.action === "Follow up") query.set("start", "follow-up");
-  const text = query.toString();
-  return `/applications/${item.id}${text ? `?${text}` : ""}`;
-}
+// Where a row's button goes lives in dashboard.ts, so get_today links the same way (jobauto fork).
+export { needsYouHref };
 
 /** Rows shown before "Show all" (decided 16 November 2026, DB1). */
 const NEEDS_YOU_LIMIT = 6;
@@ -48,7 +40,8 @@ export function NeedsYou({ items, quietDays }: { items: NeedsYouItem[]; quietDay
             <li key={item.id} className="relative flex items-center gap-3 border-t border-line py-[13px]">
               <StatusDot status={item.status} />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <p className="truncate text-field">
+                {/* Wraps on a phone rather than cutting the company off (jobauto fork). */}
+                <p className="truncate text-field max-sm:whitespace-normal">
                   <span className="font-medium">{item.company || item.role}</span>
                   {item.company && item.role && <span className="text-muted"> · {item.role}</span>}
                 </p>

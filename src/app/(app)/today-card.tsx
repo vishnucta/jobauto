@@ -57,8 +57,9 @@ function TodayRow({ item, number }: { item: TodayItem; number: number }) {
       <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-track text-meta font-medium">
         {number}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium">
+      {/* On a phone the title wraps and the button goes under it, so neither is cut off (jobauto fork). */}
+      <div className="flex min-w-0 flex-1 flex-col max-sm:basis-[calc(100%-2.75rem)]">
+        <span className="truncate font-medium max-sm:whitespace-normal">
           {item.title}
           {item.company && <span className="font-normal text-muted"> · {item.company}</span>}
         </span>
@@ -67,13 +68,15 @@ function TodayRow({ item, number }: { item: TodayItem; number: number }) {
           {item.kind !== "finish" && item.coverage.total > 0 && ` · ${item.coverage.hit} of ${item.coverage.total} requirements covered`}
         </span>
       </div>
-      {item.kind === "prepare" ? (
-        <PrepareButton item={item} />
-      ) : (
-        <Link href={`/applications/${item.applicationId}`} className={buttonClassName("primary", "sm", "hover:text-on-primary")}>
-          {item.kind === "finish" ? "Finish" : "Review"}
-        </Link>
-      )}
+      <div className="flex-none max-sm:pl-11">
+        {item.kind === "prepare" ? (
+          <PrepareButton item={item} />
+        ) : (
+          <Link href={`/applications/${item.applicationId}`} className={buttonClassName("primary", "sm", "hover:text-on-primary")}>
+            {item.kind === "finish" ? "Finish" : "Review"}
+          </Link>
+        )}
+      </div>
     </li>
   );
 }

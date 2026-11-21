@@ -17,7 +17,7 @@ import { loadProfile } from "@/lib/profile-data";
 import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
 import { noteAgencies } from "@/lib/recruiters/store";
 import { loadSettings } from "@/lib/settings-data";
-import { applyStatusChange } from "@/lib/status-changes";
+import { applyStatusChange, type StatusChangeResult } from "@/lib/status-changes";
 
 // Creating an application from finished documents (E7-6), shared by New
 // application and the job agent (E16-5): the Draft application, its resume
@@ -354,10 +354,21 @@ export async function createSentApplication(input: SentApplicationInput, now = n
     if (input.startupId) await tx.startup.updateMany({ where: { id: input.startupId, applicationId: null }, data: { applicationId: created.id } });
     return created;
   });
-  // Midday UTC is that day in nearly every time zone.
-  const sentAt = new Date(`${input.sentOn}T12:00:00Z`);
-  await applyStatusChange(prisma, application.id, ApplicationStatus.SENT, sentAt);
-  if (input.status !== ApplicationStatus.SENT) await applyStatusChange(prisma, application.id, input.status, now > sentAt ? now : sentAt);
+  await moveAsSentOn(application.id, input.sentOn, input.status, now);
   await noteAgencies([{ company: input.company, title: input.role }], "job");
   return application.id;
+}
+
+/**
+ * Moves an application not sent yet to Sent on the day it was sent
+ * ("2026-10-15"), then on to `status` as of now, so the board, the dashboard
+ * and follow-ups count from that day. "Already sent it?" records one this way,
+ * and so does the Claude connector's set_application_status (jobauto fork).
+ */
+export async function moveAsSentOn(applicationId: string, sentOn: string, status: Exclude<ApplicationStatus, "DRAFT">, now = new Date()): Promise<StatusChangeResult> {
+  // Midday UTC is that day in nearly every time zone.
+  const sentAt = new Date(`${sentOn}T12:00:00Z`);
+  const sent = await applyStatusChange(prisma, applicationId, ApplicationStatus.SENT, sentAt);
+  if (status === ApplicationStatus.SENT || sent.outcome === "not-found") return sent;
+  return applyStatusChange(prisma, applicationId, status, now > sentAt ? now : sentAt);
 }

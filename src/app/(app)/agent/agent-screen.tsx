@@ -16,6 +16,9 @@ import { useJob } from "@/hooks/use-job";
 import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
 import type { AgentCandidateView, AgentView } from "@/lib/agent/view";
 import { coversLine, fitWords, withoutPoints } from "@/lib/posting-coverage";
+import type { ScoringOffNotice } from "@/lib/scoring-off";
+
+import { ScoringOffNotice as ScoringOff } from "../scoring-off-notice";
 
 import { approveAgentDraft, dismissAgentCandidate, prepareAgentDraft, restoreAgentCandidate, runAgentNow } from "./actions";
 import { AGENT_TABS, type AgentTab } from "./tabs";
@@ -37,7 +40,16 @@ const SETTINGS: Record<NonNullable<AgentView["setupSection"]>, { href: string; l
  * in the source bar, tabs for its drafts, its best finds and what it
  * skipped, the list and a preview. Nothing here sends anything.
  */
-export function AgentScreen({ view, tab = "drafts" }: { view: AgentView; tab?: AgentTab }) {
+export function AgentScreen({
+  view,
+  tab = "drafts",
+  scoringOff = null,
+}: {
+  view: AgentView;
+  tab?: AgentTab;
+  /** Scoring is off while a profile its searches score against has no levels (scoring-off.ts, jobauto fork); null when it's on. */
+  scoringOff?: ScoringOffNotice | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [runJobId, setRunJobId] = useState(view.runJobId);
@@ -125,6 +137,7 @@ export function AgentScreen({ view, tab = "drafts" }: { view: AgentView; tab?: A
         }
       />
       <div className="flex flex-col gap-3 px-10 pb-4">
+        {scoringOff && <ScoringOff off={scoringOff} />}
         <Notices view={view} />
         <SourceBar
           label="Agent"

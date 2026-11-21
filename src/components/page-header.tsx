@@ -28,7 +28,7 @@ export function PageHeader({ title, description, actions, before, breadcrumb }: 
           {breadcrumb && <Breadcrumb items={breadcrumb} />}
           <div className="flex min-w-0 items-center gap-3">
             {before ?? <PageBarIcon />}
-            <h1 className="font-serif text-title text-pretty">{title}</h1>
+            <h1 className="min-w-0 font-serif text-title text-pretty break-words max-sm:text-[30px]">{title}</h1>
           </div>
         </div>
         {/* Wraps its own buttons when even a line of its own is too narrow (E33-1: Profile's four at 800 px). */}
@@ -36,7 +36,7 @@ export function PageHeader({ title, description, actions, before, breadcrumb }: 
       </PageBar>
       {/* The screen's content starts 32px under the bar, after the description if there is one. */}
       {description ? (
-        <p className="max-w-[620px] px-10 pt-1 pb-8 text-lead text-pretty text-muted">{description}</p>
+        <p className="max-w-[620px] px-10 pt-1 pb-8 text-lead text-pretty text-muted max-sm:px-4 max-sm:pb-6">{description}</p>
       ) : (
         <div aria-hidden="true" className="h-8" />
       )}
@@ -53,13 +53,15 @@ export function PageBar({ children, compact = false }: { children: ReactNode; /*
   return (
     // -mx-px: over the panel's side borders, so the bar's own line up with them.
     // pt-2: the shell's 8px above the panel, as at its sides and bottom; it
-    // stays while the bar sticks, so nothing scrolls by above it.
-    <div className="sticky top-0 z-20 -mx-px bg-paper pt-2">
+    // stays while the bar sticks, so nothing scrolls by above it. On a phone
+    // the shell's own bar stays in view instead, and this one scrolls away
+    // with a narrower inset (jobauto fork).
+    <div className="sticky top-0 z-20 -mx-px bg-paper pt-2 max-sm:static">
       <div
         className={
           compact
-            ? "flex min-h-12 flex-wrap items-center gap-x-6 gap-y-3 rounded-t-panel border border-line-card border-b-line bg-surface px-7 py-[18px]"
-            : "flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-t-panel border border-b-0 border-line-card bg-surface px-10 pt-7 pb-4"
+            ? "flex min-h-12 flex-wrap items-center gap-x-6 gap-y-3 rounded-t-panel border border-line-card border-b-line bg-surface px-7 py-[18px] max-sm:px-4 max-sm:py-3"
+            : "flex min-h-12 flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-t-panel border border-b-0 border-line-card bg-surface px-10 pt-7 pb-4 max-sm:px-4 max-sm:pt-5"
         }
       >
         {children}

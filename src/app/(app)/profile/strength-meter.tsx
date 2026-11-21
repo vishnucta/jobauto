@@ -3,9 +3,15 @@
 import { useId } from "react";
 
 import { nextMissing, paidRoles, profileStrength, type ProfileData } from "@/lib/profile";
+import type { LevelRange } from "@/lib/profile-levels";
 
-/** "Profile strength" with a progress bar and a hint that names the next missing thing (PRO-9, E33-1). */
-export function StrengthMeter({ profile }: { profile: ProfileData }) {
+/**
+ * "Profile strength" with a progress bar and a hint that names the next
+ * missing thing (PRO-9, E33-1). The levels come first (jobauto fork):
+ * nothing is scored against a profile without them, so it's never "All set"
+ * while they're missing. `levels` undefined leaves them out.
+ */
+export function StrengthMeter({ profile, levels }: { profile: ProfileData; levels?: LevelRange | null }) {
   const labelId = useId();
   const hintId = useId();
   const strength = profileStrength({
@@ -15,7 +21,7 @@ export function StrengthMeter({ profile }: { profile: ProfileData }) {
     skills: profile.skills.length,
   });
   const { percent } = strength;
-  const next = nextMissing(profile);
+  const next = levels === null ? "Choose the levels this profile is for, under Jobs it's for: nothing is scored until you do." : nextMissing(profile);
   const hint = next ? `${percent >= 80 ? "Nearly there." : percent >= 50 ? "Good progress." : "A good start."} ${next}` : strength.hint;
 
   return (

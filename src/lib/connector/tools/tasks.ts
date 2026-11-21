@@ -174,6 +174,7 @@ const KINDS: Record<string, Tell> = {
       task: "Drafting a message to the employer",
       about: { application_id: input?.applicationId, kind: input?.kind },
       link: input ? linkTo(`/applications/${input.applicationId}`) : undefined,
+      next: task.status === JobStatus.DONE ? "get_application reads the draft; the user sends it from the application's page." : undefined,
     };
   },
   // A search asking its portals in the background (E22-4).
@@ -253,6 +254,7 @@ const KINDS: Record<string, Tell> = {
     task: "Preparing a practice call",
     result: resultOf(preparePracticeJob, task) ? { prepared: true } : undefined,
     link: linkTo("/practice"),
+    next: "get_practice_prep reads the pack.",
   }),
   [writeWorkSampleJob.type]: (task, linkTo) => {
     const applicationId = inputOf(writeWorkSampleJob, task)?.applicationId;
@@ -261,6 +263,7 @@ const KINDS: Record<string, Tell> = {
       about: { application_id: applicationId },
       result: resultOf(writeWorkSampleJob, task) ? { written: true } : undefined,
       link: applicationId ? linkTo(`/applications/${applicationId}?tab=sample`) : undefined,
+      next: task.status === JobStatus.DONE ? "Read it with get_work_sample." : undefined,
     };
   },
   [englishCopyJob.type]: (task, linkTo) => {

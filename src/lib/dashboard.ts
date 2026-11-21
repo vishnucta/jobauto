@@ -233,6 +233,17 @@ export function quietApplications(applications: readonly DashboardApplication[],
     .sort((a, b) => b.days - a.days);
 }
 
+/** Where a Needs you row's button goes: the right tab, and the work its click starts (U3), e.g. Prepare's checklist. */
+export function needsYouHref(item: Pick<NeedsYouItem, "id" | "tab" | "action">): string {
+  const query = new URLSearchParams();
+  if (item.tab) query.set("tab", item.tab);
+  if (item.action === "Follow up") query.set("tab", "email");
+  if (item.action === "Prepare") query.set("start", "prepare");
+  if (item.action === "Follow up") query.set("start", "follow-up");
+  const text = query.toString();
+  return `/applications/${item.id}${text ? `?${text}` : ""}`;
+}
+
 /** Undated items, in this order after the dated ones. */
 const UNDATED_ORDER: ApplicationStatus[] = [ApplicationStatus.OFFER, ApplicationStatus.INTERVIEW, ApplicationStatus.DRAFT];
 

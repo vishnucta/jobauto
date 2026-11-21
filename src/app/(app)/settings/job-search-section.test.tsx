@@ -24,6 +24,7 @@ vi.mock("./actions", () => ({
   keepWithdrawnPortal: vi.fn(),
 }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
+vi.mock("@/lib/job-search/portals-off-actions", () => ({ dismissPortalsOffNote: vi.fn() }));
 
 const ACCEPTED = "2026-10-23T09:00:00.000Z";
 const NOTE = "The Bundesagentur für Arbeit has no official API.";
@@ -377,5 +378,24 @@ describe("the catalog (E23-4, E23-5)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Keep searching FreeHire" }));
     expect(keepWithdrawnPortal).toHaveBeenCalledWith({ portal: "FREEHIRE" });
     await waitFor(() => expect(screen.queryByText(/Withdrawn from the catalog/)).not.toBeInTheDocument());
+  });
+});
+
+describe("JobSearchSection's note about portals with a key that are off (jobauto fork)", () => {
+  const upgraded = () => viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" }, JOOBLE: { keyState: "set" } }, { withBa: false });
+
+  it("names them above the cards until one is switched on, without switching any on itself", async () => {
+    render(<JobSearchSection initial={upgraded()} portalsOffNote />);
+    expect(screen.getByRole("note")).toHaveTextContent("You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble. Switch them on below.");
+    expect(setPortalOn).not.toHaveBeenCalled();
+
+    vi.mocked(setPortalOn).mockResolvedValueOnce({ ok: true, data: viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { on: true, keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" }, JOOBLE: { keyState: "set" } }, { withBa: false }) });
+    await userEvent.click(screen.getByRole("switch", { name: /^SerpApi/ }));
+    expect(screen.queryByText(/portals that are off/)).not.toBeInTheDocument();
+  });
+
+  it("isn't there once it's done", () => {
+    render(<JobSearchSection initial={upgraded()} />);
+    expect(screen.queryByText(/portals that are off/)).not.toBeInTheDocument();
   });
 });

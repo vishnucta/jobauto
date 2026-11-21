@@ -1326,7 +1326,12 @@ export function ApplicationView({
         status={application.status}
         flag={flag}
         tabs={
-          <TabsList variant="pills" aria-label="Application">
+          // On a phone, one row that scrolls sideways (jobauto fork).
+          <TabsList
+            variant="pills"
+            aria-label="Application"
+            className="max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[&>*]:shrink-0 max-sm:[&>*]:whitespace-nowrap"
+          >
             <TabsTrigger value="resume">Resume{dot(null)}</TabsTrigger>
             <TabsTrigger value="letter">Cover letter{dot(null)}</TabsTrigger>
             <TabsTrigger value="email">Email{dot(application.status === "DRAFT" && email ? "ready" : null)}</TabsTrigger>
@@ -1398,7 +1403,8 @@ export function ApplicationView({
         />
       )}
 
-      <div className="flex min-h-0 flex-1">
+      {/* On a phone the Fit column is a button above the document (jobauto fork). */}
+      <div className="flex min-h-0 flex-1 max-sm:flex-col">
       <FitColumn match={match} open={fitOpen} onOpenChange={setFitOpen}>
         {application.status === "OFFER" && !showFit ? (
           <OfferPanel
@@ -1464,7 +1470,7 @@ export function ApplicationView({
         )}
       </FitColumn>
       {/* The composer floats over the canvas; each tab leaves room for it under its content. */}
-      <div className="@container relative flex min-h-0 min-w-0 flex-1 [--composer-space:15rem]">
+      <div className="@container relative flex min-h-0 min-w-0 flex-1 [--composer-space:15rem] max-sm:[--composer-space:6rem]">
         <TabsContent value="resume" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
           {resume && resumeTheme && resumeUnits ? (
             <DocumentPreview

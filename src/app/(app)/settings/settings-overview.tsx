@@ -43,7 +43,7 @@ export function SettingsOverview({ status }: { status: SettingsStatus }) {
           <p className="min-w-0 flex-[1_1_320px] text-sm text-pretty">
             <span className="font-medium">{banner.title}</span> {banner.summary}
           </p>
-          <Link href={settingsSectionHref(banner.fix.section)} className="flex-none rounded-control border border-line-strong bg-card px-3 py-1.5 text-sm font-medium text-ink hover:bg-hover hover:text-ink">
+          <Link href={banner.fix.href ?? settingsSectionHref(banner.fix.section)} className="flex-none rounded-control border border-line-strong bg-card px-3 py-1.5 text-sm font-medium text-ink hover:bg-hover hover:text-ink">
             {banner.fix.label}
           </Link>
         </section>

@@ -10,6 +10,8 @@ import {
   inEntryOrder,
   LEGACY_ADDRESS_KEY,
   type Basics,
+  type CertificationItem,
+  type CustomItem,
   type EducationItem,
   type ExperienceItem,
   type ProjectItem,
@@ -165,6 +167,33 @@ export async function restorePublicationEntry(profileId: string, entry: Publicat
   });
 }
 
+/** "+ Add a certification" (#293): at the top, where the newest usually goes. */
+export async function newCertification(profileId: string, data: Omit<Prisma.CertificationUncheckedCreateInput, "sort" | "profileId"> = {}) {
+  return prisma.certification.create({ data: { ...data, profileId, sort: await firstSort(prisma.certification, { profileId }) } });
+}
+
+/** Puts a removed certification back, last; the list then saves its place in the order. */
+export async function restoreCertificationEntry(profileId: string, entry: CertificationItem) {
+  return prisma.certification.upsert({
+    where: { id: entry.id },
+    create: { ...entry, profileId, sort: await nextSort(prisma.certification, { profileId }) },
+    update: {},
+  });
+}
+
+/** "+ Add an item" in a section the user made (#298): at its end, since nothing in it says what's newest. Null when the section is gone. */
+export async function newCustomItem(sectionId: string, data: Omit<Prisma.CustomItemUncheckedCreateInput, "sort" | "sectionId"> = {}) {
+  const sort = await nextSort(prisma.customItem, { sectionId });
+  if (!(await prisma.customSection.count({ where: { id: sectionId } }))) return null;
+  return prisma.customItem.create({ data: { ...data, sectionId, sort } });
+}
+
+/** Puts a removed item back, last in its section; null when the section is gone too. */
+export async function restoreCustomItemEntry(sectionId: string, entry: CustomItem) {
+  if (!(await prisma.customSection.count({ where: { id: sectionId } }))) return null;
+  return prisma.customItem.upsert({ where: { id: entry.id }, create: { ...entry, sectionId, sort: await nextSort(prisma.customItem, { sectionId }) }, update: {} });
+}
+
 export async function newReference(profileId: string, data: Omit<Prisma.ReferenceUncheckedCreateInput, "sort" | "profileId"> = {}) {
   return prisma.reference.create({ data: { ...data, profileId, sort: await nextSort(prisma.reference, { profileId }) } });
 }
@@ -229,5 +258,23 @@ export async function reorderPublicationList(profileId: string, ids: string[]): 
     const known = new Set((await tx.publication.findMany({ where: { profileId }, select: { id: true } })).map((entry) => entry.id));
     if (!isWholeList(ids, known)) throw new ActionError("The list changed in the meantime. Reload the page and try again.");
     for (const [sort, entryId] of ids.entries()) await tx.publication.update({ where: { id: entryId }, data: { sort } });
+  });
+}
+
+/** Saves the certifications' order (#293): `ids` is every certification of the profile, in the new order. */
+export async function reorderCertificationList(profileId: string, ids: string[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const known = new Set((await tx.certification.findMany({ where: { profileId }, select: { id: true } })).map((entry) => entry.id));
+    if (!isWholeList(ids, known)) throw new ActionError("The list changed in the meantime. Reload the page and try again.");
+    for (const [sort, entryId] of ids.entries()) await tx.certification.update({ where: { id: entryId }, data: { sort } });
+  });
+}
+
+/** Saves the order of a section the user made (#298): `ids` is each of its items, in the new order. */
+export async function reorderCustomItemList(sectionId: string, ids: string[]): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const known = new Set((await tx.customItem.findMany({ where: { sectionId }, select: { id: true } })).map((entry) => entry.id));
+    if (!isWholeList(ids, known)) throw new ActionError("The list changed in the meantime. Reload the page and try again.");
+    for (const [sort, entryId] of ids.entries()) await tx.customItem.update({ where: { id: entryId }, data: { sort } });
   });
 }

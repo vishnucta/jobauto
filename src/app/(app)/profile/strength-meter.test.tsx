@@ -46,3 +46,39 @@ describe("StrengthMeter's hint (E33-1)", () => {
     expect(screen.getByRole("progressbar", { name: "Profile strength" })).toHaveAccessibleDescription("Good progress. One role has no lines yet.");
   });
 });
+
+describe("StrengthMeter without levels (jobauto fork)", () => {
+  const full = { ...basics, name: "Erika Mustermann", email: "erika@example.com", city: "Hamburg", country: "Germany", headline: "Financial analyst", summary: "Reports." };
+  const complete: ProfileData = {
+    basics: full,
+    skills: [{} as never],
+    languages: [],
+    experience: [{ bullets: "Closed the books" } as never],
+    projects: [],
+    education: [{} as never],
+    certifications: [],
+    publications: [],
+    references: [],
+    customSections: [],
+    facts: [],
+    photo: null,
+  };
+
+  it("never says All set while the levels are missing: they're the next thing to add", () => {
+    render(<StrengthMeter profile={complete} levels={null} />);
+    const bar = screen.getByRole("progressbar", { name: "Profile strength" });
+    expect(bar).toHaveAttribute("aria-valuenow", "100");
+    expect(bar).toHaveAccessibleDescription("Nearly there. Choose the levels this profile is for, under Jobs it's for: nothing is scored until you do.");
+    expect(screen.queryByText(/All set/)).not.toBeInTheDocument();
+  });
+
+  it("names the levels before anything else missing", () => {
+    render(<StrengthMeter profile={{ ...complete, basics: { ...full, headline: "" } }} levels={null} />);
+    expect(screen.getByRole("progressbar", { name: "Profile strength" })).toHaveAccessibleDescription(/Choose the levels this profile is for/);
+  });
+
+  it("says All set once they're chosen", () => {
+    render(<StrengthMeter profile={complete} levels={{ from: "mid", to: "senior" }} />);
+    expect(screen.getByRole("progressbar", { name: "Profile strength" })).toHaveAccessibleDescription("All set. The optional sections are there if they help.");
+  });
+});

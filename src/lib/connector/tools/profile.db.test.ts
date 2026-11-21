@@ -578,3 +578,116 @@ describe("importing from a resume (E4-10)", () => {
     expect(await prisma().job.count({ where: { id: posting.id } })).toBe(1);
   });
 });
+
+describe("certifications, volunteering and sections the user made (#293, #294, #298)", () => {
+  /** The certifications' ids, in the profile's order. */
+  const certifications = async () => ((await tool("get_profile")).json.certifications as Entry[]).map((entry) => entry.id);
+
+  it("adds and changes a certification, never echoing its credential ID or link, and puts a removed one back in its place", async () => {
+    const added = await tool("save_profile_entry", {
+      certification: { name: "EMIR Reporting", issuer: "Frankfurt School", obtained: "2025-06", credential_id: "FS-1234", link: "https://verify.example/fs-1234" },
+    });
+    expect(added.json).toMatchObject({
+      saved: "certification",
+      created: true,
+      entry: { name: "EMIR Reporting", issuer: "Frankfurt School", obtained: "2025-06", valid_until: null, has_link: true, on_resumes: true },
+      link: `${PROFILE_PAGE}&section=certifications`,
+    });
+    expect(added.text).not.toContain("FS-1234");
+    expect(added.text).not.toContain("verify.example");
+    const { id } = added.json.entry as Entry;
+    // A new one goes to the top, as + Add does.
+    const order = await certifications();
+    expect(order[0]).toBe(id);
+    expect(await prisma().certification.findUniqueOrThrow({ where: { id } })).toMatchObject({ year: 2025, month: 6, credentialId: "FS-1234" });
+
+    const changed = await tool("save_profile_entry", { certification: { id, valid_until: "2028", on_resumes: false } });
+    expect(changed.json.entry).toMatchObject({ name: "EMIR Reporting", obtained: "2025-06", valid_until: "2028", on_resumes: false });
+
+    const removed = await tool("remove_profile_entry", { kind: "certification", id });
+    expect(removed.json).toMatchObject({ removed: "certification", title: "EMIR Reporting", link: `${PROFILE_PAGE}&section=certifications` });
+    expect(await prisma().certification.count({ where: { id } })).toBe(0);
+    await tool("remove_profile_entry", { kind: "certification", id, restore: true });
+    expect(await certifications()).toEqual(order);
+    expect(await prisma().certification.findUniqueOrThrow({ where: { id } })).toMatchObject({ credentialId: "FS-1234", link: "https://verify.example/fs-1234" });
+  });
+
+  it("marks a role as volunteering, linking to its own section", async () => {
+    const added = await tool("save_profile_entry", { experience: { role: "Treasurer", company: "Tafel Hamburg e.V.", start: "2024", current: true, volunteering: true } });
+    expect(added.json).toMatchObject({ entry: { role: "Treasurer", volunteering: true }, link: `${PROFILE_PAGE}&section=volunteering` });
+    const { id } = added.json.entry as Entry;
+    expect(await prisma().experience.findUniqueOrThrow({ where: { id } })).toMatchObject({ volunteering: true });
+
+    const paid = await tool("save_profile_entry", { experience: { id, volunteering: false } });
+    expect(paid.json).toMatchObject({ link: `${PROFILE_PAGE}&section=experience` });
+    expect((paid.json.entry as Entry).volunteering).toBeUndefined();
+  });
+
+  it("adds, changes and removes an item of a section the user made, only in one of this profile's sections", async () => {
+    const section = await prisma().customSection.create({ data: { profileId: TEST_PROFILE_ID, title: "Awards", format: "ENTRIES" } });
+    await prisma().customItem.create({ data: { sectionId: section.id, title: "Earlier award", sort: 0 } });
+    expect(await tool("save_profile_entry", { section_item: { title: "Best thesis" } })).toMatchObject({ isError: true });
+    expect(await tool("save_profile_entry", { section_item: { section_id: "gone", title: "Best thesis" } })).toMatchObject({ isError: true });
+
+    const added = await tool("save_profile_entry", {
+      section_item: { section_id: section.id, title: "Best thesis", subtitle: "Universität Hamburg", start: "2019", details: ["On liquidity reporting"], link: "https://uni.example/award" },
+    });
+    expect(added.json).toMatchObject({
+      saved: "section_item",
+      created: true,
+      entry: { title: "Best thesis", subtitle: "Universität Hamburg", start: "2019", details: ["On liquidity reporting"], has_link: true, on_resumes: true, section_id: section.id, section: "Awards" },
+      link: `${PROFILE_PAGE}&section=custom:${section.id}`,
+    });
+    expect(added.text).not.toContain("uni.example");
+    const { id } = added.json.entry as Entry;
+    // Last in its section, as + Add an item puts it.
+    const items = async () => (await prisma().customItem.findMany({ where: { sectionId: section.id }, orderBy: { sort: "asc" } })).map((item) => item.title);
+    expect(await items()).toEqual(["Earlier award", "Best thesis"]);
+
+    expect((await tool("save_profile_entry", { section_item: { id, title: "Best master thesis" } })).json.entry).toMatchObject({ title: "Best master thesis", subtitle: "Universität Hamburg" });
+    expect(await tool("save_profile_entry", { section_item: { id, section_id: section.id } })).toMatchObject({ isError: true, text: "Give the item's fields to save." });
+
+    // Removed and put back in its place in the section.
+    await tool("remove_profile_entry", { kind: "section_item", id });
+    expect(await items()).toEqual(["Earlier award"]);
+    expect((await tool("remove_profile_entry", { kind: "section_item", id, restore: true })).json).toMatchObject({ restored: "section_item", link: `${PROFILE_PAGE}&section=custom:${section.id}` });
+    expect(await items()).toEqual(["Earlier award", "Best master thesis"]);
+
+    // Not once its section is gone.
+    await tool("remove_profile_entry", { kind: "section_item", id });
+    await prisma().customSection.delete({ where: { id: section.id } });
+    expect(await tool("remove_profile_entry", { kind: "section_item", id, restore: true })).toMatchObject({ isError: true, text: "The section that item was in is gone, so it can't come back." });
+
+    // Another profile's section takes no items from this one.
+    const backend = await copyProfile(TEST_PROFILE_ID, "Backend");
+    const theirs = await prisma().customSection.create({ data: { profileId: backend, title: "Talks", format: "LINES" } });
+    expect(await tool("save_profile_entry", { section_item: { section_id: theirs.id, title: "A talk" } })).toMatchObject({ isError: true });
+    expect((await tool("save_profile_entry", { profile: "Backend", section_item: { section_id: theirs.id, title: "A talk" } })).json).toMatchObject({ profile: "Backend", created: true });
+  });
+});
+
+describe("the jobs a profile is for (E24-3, E24-4)", () => {
+  it("sets the levels and where it wants to work, changing only what's given", async () => {
+    await prisma().profile.update({ where: { id: TEST_PROFILE_ID }, data: { levelFrom: null, levelTo: null } });
+    expect((await tool("get_profile")).json).toMatchObject({ levels_not_set: expect.stringContaining("set_profile_levels") });
+
+    // Given in either order, kept lower first.
+    const set = await tool("set_profile_levels", { levels: { from: "senior", to: "mid" } });
+    expect(set.json).toMatchObject({ profile: DEMO_PROFILE, jobsItsFor: "Mid level to Senior", link: `${PROFILE_PAGE}&section=target` });
+    expect(await prisma().profile.findUniqueOrThrow({ where: { id: TEST_PROFILE_ID } })).toMatchObject({ levelFrom: "mid", levelTo: "senior" });
+    expect((await tool("get_profile")).json).toMatchObject({ jobsItsFor: "Mid level to Senior" });
+
+    const where = await tool("set_profile_levels", { ways_of_working: ["hybrid", "remote"], within_km: 25, remote_for: "countries", remote_countries: ["Germany", "Netherlands"] });
+    expect(where.json).toMatchObject({
+      jobsItsFor: "Mid level to Senior",
+      whereItWantsToWork: { waysOfWorking: ["Hybrid", "Remote"], onSiteOrHybrid: { withinKmOfHome: 25 }, remoteForEmployersIn: ["DE", "NL"] },
+    });
+    const { workplace } = await prisma().profile.findUniqueOrThrow({ where: { id: TEST_PROFILE_ID } });
+    expect(workplace).toMatchObject({ modes: ["HYBRID", "REMOTE"], radiusKm: 25, remoteOpenTo: "countries", remoteCountries: ["de", "nl"], relocate: false });
+
+    expect(await tool("set_profile_levels", {})).toMatchObject({ isError: true });
+    expect(await tool("set_profile_levels", { remote_countries: ["Atlantis"] })).toMatchObject({ isError: true, text: expect.stringContaining("Atlantis") });
+    expect(await tool("set_profile_levels", { levels: { from: "senior", to: "principal" } })).toMatchObject({ isError: true });
+    expect(await tool("set_profile_levels", { within_km: 30 })).toMatchObject({ isError: true });
+  });
+});

@@ -193,3 +193,26 @@ describe("AgentScreen (E16-6)", () => {
     expect(screen.getByText("Last run").nextElementSibling).toHaveTextContent("Not yet");
   });
 });
+
+describe("AgentScreen while scoring is off (jobauto fork)", () => {
+  const scoringOff = {
+    title: "Scoring is off: choose the levels your profile is for.",
+    body: "Until then no posting gets a score: Best fit can't sort, How you fit doesn't run, and the job agent and strong-match alerts wait.",
+    reason: "Choose the levels your profile is for. Nothing is scored until you do.",
+    href: "/profile?section=target&profile=p1",
+    profileId: "p1",
+    canGuess: true,
+  };
+
+  it("says so above everything else, with Choose levels and Guess with AI", () => {
+    render(<AgentScreen view={view} scoringOff={scoringOff} />);
+    expect(screen.getByRole("region", { name: "Scoring is off" })).toHaveTextContent("Scoring is off: choose the levels your profile is for.");
+    expect(screen.getByRole("link", { name: "Choose levels" })).toHaveAttribute("href", "/profile?section=target&profile=p1");
+    expect(screen.getByRole("button", { name: "Guess with AI" })).toBeInTheDocument();
+  });
+
+  it("shows no notice while scoring is on", () => {
+    open();
+    expect(screen.queryByRole("region", { name: "Scoring is off" })).not.toBeInTheDocument();
+  });
+});

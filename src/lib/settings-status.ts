@@ -9,8 +9,8 @@ import type { SearchPortal } from "@/lib/job-search/search";
 
 export type SectionTone = "on" | "look" | "off";
 
-/** What's wrong, for the overview's banner: a clause to join with the others, and its fix's button. */
-type SectionProblem = { summary: string; fix: string };
+/** What's wrong, for the overview's banner: a clause to join with the others, and its fix's button, which goes to `href` when the fix is outside Settings. */
+type SectionProblem = { summary: string; fix: string; href?: string };
 
 export type SectionStatus = {
   tone: SectionTone;
@@ -43,7 +43,13 @@ export type StatusInputs = {
     test: { at: Date; ok: boolean; seconds: number | null; error: string | null } | null;
   };
   documents: { paper: string; language: string; tone: string };
-  scoring: { name: string; problem: string | null; scoredThisMonth: number };
+  scoring: {
+    name: string;
+    problem: string | null;
+    scoredThisMonth: number;
+    /** Scoring is off while a profile has no levels (scoring-off.ts, jobauto fork): why, and where to choose them. */
+    levelsOff?: { reason: string; href: string } | null;
+  };
   jobs: { portals: readonly PortalStatusInput[]; runs: readonly SearchRunInput[] };
   agent: {
     enabled: boolean;
@@ -132,6 +138,8 @@ function jobsStatus({ jobs }: StatusInputs, now: Date): SectionStatus {
 function scoringStatus({ scoring }: StatusInputs): SectionStatus {
   const meta = scoring.scoredThisMonth === 0 ? "Nothing scored this month yet" : `${plural(scoring.scoredThisMonth, "posting")} scored this month`;
   if (scoring.problem) return look(scoring.name, scoring.problem, "Needs a look", { summary: "scoring can't run", fix: "Fix scoring" });
+  // Set up, but nothing is scored until the profile's levels are chosen (jobauto fork): never "On".
+  if (scoring.levelsOff) return look(scoring.name, scoring.levelsOff.reason, "Waiting for levels", { summary: "scoring is off until your profile's levels are chosen", fix: "Choose levels", href: scoring.levelsOff.href });
   return on(`${scoring.name}, with reasons`, meta, scoring.name);
 }
 
@@ -204,7 +212,7 @@ const NUMBERS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "E
  * stopped working on 12 Nov, and Dossier 1.16 is out." and the first
  * fix, or null when nothing needs a look.
  */
-export function problemsBanner(status: SettingsStatus): { title: string; summary: string; fix: { label: string; section: (typeof PROBLEM_ORDER)[number] } } | null {
+export function problemsBanner(status: SettingsStatus): { title: string; summary: string; fix: { label: string; section: (typeof PROBLEM_ORDER)[number]; href?: string } } | null {
   const problems = PROBLEM_ORDER.flatMap((id) => (status[id].problem ? [{ id, problem: status[id].problem! }] : []));
   if (problems.length === 0) return null;
   const count = problems.length === 1 ? "One thing" : `${NUMBERS[problems.length] ?? problems.length} things`;
@@ -213,6 +221,6 @@ export function problemsBanner(status: SettingsStatus): { title: string; summary
   return {
     title: `${count} to look at.`,
     summary: `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.`,
-    fix: { label: problems[0].problem.fix, section: problems[0].id },
+    fix: { label: problems[0].problem.fix, section: problems[0].id, ...(problems[0].problem.href ? { href: problems[0].problem.href } : {}) },
   };
 }

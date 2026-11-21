@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { isAiUsable } from "@/lib/ai/config";
-import { moveBack } from "@/lib/archive";
+import { moveBack, removeArchived } from "@/lib/archive";
 import { countryName } from "@/lib/job-search/countries";
 import {
   DEFAULT_FILTERS,
@@ -24,7 +24,7 @@ import { CLIENT_SOURCE, searchSourcesName, sourceInfo } from "@/lib/job-search/s
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { scoreJobKey, scorePostingJob } from "@/lib/jobs/score-posting";
-import { listLibrary } from "@/lib/library";
+import { listLibrary, markAllSeen, markSeen, splitPosting } from "@/lib/library";
 import { COVERS } from "@/lib/posting-coverage";
 import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
 import { dismissPosting, foundFromPosting, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
@@ -51,10 +51,13 @@ const LISTS = ["open", "new", "saved", "applied", "dismissed", "archive", "searc
 type List = (typeof LISTS)[number];
 /** Listed without a view: as Find jobs' three lists were. */
 const DEFAULT_LISTS: readonly List[] = ["saved", "dismissed", "searches"];
-const CHANGES = ["save", "unsave", "dismiss", "restore", "move_back"] as const;
+const CHANGES = ["save", "unsave", "dismiss", "restore", "move_back", "remove", "not_same_job", "seen"] as const;
+/** The changes made to the posting's row in Dossier, as the Archive's and a posting's buttons make them (jobauto fork). */
+type RowChange = "move_back" | "remove" | "not_same_job" | "seen";
+const isRowChange = (action: (typeof CHANGES)[number]): action is RowChange => ["move_back", "remove", "not_same_job", "seen"].includes(action);
 
 /** What each change does, as the button on a posting does it. */
-const CHANGE: Record<Exclude<(typeof CHANGES)[number], "move_back">, (posting: FoundPosting) => Promise<unknown>> = {
+const CHANGE: Record<Exclude<(typeof CHANGES)[number], RowChange>, (posting: FoundPosting) => Promise<unknown>> = {
   save: savePosting,
   unsave: (posting) => unmarkPosting(posting, "saved"),
   dismiss: dismissPosting,
@@ -74,6 +77,8 @@ function keptLine(posting: ShownPosting) {
     ...line,
     dismissed: posting.state.dismissed || undefined,
     archived: posting.state.archived || undefined,
+    // Not opened or acted on yet: update_postings' seen marks it seen.
+    new: posting.state.new || undefined,
     application_id: posting.state.applicationId ?? undefined,
   };
 }
@@ -314,53 +319,88 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
   server.registerTool(
     "update_postings",
     {
-      title: "Save or dismiss postings",
+      title: "Save, dismiss or tidy postings",
       description:
-        "Saves, unsaves, dismisses or brings back postings as the buttons in Positions do, or moves them back from the Archive, from a search by number or by posting_id, and returns where each one stands. " +
-        "A dismissed posting stays out of later searches, and is trimmed to what Dossier needs to know it again: bringing it back gets its text from the portal when it's read again. Postings stay in Positions either way.",
+        "Does what the buttons in Positions do, from a search by number or by posting_id, and returns where each one stands: saves, unsaves, dismisses or brings back postings; " +
+        "moves them back from the Archive, or removes them from it; shows postings merged as the same job apart again (Not the same job); marks them seen, or with all_seen every new one. " +
+        "A dismissed or removed posting stays out of later searches, and is trimmed to what Dossier needs to know it again: bringing a dismissed one back gets its text from the portal when it's read again.",
       inputSchema: z.object({
         search_id: z.string().min(1).max(100).optional().describe("The search the numbered postings are from"),
         changes: z
           .array(
             z.object({
-              action: z.enum(CHANGES).describe("save, unsave, dismiss, restore to bring a dismissed posting back, or move_back to take one out of the Archive"),
+              action: z
+                .enum(CHANGES)
+                .describe(
+                  "save, unsave, dismiss, restore to bring a dismissed posting back, move_back to take one out of the Archive, remove to remove one from the Archive for good, " +
+                    "not_same_job to show the postings merged into it (its also_on) on their own again, or seen to mark a new one seen",
+                ),
               number: z.number().int().min(1).optional().describe("The posting's number in the search"),
               posting_id: z.string().min(1).max(100).optional().describe("Instead of a number: a posting from list_postings"),
             }),
           )
           .min(1)
-          .max(50),
+          .max(50)
+          .optional(),
+        all_seen: z.boolean().optional().describe("Mark all as seen: every new posting in Positions, or only those search_id found"),
       }),
-      // Dismiss trims a posting's text, which only the portal can give back: no Undo from here.
+      // Dismiss and remove trim a posting's text, which only the portal can give back: no Undo from here.
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
-    async ({ search_id, changes }) => {
+    async ({ search_id, changes = [], all_seen }) => {
+      if (changes.length === 0 && !all_seen) return failure("Give the changes to make, or all_seen.");
       const search = search_id ? await loadSearch(search_id) : null;
       if (search_id && !search) return failure(SEARCH_GONE);
+      // "Mark all as seen", for what the filters show: the new ones, of the search when there is one.
+      const markedSeen = all_seen ? await markAllSeen({ ...DEFAULT_FILTERS, show: "new", found: search_id ?? null }) : undefined;
       // All found first, as each change refers to the posting as it was.
       const postings = await Promise.all(changes.map((change) => postingFor(change, search?.postings ?? [])));
       const missing = changes.flatMap((change, index) => (postings[index] ? [] : [change.posting_id ?? change.number ?? "?"]));
-      if (missing.length === changes.length) return failure("None of those postings could be found. Use numbers from the search, or posting_id values from list_postings.");
+      if (changes.length > 0 && missing.length === changes.length) return failure("None of those postings could be found. Use numbers from the search, or posting_id values from list_postings.");
+      // What a change did beyond where the posting stands, and why one did nothing.
+      const done = new Map<number, Record<string, unknown>>();
+      const notes: string[] = [];
       for (const [index, change] of changes.entries()) {
         const posting = postings[index];
         if (!posting) continue;
-        if (change.action !== "move_back") {
+        if (!isRowChange(change.action)) {
           await CHANGE[change.action](posting);
           continue;
         }
-        // "Move back" (E22-7): out of the Archive, into Positions again.
         const row = await prisma.posting.findUnique({ where: { source_externalId: { source: posting.source, externalId: posting.externalId } }, select: { id: true } });
-        if (row) await moveBack([row.id]);
+        const ids = row ? [row.id] : [];
+        if (change.action === "move_back") {
+          // "Move back" (E22-7): out of the Archive, into Positions again.
+          await moveBack(ids);
+        } else if (change.action === "remove") {
+          // "Remove" (E22-7): out of the Archive for good; only a posting in it.
+          if ((await removeArchived(ids)) > 0) done.set(index, { removed: true });
+          else notes.push(`${posting.title}: only a posting in the Archive can be removed.`);
+        } else if (change.action === "seen") {
+          await markSeen(ids);
+        } else {
+          // "Not the same job" (E22-6): the postings merged into this one show on their own again.
+          const count = row ? await splitPosting(row.id) : 0;
+          if (count > 0) done.set(index, { shown_apart: count });
+          else notes.push(`${posting.title}: it isn't shown as the same job as another.`);
+        }
       }
       const states = await postingStates(postings.filter((posting) => posting !== null));
       const updated = changes.flatMap((change, index) => {
         const posting = postings[index];
         const state = posting && states.get(postingKey(posting));
         if (!posting || !state) return [];
-        return [{ number: change.number, posting_id: state.postingId ?? undefined, title: posting.title, saved: state.saved, dismissed: state.dismissed, archived: state.archived }];
+        return [{ number: change.number, posting_id: state.postingId ?? undefined, title: posting.title, saved: state.saved, dismissed: state.dismissed, archived: state.archived, new: state.new, ...done.get(index) }];
       });
       const show = changes.every((change) => change.action === "dismiss") ? "dismissed" : changes.every((change) => change.action === "save") ? "saved" : "open";
-      return text({ updated, not_found: missing.length > 0 ? missing : undefined, link: linkTo(search_id ? libraryHref({ found: search_id }) : libraryHref({ show })) });
+      const inArchive = changes.length > 0 && changes.every((change) => change.action === "remove");
+      return text({
+        updated,
+        marked_seen: markedSeen,
+        not_found: missing.length > 0 ? missing : undefined,
+        notes: notes.length > 0 ? notes : undefined,
+        link: linkTo(search_id ? libraryHref({ found: search_id }) : libraryHref(inArchive ? { tab: "archive" } : { show })),
+      });
     },
   );
 
@@ -410,7 +450,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       const profiles = chosen ? chosen.id : "all";
       // As in Positions, scoring waits until a profile's levels are chosen (E24-3).
       const waiting = await scoreLevelsProblem(profiles);
-      if (waiting) return failure(`${waiting.message} Ask the user to choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
+      if (waiting) return failure(`${waiting.message} Ask the user which levels it's for and save them with set_profile_levels, or they choose them in Profile → Jobs it's for: ${linkTo(waiting.href)}`);
       const search = search_id && !posting_id ? await loadSearch(search_id) : null;
       if (search_id && !posting_id && !search) return failure(SEARCH_GONE);
       const posting = await postingFor({ number, posting_id }, search?.postings ?? []);

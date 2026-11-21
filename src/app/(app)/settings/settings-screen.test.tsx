@@ -77,4 +77,18 @@ describe("SettingsOverview (E34-2)", () => {
     render(<SettingsOverview status={{ ...status, jobs: on("JSearch"), about: on("1.15.0") }} />);
     expect(screen.queryByRole("region", { name: "Needs a look" })).not.toBeInTheDocument();
   });
+  it("sends Choose levels to the profile while scoring waits for its levels (jobauto fork)", () => {
+    const scoring: SectionStatus = {
+      tone: "look",
+      state: "Your AI model",
+      meta: "Choose the levels your profile is for. Nothing is scored until you do.",
+      note: "Waiting for levels",
+      problem: { summary: "scoring is off until your profile's levels are chosen", fix: "Choose levels", href: "/profile?section=target&profile=p1" },
+    };
+    render(<SettingsOverview status={{ ...status, jobs: on("JSearch"), about: on("1.15.0"), scoring }} />);
+    const banner = screen.getByRole("region", { name: "Needs a look" });
+    expect(banner).toHaveTextContent("One thing to look at. Scoring is off until your profile's levels are chosen.");
+    expect(within(banner).getByRole("link", { name: "Choose levels" })).toHaveAttribute("href", "/profile?section=target&profile=p1");
+    expect(screen.getByRole("link", { name: /^Scoring Needs a look Your AI model Choose the levels your profile is for/ })).toHaveAttribute("href", "/settings?section=scoring");
+  });
 });

@@ -21,15 +21,16 @@ import { putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { DOCUMENT_LABELS } from "@/lib/file-name";
 import { frozenCopySchema, frozenProfile, readFrozenCopy, withSectionFromProfile } from "@/lib/frozen-copy";
 import { followInCalendar, saveInterviewDate } from "@/lib/interview-date";
-import { addNextRound, prepSchema, upcomingRound } from "@/lib/interviews";
+import { addNextRound, prepSchema, saveRoundDetails, upcomingRound } from "@/lib/interviews";
 import { checkRequirementsJob, checkRequirementsJobKey } from "@/lib/jobs/check-requirements";
 import { prepareInterviewJob, prepareJobKey } from "@/lib/jobs/prepare-interview";
 import { cancelJob, findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { writeApplicationJobKey } from "@/lib/jobs/write-application";
 import { writeDocumentJob, writeDocumentJobKey } from "@/lib/jobs/write-document";
-import { messageJobKey, writeMessageJob } from "@/lib/jobs/write-message";
+import { startMessageDraft } from "@/lib/jobs/write-message";
 import { addMissingSkill } from "@/lib/match-skills";
 import { MESSAGE_KINDS, messageDraftSchema } from "@/lib/message-draft";
+import { saveOfferDetails } from "@/lib/offers";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { profileUpdate } from "@/lib/profile-update";
@@ -410,8 +411,7 @@ export const updateInterview = action(
     notes: z.string().trim().max(10_000),
   }),
   async ({ id, interviewId, minutes, place, people, notes }) => {
-    const { count } = await prisma.interview.updateMany({ where: { id: interviewId, applicationId: id }, data: { minutes, place, people, notes } });
-    if (count === 0) throw new ActionError(ROUND_GONE);
+    if (!(await saveRoundDetails(id, interviewId, { minutes, place, people, notes }))) throw new ActionError(ROUND_GONE);
     refresh(id);
     return null;
   },
@@ -440,10 +440,8 @@ export const saveOffer = action(
     holidays: z.string().trim().max(200),
     office: z.string().trim().max(300),
   }),
-  async ({ id, salary, decideBy, startDate, holidays, office }) => {
-    if (!(await prisma.application.count({ where: { id } }))) throw new ActionError(GONE);
-    const data = { salary, holidays, office, decideBy: decideBy ? new Date(`${decideBy}T00:00:00Z`) : null, startDate: startDate ? new Date(`${startDate}T00:00:00Z`) : null };
-    await prisma.offer.upsert({ where: { applicationId: id }, create: { applicationId: id, ...data }, update: data });
+  async ({ id, ...offer }) => {
+    await saveOfferDetails(id, offer);
     refresh(id);
     // Decide by shows on the board and the dashboard too.
     revalidatePath("/applications");
@@ -460,10 +458,7 @@ export const saveOffer = action(
 export const startWritingMessage = action(z.object({ id: z.string().min(1), kind: z.enum(MESSAGE_KINDS) }), async ({ id, kind }) => {
   if (!(await prisma.application.count({ where: { id } }))) throw new ActionError(GONE);
   if (!(await isAiConfigured())) throw new ActionError("That needs an AI provider. Choose one in Settings → AI provider.");
-  const key = messageJobKey(id);
-  const [running] = await findUnfinishedJobs(key);
-  if (running) throw new ActionError("A message is being drafted already. Try again once it's done.");
-  return startJob(writeMessageJob, { applicationId: id, kind }, { key, applicationId: id });
+  return startMessageDraft(id, kind);
 });
 
 /** A drafted message, as edited by hand. */

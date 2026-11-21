@@ -77,7 +77,7 @@ export function PasteStep({
           className="min-h-[260px] resize-y rounded-t-[14px] bg-transparent px-5 py-4 text-[15px] leading-relaxed text-ink placeholder:text-muted focus-visible:-outline-offset-2"
         />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-4 py-3">
-          <label className="flex min-w-[220px] flex-1 items-center gap-2 text-muted">
+          <label className="flex min-w-[min(220px,100%)] flex-1 items-center gap-2 text-muted">
             <Link2 size={15} aria-hidden="true" className="flex-none" />
             <span className="sr-only">Link to the posting</span>
             <input
@@ -95,9 +95,12 @@ export function PasteStep({
             </Button>
           )}
           {profiles.length > 1 && (
-            <span className="flex items-center gap-1.5 rounded-control border border-line-control bg-input px-2.5 py-1 text-[13px] text-muted">
-              <label htmlFor="write-from">Write from</label>
-              <select id="write-from" value={profileId} onChange={(event) => onProfile(event.target.value)} className="bg-transparent font-medium text-ink">
+            // max-w-full and min-w-0: a long profile name shortens in the box on a phone, not past the screen (jobauto fork).
+            <span className="flex max-w-full min-w-0 items-center gap-1.5 rounded-control border border-line-control bg-input px-2.5 py-1 text-[13px] text-muted">
+              <label htmlFor="write-from" className="flex-none">
+                Write from
+              </label>
+              <select id="write-from" value={profileId} onChange={(event) => onProfile(event.target.value)} className="min-w-0 truncate bg-transparent font-medium text-ink">
                 {profiles.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.name}
