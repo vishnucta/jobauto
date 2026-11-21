@@ -117,7 +117,12 @@ function Catalog({ catalog }: { catalog: CatalogView }) {
             Portals reviewed for the catalog: each has an official API or a public feed, or terms that allow it, and reaches only its own hosts.
           </p>
         </div>
-        {catalog.readAt === null ? (
+        {catalog.off ? (
+          <p role="note" className="rounded-card bg-card px-4 py-3 text-meta text-muted">
+            The portal catalog is off on this server, so nothing asks Dossier&apos;s project for it. Add portal takes a config from a file or a link; setting{" "}
+            <code>DOSSIER_PORTAL_CATALOG=on</code> switches the catalog on.
+          </p>
+        ) : catalog.readAt === null ? (
           <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
             The catalog can&apos;t be reached right now. Try again later; Add portal takes a config from a file or a link meanwhile.
           </p>

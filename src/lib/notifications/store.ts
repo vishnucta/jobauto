@@ -68,9 +68,10 @@ export type SecretChange = { action: "keep" } | { action: "set"; value: string }
 
 /**
  * Adds a channel, or changes one; returns its view. A new webhook gets its
- * signing secret here. Each event starts at its default.
+ * signing secret here. Each event starts at its default, or as `events` says
+ * (the supporter's channel, jobauto fork).
  */
-export async function saveChannel(input: { id?: string; type: ChannelType; name: string; config: ChannelConfig; secret: SecretChange }): Promise<ChannelView> {
+export async function saveChannel(input: { id?: string; type: ChannelType; name: string; config: ChannelConfig; secret: SecretChange; events?: Partial<Record<EventName, boolean>> }): Promise<ChannelView> {
   const config = configSchemas[input.type].parse(input.config) as Prisma.InputJsonValue;
   const secretEnc =
     input.secret.action === "set"
@@ -89,6 +90,7 @@ export async function saveChannel(input: { id?: string; type: ChannelType; name:
       name: input.name,
       config,
       sort,
+      ...(input.events ? { events: input.events as Prisma.InputJsonValue } : {}),
       secretEnc: input.type === "WEBHOOK" ? encryptSecret(NOTIFICATION_SECRET, newWebhookSecret()) : (secretEnc ?? null),
     },
   });

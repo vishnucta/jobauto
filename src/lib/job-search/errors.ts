@@ -55,16 +55,10 @@ export function jobSearchError(
     off: `${name} isn't offered on this server. Choose another source in Settings → Job search.`,
     "not-accepted": `Read the note about ${name} and tick “I understand” before Dossier searches it.`,
     "no-key": `Add your ${name} ${keyWords} in Settings → Job search first.`,
-    key:
-      source === "JOOBLE"
-        ? "Jooble didn't accept your key. Check it in Settings → Job search: it must be the key for your country, and its 500 free searches may be used up."
-        : `${name} didn't accept your key. Check it in Settings → Job search.`,
-    quota:
-      source === "JOOBLE"
-        ? "Your Jooble key has no searches left. Ask Jooble for more at jooble.org/api/about, or choose another source in Settings → Job search."
-        : quotaPeriod
-          ? `You've used up your ${name} searches for ${quotaPeriod}. Try again then, or move to a bigger plan.`
-          : `${name} is limiting searches right now. Wait a minute and try again.`,
+    key: `${name} didn't accept your key. Check it in Settings → Job search.`,
+    quota: quotaPeriod
+      ? `You've used up your ${name} searches for ${quotaPeriod}. Try again then, or move to a bigger plan.`
+      : `${name} is limiting searches right now. Wait a minute and try again.`,
     country: `${name} doesn't list jobs in ${countryName(country)}. Choose another country, or another source in Settings → Job search.`,
     unavailable: `${name} isn't answering right now. Try again in a minute.`,
     changed:

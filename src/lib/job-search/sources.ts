@@ -69,7 +69,7 @@ export function portalsLeftOff(portals: readonly PortalView[]): string[] | null 
   return keyed.map((portal) => portal.name);
 }
 
-/** The note's first sentence: "You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble." */
+/** The note's first sentence: "You have keys for 3 portals that are off: JSearch, SerpApi, Adzuna." */
 export function portalsLeftOffNote(names: readonly string[]): string {
   return names.length === 1 ? `You have a key for ${names[0]}, which is off.` : `You have keys for ${names.length} portals that are off: ${names.join(", ")}.`;
 }
@@ -211,6 +211,8 @@ export function sourceInfo(id: string): SourceInfo {
   if (id === CAREERS_SOURCE) {
     return { ...unlisted(id), name: "Careers pages", description: "New jobs on the careers pages of the employers you follow, read from their job systems once a day.", tag: "Employers you follow", countries: null };
   }
+  // Removed from the fork (jobauto fork): what it found stays, under its name.
+  if (id === RETIRED_JOOBLE) return { ...unlisted(id), name: "Jooble", description: "A job portal this copy no longer searches. What it found stays." };
   const updated = UPDATED.get(id);
   if (updated) return updated.info;
   if (Object.hasOwn(SOURCE_INFO, id)) return SOURCE_INFO[id];
@@ -218,6 +220,9 @@ export function sourceInfo(id: string): SourceInfo {
   if (installed) return installed.info;
   return unlisted(id);
 }
+
+/** Jooble, a portal the fork had until it was removed: its postings keep this source. */
+const RETIRED_JOOBLE = "JOOBLE";
 
 const unlisted = (id: string): SourceInfo => ({ name: id, description: "", tag: "", keyUrl: null, quotaPeriod: null, attribution: null, attributionLink: null, countries: [], radius: false, kinds: [] });
 

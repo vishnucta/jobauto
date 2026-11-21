@@ -60,7 +60,7 @@ describe("Jump to's search (E27-6)", () => {
     expect((await searchJump("experience")).find((group) => group.label === "Profiles")!.results[0].href).toBe("/profile?section=experience");
     expect(labels(await searchJump("google"))).toMatchObject({ Settings: ["Google"] });
     expect(labels(await searchJump("inbox"))).toMatchObject({ Screens: ["Inbox"] });
-    // The fork's Recruiters and careers pages (jobauto), which have no sidebar item.
+    // The fork's Recruiters and careers pages (jobauto), sidebar items of their own: each found once.
     expect(labels(await searchJump("recruit"))).toMatchObject({ Screens: ["Recruiters"] });
     expect(labels(await searchJump("careers"))).toMatchObject({ Screens: ["Careers pages"] });
   });

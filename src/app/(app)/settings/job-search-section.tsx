@@ -35,7 +35,7 @@ type Connection =
 type Apply = (result: { ok: true; data: JobSearchSettingsView } | { ok: false; error: string }) => boolean;
 
 /** Portals whose test spends a search from the user's plan. */
-const METERED_TESTS: readonly string[] = ["JSEARCH", "SERPAPI", "JOOBLE"];
+const METERED_TESTS: readonly string[] = ["JSEARCH", "SERPAPI"];
 
 /**
  * Settings → Job search (E14-4, E22-3): the portals Find jobs searches. Any
@@ -279,12 +279,6 @@ function PortalCard({ portal, freehireHost, apply, track }: { portal: PortalView
               {freehireHost === new URL(FREEHIRE_URL).host
                 ? `No key needed. Dossier searches FreeHire's public catalogue at ${freehireHost}.`
                 : `No key needed. Dossier searches your own FreeHire at ${freehireHost}.`}
-            </p>
-          )}
-          {portal.id === "JOOBLE" && (
-            <p className="text-sm text-muted">
-              A Jooble key is for one country: ask for yours on that country&apos;s Jooble site (de.jooble.org for Germany). The free plan has 500 searches in all, and
-              every page of results, every test and every search of the job agent uses one.
             </p>
           )}
           {portal.id === "ARBEITSAGENTUR" && <p className="text-sm text-muted">No key needed. The job agent doesn&apos;t search this portal.</p>}

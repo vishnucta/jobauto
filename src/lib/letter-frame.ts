@@ -20,6 +20,39 @@ export const FRAME_LABELS: Frame = { sender: "Sender", date: "Date", recipient: 
 /** Parts with contact details: never sent to an AI model. */
 export const PRIVATE_FRAME_UNITS: ReadonlySet<string> = new Set<FrameUnitId>(["sender", "signature"]);
 
+/**
+ * Parts drawn from the profile whenever the letter is shown or printed, not
+ * kept from when it was written (jobauto fork): the sender block and the
+ * name under the sign-off. A letter and a resume in one Bewerbungsmappe
+ * can't then give two phone numbers or towns. A sent letter keeps the ones
+ * it was sent with (frozen-copy.ts).
+ */
+export const PROFILE_FRAME_UNITS: ReadonlySet<string> = PRIVATE_FRAME_UNITS;
+
+/** The letter's units with the sender and signature from `frame` (the profile's) in place of any it stored (jobauto fork). */
+export function withSenderFromProfile(units: Unit[], frame: Pick<Frame, "sender" | "signature">): Unit[] {
+  return withFrame(
+    units.filter((unit) => !PROFILE_FRAME_UNITS.has(unit.id)),
+    { sender: frame.sender, signature: frame.signature },
+  );
+}
+
+/** A German letter's sign-off (jobauto fork): DIN 5008 puts no comma after it. */
+export const GERMAN_SIGN_OFF = "Mit freundlichen Grüßen";
+
+/** A sign-off without the comma after it, as a German letter has it. */
+export const withoutClosingComma = (text: string) => text.replace(/\s*,\s*$/, "");
+
+/**
+ * A letter as it's drawn until it's sent (jobauto fork): the sender and
+ * signature from `frame` (the profile's), and in German, the sign-off
+ * without a comma, whatever was stored.
+ */
+export function draftLetterUnits(units: Unit[], frame: Pick<Frame, "sender" | "signature">, { german }: { german: boolean }): Unit[] {
+  const drawn = withSenderFromProfile(units, frame);
+  return german ? drawn.map((unit) => (unit.id === SIGN_OFF_UNIT ? { ...unit, text: withoutClosingComma(unit.text) } : unit)) : drawn;
+}
+
 /** Parts the AI writes, in the letter's language, and can write again. */
 export const WRITTEN_FRAME_UNITS: ReadonlySet<string> = new Set<FrameUnitId>(["recipient", "greeting"]);
 
@@ -70,12 +103,14 @@ export function letterDate(date: Date, format: DateFormat, lang: string | undefi
 }
 
 /**
- * The frame of a new letter: the sender and signature from the profile, and
- * the date written once, in the letter's language. Its recipient and
- * greeting only stand in for ones the AI didn't write (withFrame keeps those).
+ * The frame a new letter stores: the date written once, in the letter's
+ * language. Its recipient and greeting only stand in for ones the AI didn't
+ * write (withFrame keeps those). The sender and signature aren't stored: they
+ * come from the profile each time it's drawn (PROFILE_FRAME_UNITS, jobauto fork).
  */
-export function newFrame(context: FrameContext & { lang: string | undefined }): Frame {
-  return { ...defaultFrame(context), date: letterDate(context.date, context.dateFormat, context.lang) };
+export function newFrame(context: FrameContext & { lang: string | undefined }): Partial<Frame> {
+  const { recipient, greeting } = defaultFrame(context);
+  return { date: letterDate(context.date, context.dateFormat, context.lang), recipient, greeting };
 }
 
 /**

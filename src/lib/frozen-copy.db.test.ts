@@ -99,6 +99,34 @@ describe("the first send (#299)", () => {
     expect(profile.experience[0].role).toBe("Changed");
   });
 
+  it("draws a draft letter's sender from the profile as it is now, and a sent one's from the copy (jobauto fork)", async () => {
+    const id = await draft();
+    const stored = [
+      { id: "sender", label: "Sender", text: "Jane\n+49 1111 · Hamburg" },
+      { id: "paragraph:1", label: "Opening", text: "Ich bewerbe mich." },
+      { id: "signature", label: "Signature", text: "Jane" },
+    ];
+    await prisma().document.updateMany({ where: { applicationId: id, kind: DocumentKind.COVER_LETTER }, data: { units: stored } });
+    await prisma().profileField.createMany({ data: [{ key: "phone", value: "+49 2222" }, { key: "city", value: "Musterstadt" }] });
+    const sender = async () => (await loadDocuments(id)).letter?.units.find((unit) => unit.id === "sender")?.text ?? "";
+
+    expect(await sender()).toContain("+49 2222");
+    expect(await sender()).not.toContain("+49 1111");
+    expect((await loadDocuments(id)).senderFromProfile).toBe(true);
+
+    // Sent, it keeps the profile it was sent with.
+    await applyStatusChange(prisma(), id, "SENT");
+    await prisma().profileField.update({ where: { key: "phone" }, data: { value: "+49 3333" } });
+    expect(await sender()).toContain("+49 2222");
+    expect((await frozenOf(id)).frozen).toMatchObject({ senderFromProfile: true });
+
+    // A copy from before keeps the sender the letter stored: that's what went out.
+    const { frozen } = await frozenOf(id);
+    await prisma().application.update({ where: { id }, data: { frozen: { ...(frozen as object), senderFromProfile: undefined } } });
+    expect(await sender()).toContain("+49 1111");
+    expect((await loadDocuments(id)).senderFromProfile).toBe(false);
+  });
+
   it("doesn't freeze a draft that's declined, which was never sent", async () => {
     const id = await draft();
     await applyStatusChange(prisma(), id, "DECLINED");

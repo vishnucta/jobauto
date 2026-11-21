@@ -18,7 +18,6 @@ import type { Scorer } from "@/lib/scoring/scorers";
 
 import { saveAgentSettings } from "../agent/actions";
 import { RecurringSearches, type SearchProfile } from "./recurring-searches";
-import { SupporterDigest, type SupporterDigestSettings } from "./supporter-digest";
 import { SETTINGS_SECTIONS, settingsSectionHref, type SettingsSectionId } from "./sections";
 import { SettingsSectionIntro } from "./settings-screen";
 import { COVERS, COVERS_LABELS, type Covers } from "@/lib/posting-coverage";
@@ -58,7 +57,6 @@ export function AgentSection({
   searches,
   suggestedQuery,
   profiles = [],
-  supporter,
 }: {
   initial: AgentSettings;
   /** The source in Settings → Job search; null while job search is off. */
@@ -78,8 +76,6 @@ export function AgentSection({
   suggestedQuery?: SearchQuery;
   /** Every profile, with what a search tied to it starts with (E24-6). */
   profiles?: SearchProfile[];
-  /** The weekly digest for her supporter (jobauto fork); missing in older callers. */
-  supporter?: SupporterDigestSettings;
 }) {
   const track = useTrackSave();
   const [settings, setSettings] = useState(initial);
@@ -229,18 +225,18 @@ export function AgentSection({
           description={
             settings.autoDraft
               ? `For the best new postings of each run, up to ${plural(settings.maxDrafts, "draft", "drafts")}: a tailored resume and cover letter, waiting for your review.`
-              : "Off. You choose which postings get a draft with Prepare draft."
+              : "Off. You choose which postings get a draft with Prepare it for me."
           }
           checked={settings.autoDraft}
           onCheckedChange={(autoDraft) => change({ autoDraft })}
         />
       </Card>
 
-      {/* The fork's phone alerts for strong matches, now one of Settings → Notifications' events (jobauto fork). */}
-      <Card padding="none" className="px-7 py-[26px]">
+      {/* What counts as a strong match (jobauto fork): only the threshold. Notifications delivers the Strong new matches event, to the channels that have it on. */}
+      <Card padding="none" className="flex flex-col gap-2 px-7 py-[26px]">
         <Select
-          label="Tell me about new matches that cover"
-          hint="After each run, Run now too, a Strong new matches message goes to the channels in Settings → Notifications that have it switched on."
+          label="A new match is strong when it covers"
+          hint="This only says which new finds count as strong. After each run, Run now too, they go out as Strong new matches."
           value={settings.strongCovers}
           onChange={(event) => change({ strongCovers: event.target.value as Covers })}
         >
@@ -250,9 +246,14 @@ export function AgentSection({
             </option>
           ))}
         </Select>
+        <p className="text-meta text-muted">
+          Where they go, if anywhere, is set in{" "}
+          <Link href={settingsSectionHref("notifications")} className="font-medium text-ink underline underline-offset-2">
+            Settings → Notifications
+          </Link>
+          , as is the weekly digest for a supporter.
+        </p>
       </Card>
-
-      {supporter && <SupporterDigest initial={supporter} />}
 
       <p className="text-meta text-muted">
         One shared daily schedule for all enabled searches, in {timeZone}. Each search asks every portal the agent searches with that covers its country for the first page (never the Bundesagentur für Arbeit), and what it finds lands in Positions. At most {AGENT_MAX_SOURCE_REQUESTS_PER_DAY} requests to each portal in any rolling 24 hours, including failed attempts. A run waits until the whole batch fits. Across all searches, each run scores up to {plural(settings.maxScores, "posting", "postings")}

@@ -6,8 +6,8 @@ import { ApplicationStatus } from "@/generated/prisma/enums";
 import { isAiUsable } from "@/lib/ai/config";
 import { isoInZone } from "@/lib/dates";
 import { followInCalendar, interviewMoment, saveInterviewDate } from "@/lib/interview-date";
-import { addNextRound, prepSchema, saveRoundDetails, upcomingRound } from "@/lib/interviews";
-import { keepMessageDraft, startMessageDraft } from "@/lib/jobs/write-message";
+import { addNextRound, prepSchema, saveRoundDetails, tickPrepItem, upcomingRound } from "@/lib/interviews";
+import { keepMessageDraft, letMessageDraftGo, startMessageDraft } from "@/lib/jobs/write-message";
 import { MESSAGE_KINDS, messageDraftSchema, MESSAGE_TITLES } from "@/lib/message-draft";
 import { saveOfferDetails } from "@/lib/offers";
 import { prisma } from "@/lib/prisma";
@@ -18,8 +18,9 @@ import { WRITTEN_IN_CLAUDE } from "../write";
 
 // After applying (Dossier 1.15, jobauto fork): an application's interview
 // rounds, its offer, and the follow-up or answer to the offer drafted for
-// it, as the Interview and Offer columns on its page keep them. Nothing is
-// sent: a drafted message waits on the page, where the user sends it.
+// it, as the Interview and Offer columns on its page keep them, with the
+// rounds' Getting ready ticks. Nothing is sent: a drafted message waits on
+// the page, where the user sends it, and is let go here only on her word.
 // get_application reads all three (rounds, offer, message draft).
 
 const GONE = "That application no longer exists.";
@@ -44,8 +45,8 @@ export function roundsView(rounds: readonly Round[], timeZone: string) {
         place: round.place || undefined,
         people: round.people.split("\n").filter((line) => line.trim()),
         notes: round.notes || undefined,
-        // "Getting ready", with its ticks.
-        getting_ready: prep.success ? prep.data.map((item) => ({ item: item.text, done: item.done })) : undefined,
+        // "Getting ready", with its ticks, numbered as tick_getting_ready takes them.
+        getting_ready: prep.success ? prep.data.map((item, index) => ({ number: index + 1, item: item.text, done: item.done })) : undefined,
       };
     });
 }
@@ -191,6 +192,58 @@ export function registerInterviewTools({ server, linkTo }: ToolContext): void {
         id,
         offer: offerView(after),
         next: application.status !== ApplicationStatus.OFFER ? "It shows on the application's page once it's in Offer: move it there with set_application_status." : undefined,
+        link: page(id),
+      });
+    },
+  );
+
+  server.registerTool(
+    "tick_getting_ready",
+    {
+      title: "Tick a Getting ready item",
+      description:
+        "Ticks or unticks an item of an interview round's Getting ready list, as its checkbox on the application's page does, once the user says it's done (or not). " +
+        "get_application lists the rounds with their getting_ready items, first item number 1.",
+      inputSchema: z.object({
+        id: applicationId,
+        round_id: z.string().min(1).max(100).describe("The round, from get_application"),
+        item: z.number().int().min(1).max(100).describe("The item's number in the round's getting_ready list, from 1"),
+        done: z.boolean().default(true).describe("false unticks it"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ id, round_id, item, done }) => {
+      if (!(await prisma.application.count({ where: { id } }))) return failure(GONE);
+      if (!(await tickPrepItem(id, round_id, item - 1, done))) return failure("There's no such item. get_application lists each round's getting_ready items, numbered from 1.");
+      const [rounds, timeZone] = await Promise.all([prisma.interview.findMany({ where: { applicationId: id }, select: ROUND_FIELDS, orderBy: { round: "asc" } }), lastKnownTimeZone()]);
+      const round = roundsView(rounds, timeZone).find((entry) => entry.round_id === round_id);
+      return text({ id, round: round?.round, getting_ready: round?.getting_ready, link: page(id) });
+    },
+  );
+
+  server.registerTool(
+    "settle_message_draft",
+    {
+      title: "Let a drafted message go",
+      description:
+        "Lets the follow-up or answer to an offer drafted on the application's page go, as its buttons do: sent true is I sent it, for one the user sent from their own mail, " +
+        "which starts Quiet for again from today; sent false is Discard, which deletes the draft for good. Nothing is sent either way. Use it only after the user said which.",
+      inputSchema: z.object({
+        id: applicationId,
+        sent: z.boolean().describe("true: the user sent it themselves; false: discard it"),
+      }),
+      // Discard deletes the draft's text, which can't be undone.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ id, sent }) => {
+      const application = await prisma.application.findUnique({ where: { id }, select: { messageDraft: true } });
+      if (!application) return failure(GONE);
+      const draft = messageDraftView(application.messageDraft);
+      if (!draft) return failure("There's no drafted message on this application. draft_follow_up drafts one.");
+      await letMessageDraftGo(id, { sent });
+      return text({
+        id,
+        done: sent ? `Noted that the user sent “${draft.subject}”. Quiet for starts again from today.` : `Discarded “${draft.subject}”.`,
         link: page(id),
       });
     },

@@ -19,6 +19,7 @@ import { profileForPrompt } from "./prompt-parts";
 import { recipientFromJob } from "./write-cover-letter";
 import { recipient } from "./write-email";
 import {
+  answerQuestion,
   prepareInterview,
   extractPosting,
   refineChat,
@@ -548,7 +549,7 @@ describe("writeCoverLetter", () => {
   it("returns the recipient, greeting, paragraphs and the tone's sign-off for an English letter (APP-10, E8-11)", async () => {
     const provider = model(answer);
     const { data, promptVersion } = await writeCoverLetter(provider, { profile, extracted, match, tone: "FORMAL", facts: [], posting }, options);
-    expect(promptVersion).toBe("write-cover-letter@8");
+    expect(promptVersion).toBe("write-cover-letter@9");
     expect(data).toEqual([
       { id: "recipient", label: "Recipient", text: "Ledgerly · Hiring team\nAmsterdam" },
       { id: "greeting", label: "Greeting", text: "Dear Ledgerly team," },
@@ -602,6 +603,27 @@ describe("writeCoverLetter", () => {
   it("keeps the model's sign-off in another language", async () => {
     const { data } = await writeCoverLetter(model({ ...answer, signOff: "Met vriendelijke groet," }), { profile, extracted, match: null, tone: "WARM", facts: [], posting }, { ...options, language: "Dutch" });
     expect(data.at(-1)).toEqual({ id: "sign-off", label: "Sign-off", text: "Met vriendelijke groet," });
+  });
+
+  it("writes a German letter's recipient, greeting and sign-off in code, to the contact the posting names (jobauto fork)", async () => {
+    const german = { ...answer, recipient: "Ledgerly · Hiring team\nAmsterdam", greeting: "Sehr geehrtes Ledgerly-Team,", signOff: "Mit freundlichen Grüßen,", contactName: "Herr Dr. Max Mustermann" };
+    const named = `${posting}\n\nIhr Ansprechpartner: Herr Dr. Max Mustermann`;
+    const provider = model(german);
+    const { data, promptVersion } = await writeCoverLetter(provider, { profile, extracted, match: null, tone: "WARM", facts: [], posting: named }, { ...options, language: "German" });
+    expect(promptVersion).toBe("write-cover-letter@9");
+    expect(prompt(provider)).toContain("contactName: the person the posting names");
+    expect(prompt(provider)).toContain("Never state a salary expectation, a start date, a notice period or a work permit unless it's given to you below");
+    expect(data.find((unit) => unit.id === "recipient")?.text).toBe("Ledgerly\nz. Hd. Herrn Dr. Max Mustermann\nAmsterdam");
+    expect(data.find((unit) => unit.id === "greeting")?.text).toBe("Sehr geehrter Herr Dr. Mustermann,");
+    expect(data.at(-1)).toEqual({ id: "sign-off", label: "Sign-off", text: "Mit freundlichen Grüßen" });
+
+    // A name the posting doesn't give isn't written; without one, the department and the usual greeting.
+    const { data: unnamed } = await writeCoverLetter(model(german), { profile, extracted, match: null, tone: "WARM", facts: [], posting }, { ...options, language: "German" });
+    expect(unnamed.find((unit) => unit.id === "recipient")?.text).toBe("Ledgerly\nPersonalabteilung\nAmsterdam");
+    expect(unnamed.find((unit) => unit.id === "greeting")?.text).toBe("Sehr geehrte Damen und Herren,");
+    // An English letter keeps the model's recipient and greeting.
+    const { data: english } = await writeCoverLetter(model(german), { profile, extracted, match: null, tone: "WARM", facts: [], posting: named }, options);
+    expect(english.find((unit) => unit.id === "recipient")?.text).toBe("Ledgerly · Hiring team\nAmsterdam");
   });
 
   it("normalises what the model wrote in every part, keeping a non-breaking space", async () => {
@@ -780,6 +802,12 @@ describe("regenerateUnit", () => {
     const { data } = await regenerateUnit(provider, { kind: "COVER_LETTER", unit, document: [unit], profile, extracted, tone: "DIRECT", facts: [], posting }, options);
     expect(data.text).toBe("Best,");
     expect(sent(provider).system).toContain(COVER_LETTER_APPROACH);
+  });
+
+  it("keeps a German letter's sign-off Mit freundlichen Grüßen, without a comma (jobauto fork)", async () => {
+    const unit = { id: "sign-off", label: "Sign-off", text: "Mit freundlichen Grüßen," };
+    const { data } = await regenerateUnit(model({ text: "Beste Grüße," }), { kind: "COVER_LETTER", unit, document: [unit], profile, extracted, tone: "DIRECT", facts: [], posting }, { ...options, language: "German" });
+    expect(data.text).toBe("Mit freundlichen Grüßen");
   });
 
   it("tells the model what the email's message is, with the tone", async () => {
@@ -1015,5 +1043,23 @@ describe("every writing task's schema (E30)", () => {
     const schemas = [...new Map(mock.calls.flatMap((call) => (call.json ? [[call.json.name, call.json] as const] : []))).values()];
     expect(schemas.map((json) => json.name)).toEqual(["tailored_resume", "cover_letter", "refinement", "interview_checklist", "message", "classified_reply"]);
     for (const json of schemas) expect(() => zodResponseFormat(json.schema as never, json.name)).not.toThrow();
+  });
+});
+
+describe("answerQuestion (Ask)", () => {
+  it("gives the model the shared German reading to answer from (jobauto fork)", async () => {
+    const provider = new MockProvider({ reply: () => "The ad asks for very good German." });
+    const german = "The ad asks for more German (C1) than your A2: “Sehr gute Deutschkenntnisse”";
+    const { data, promptVersion } = await answerQuestion(provider, { question: "Is my German enough?", history: [], profile, extracted, facts: [], posting, german }, options);
+    expect(data).toBe("The ad asks for very good German.");
+    expect(promptVersion).toBe("answer-question@2");
+    expect(JSON.stringify(sent(provider).messages[0])).toContain("Sehr gute Deutschkenntnisse");
+    expect(JSON.stringify(sent(provider).messages[0])).toContain("Don't name another level");
+  });
+
+  it("says nothing about German when the posting doesn't", async () => {
+    const provider = new MockProvider({ reply: () => "Design systems." });
+    await answerQuestion(provider, { question: "What matters most?", history: [], profile, extracted, facts: [], posting }, options);
+    expect(JSON.stringify(sent(provider).messages[0])).not.toContain("How much German");
   });
 });

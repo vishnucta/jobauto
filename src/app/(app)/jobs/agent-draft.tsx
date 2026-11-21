@@ -12,9 +12,9 @@ import type { PostingState } from "@/lib/job-search/search";
 import { prepareAgentDraft } from "../agent/actions";
 
 /**
- * A posting the job agent scored (E22-8): Prepare draft, which writes its
- * draft in the background for review on the Agent screen, or a link to the
- * draft once there is one.
+ * A posting the job agent scored (E22-8): Prepare it for me, which writes
+ * its draft in the background for review on the Agent screen with the one
+ * writer Positions uses, or a link to the draft once there is one.
  */
 export function AgentDraft({ agent }: { agent: NonNullable<PostingState["agent"]> }) {
   const router = useRouter();
@@ -46,6 +46,7 @@ export function AgentDraft({ agent }: { agent: NonNullable<PostingState["agent"]
     startTransition(async () => {
       const result = toastResult(await prepareAgentDraft({ candidateId: agent.candidateId }));
       if (!result.ok) return;
+      // One made already (one application per posting) is answered with.
       if (result.data.applicationId) router.refresh();
       else setJobId(result.data.jobId);
     });
@@ -53,7 +54,7 @@ export function AgentDraft({ agent }: { agent: NonNullable<PostingState["agent"]
   return (
     <>
       <Button variant="secondary" size="sm" aria-disabled={preparing || undefined} onClick={() => !preparing && prepare()}>
-        {preparing ? "Preparing draft…" : "Prepare draft"}
+        {preparing ? "Preparing…" : "Prepare it for me"}
       </Button>
       {jobId && job?.step && (
         <span role="status" className="text-meta text-muted">

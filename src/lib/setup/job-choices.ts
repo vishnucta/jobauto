@@ -59,14 +59,6 @@ export const PORTAL_GUIDES: Readonly<Record<string, PortalGuide>> = {
       { text: "Copy your private API key from your account and paste it below." },
     ],
   },
-  JOOBLE: {
-    about: "Jooble's own job index. It shares the start of each posting, and Dossier reads the rest from the posting's page.",
-    cost: "A free key, for one country: ask for Germany's on de.jooble.org.",
-    steps: [
-      { text: "Ask for an API key on Jooble's page for partners, for the country you're looking in.", link: { href: "https://jooble.org/api/about", label: "Jooble's API page" } },
-      { text: "Jooble mails the key. Paste it below." },
-    ],
-  },
 };
 
 /** How to set up a portal: a built-in's own guide, or what an added portal says about itself (E23-3). */

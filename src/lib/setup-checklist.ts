@@ -13,8 +13,6 @@ export type SetupFacts = {
   agenciesWritten: number;
   /** The standard answers a German recruiter's doubts need, saved. */
   readinessAnswered: boolean;
-  /** The application whose Apply tab holds the standard answers, if any. */
-  answersApplicationId: string | null;
   networkImported: boolean;
   /** A notification channel, not paused, gets strong new matches (Settings → Notifications). */
   phoneAlerts: boolean;
@@ -26,8 +24,8 @@ export type SetupStep = {
   title: string;
   why: string;
   done: boolean;
-  /** Where it's done; the weekly target is set right on the card. */
-  href: string | null;
+  /** Where it's done: a page, or the dashboard's This week card for the weekly target. */
+  href: string;
   action: string;
 };
 
@@ -45,10 +43,11 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
     {
       id: "target",
       title: "Set a weekly target",
-      why: "Five a week is a steady pace; the dashboard and your supporter's digest count towards it.",
+      why: "Five a week is a steady pace. Choose yours under This week; the dashboard and your supporter's digest count towards it.",
       done: facts.weeklyTarget > 0,
-      href: null,
-      action: "Aim for 5 a week",
+      // Its one control is the This week card's (jobauto fork); done once a target is set there.
+      href: "#weekly-target",
+      action: "Choose a target",
     },
     {
       id: "agencies",
@@ -63,7 +62,8 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
       title: "Answer what German recruiters wonder about",
       why: "Your work permit, German course and degree recognition go into every letter, so the doubts are settled before they're raised.",
       done: facts.readinessAnswered,
-      href: facts.answersApplicationId ? `/applications/${facts.answersApplicationId}?tab=apply` : null,
+      // Their one place, Settings (jobauto fork).
+      href: "/settings?section=answers",
       action: "Open the standard answers",
     },
     {
@@ -93,12 +93,12 @@ export function setupSteps(facts: SetupFacts): SetupStep[] {
     {
       id: "alerts",
       title: "Get strong matches on your phone",
-      why: "Apply the same day a good job appears, while few others have. Add your phone as an ntfy channel.",
+      why: "Apply the same day a good job appears, while few others have. Notifications sends them: add your phone as an ntfy channel there, with Strong new matches on.",
       done: facts.phoneAlerts,
+      // Notifications delivers every alert (jobauto fork); the job agent only says what counts as strong.
       href: "/settings?section=notifications",
-      action: "Set it up",
+      action: "Open Notifications",
     },
   ];
-  // The standard answers live on an application's Apply tab: with none yet, that step waits.
-  return steps.filter((step) => step.id !== "answers" || step.done || step.href);
+  return steps;
 }

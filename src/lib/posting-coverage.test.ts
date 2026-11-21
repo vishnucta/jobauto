@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { byBestFit, coverageOf, coversFromScore, passes, type Coverage } from "./posting-coverage";
+import { byBestFit, coverageOf, coversFromScore, factorReason, passes, type Coverage } from "./posting-coverage";
 
 const requirement = (covered: boolean, mustHave = false) => ({ text: "x", mustHave, covered, evidence: null });
 const fit = (...requirements: ReturnType<typeof requirement>[]) => ({ breakdown: { factors: [], cap: null, requirements } });
@@ -36,5 +36,14 @@ describe("posting coverage (E32-2)", () => {
 
   it("moves a saved 0–100 minimum over", () => {
     expect([40, 50, 65, 70, 85, 90, 100].map(coversFromScore)).toEqual(["any", "half", "half", "two-thirds", "two-thirds", "all", "all"]);
+  });
+});
+
+describe("factorReason (jobauto fork)", () => {
+  it("counts a factor line for or against by its points, without them", () => {
+    expect(factorReason("Work experience 18/20: Payments tools.")).toEqual({ text: "Work experience: Payments tools.", good: true });
+    expect(factorReason("Seniority 5/10: Close enough.")).toEqual({ text: "Seniority: Close enough.", good: true });
+    expect(factorReason("Seniority 2/10: The job is a director's.")).toEqual({ text: "Seniority: The job is a director's.", good: false });
+    expect(factorReason("Requirements: Not counted: the posting lists no requirements.")).toEqual({ text: "Requirements: Not counted: the posting lists no requirements.", good: true });
   });
 });

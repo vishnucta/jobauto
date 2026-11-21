@@ -5,7 +5,6 @@ import { z } from "zod";
 
 import { CustomSectionCountsAs, CustomSectionFormat, LanguageLevel } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
-import { rewriteSectionOnDrafts } from "@/lib/custom-section-drafts";
 import { prisma } from "@/lib/prisma";
 import { findOrCreateSkill } from "@/lib/profile-entries";
 import { applyProfileImportJob, discardProfileImports } from "@/lib/jobs/import-profile";
@@ -15,6 +14,7 @@ import {
   deletePhoto,
   newCertification,
   newCustomItem,
+  newCustomSection,
   newEducation,
   newExperience,
   newProject,
@@ -33,6 +33,7 @@ import {
   restorePublicationEntry,
   restoreReferenceEntry,
   saveBasicsFields,
+  saveCustomSectionFields,
   sortSectionByDate,
   storePhoto,
 } from "@/lib/profile-edits";
@@ -489,7 +490,7 @@ const customSectionFields = {
 
 /** "Add a section" (#298, #338), on the Profile page. */
 export const createCustomSection = action(z.object({ profileId, ...customSectionFields }), async ({ profileId, ...data }) => {
-  const { id } = await prisma.customSection.create({ data: { ...data, profileId: await ownProfile(profileId) }, select: { id: true } });
+  const id = await newCustomSection(await ownProfile(profileId), data);
   revalidateSections();
   return id;
 });
@@ -540,14 +541,7 @@ const SECTION_GONE = "That section no longer exists. Reload the page to see your
 export const saveCustomSection = action(
   z.object({ id, title: text(100), format: z.enum(CustomSectionFormat), countsAs: z.enum(CustomSectionCountsAs).optional() }),
   async ({ id: sectionId, title, format, countsAs }) => {
-    const before = await prisma.customSection.findUnique({ where: { id: sectionId }, select: { format: true } });
-    if (!before) return null;
-    const section = await prisma.customSection.update({
-      where: { id: sectionId },
-      data: { format, ...(countsAs ? { countsAs } : {}), ...(title.trim() ? { title: title.trim() } : {}) },
-      include: { items: { orderBy: [{ sort: "asc" }, { createdAt: "asc" }] } },
-    });
-    if (before.format !== format) await rewriteSectionOnDrafts(section);
+    if (!(await saveCustomSectionFields(sectionId, { title, format, countsAs }))) return null;
     revalidatePath("/resume");
     return null;
   },

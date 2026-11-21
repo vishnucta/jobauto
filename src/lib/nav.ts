@@ -1,4 +1,4 @@
-import { Bot, BriefcaseBusiness, FileText, Gauge, House, Inbox, Mic, Rocket, Search, Settings, UserRound, type LucideIcon } from "lucide-react";
+import { Bot, BriefcaseBusiness, Building2, FileText, Gauge, House, Inbox, Rocket, Search, Settings, UserRound, Users, type LucideIcon } from "lucide-react";
 
 // The app's sections, shared by the sidebar and the page bar so they always agree.
 
@@ -31,20 +31,16 @@ export const NAV: { label?: string; items: NavItem[]; profiles?: true }[] = [
         isActive: (pathname) => within(pathname, "/applications") || within(pathname, "/new"),
       },
       { href: "/inbox", label: "Inbox", icon: Inbox },
-      // Interview practice (jobauto fork): the call prep pack before there's a call.
-      { href: "/practice", label: "Interview practice", icon: Mic },
+      // Interview practice is Call prep's general practice now (jobauto fork), reached from the dashboard and an application, not the sidebar.
     ],
   },
   {
     label: "Find work",
     items: [
-      // Recruiters and careers pages (jobauto fork) sit with Positions, so their screens belong here.
-      {
-        href: "/jobs",
-        label: "Positions",
-        icon: Search,
-        isActive: (pathname) => within(pathname, "/jobs") || within(pathname, "/recruiters") || within(pathname, "/careers"),
-      },
+      { href: "/jobs", label: "Positions", icon: Search },
+      // Recruiters and careers pages (jobauto fork): screens of their own beside Positions.
+      { href: "/recruiters", label: "Recruiters", icon: Users },
+      { href: "/careers", label: "Careers pages", icon: Building2 },
       { href: "/startups", label: "Startups", icon: Rocket },
       { href: "/agent", label: "Agent", icon: Bot },
     ],

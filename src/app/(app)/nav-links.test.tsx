@@ -32,8 +32,9 @@ describe("NavLinks", () => {
       "Dashboard",
       "Applications",
       "Inbox",
-      "Interview practice",
       "Positions",
+      "Recruiters",
+      "Careers pages",
       "Startups",
       "Agent",
       "Profile",
@@ -51,9 +52,9 @@ describe("NavLinks", () => {
     expect(currentItem("/resume")).toEqual(["Base resume"]);
     expect(currentItem("/jobs")).toEqual(["Positions"]);
     expect(currentItem("/startups")).toEqual(["Startups"]);
-    // Recruiters and careers pages sit with Positions (jobauto fork).
-    expect(currentItem("/recruiters")).toEqual(["Positions"]);
-    expect(currentItem("/careers")).toEqual(["Positions"]);
+    // Recruiters and careers pages have items of their own under Find work (jobauto fork).
+    expect(currentItem("/recruiters")).toEqual(["Recruiters"]);
+    expect(currentItem("/careers")).toEqual(["Careers pages"]);
     expect(currentItem("/usage")).toEqual(["Usage"]);
     expect(currentItem("/settings")).toEqual(["Settings"]);
   });

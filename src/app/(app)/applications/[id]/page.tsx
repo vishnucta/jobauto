@@ -39,7 +39,6 @@ import { workSampleJobKey, workSampleOf } from "@/lib/work-sample";
 import { listAttachments } from "@/lib/attachments";
 import { letterAvailability } from "@/lib/letter-availability";
 import { recruiterDoubts } from "@/lib/recruiter-eye";
-import { armLabel, inRun } from "@/lib/experiments";
 import { peopleAt } from "@/lib/network-data";
 
 import { ApplicationView } from "./application-view";
@@ -66,7 +65,7 @@ export async function generateMetadata({ params }: PageProps<"/applications/[id]
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
   const [{ id }, { tab, start }] = await Promise.all([params, searchParams]);
   await pullCalendar(id);
-  const [{ application, profile, liveProfile, sent, settings, baseThemeId, extracted, resume, letter, email, includeReferences, sections, ownSections, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, languageJobs, timeZone, google, emails, themes, resumeJobs, letterJobs, checkJobs, prepareJobs, messageJobs, profiles, writingJobs] =
+  const [{ application, profile, liveProfile, sent, senderFromProfile, settings, baseThemeId, extracted, resume, letter, email, includeReferences, sections, ownSections, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, languageJobs, timeZone, google, emails, themes, resumeJobs, letterJobs, checkJobs, prepareJobs, messageJobs, profiles, writingJobs] =
     await Promise.all([
       loadDocuments(id),
       isAiConfigured(),
@@ -143,7 +142,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
   const rewritingLanguage = languageJob && languageInput?.success ? { jobId: languageJob.id, language: languageInput.data.language } : null;
   // The PDFs to attach to the email, named as they'll download (SET-8).
   const fileName = (doc: "RESUME" | "COVER_LETTER") =>
-    resolveFileName(settings.fileNamePattern, { name: profile.basics.name, company: application.company, role: application.role, doc, date: new Date() });
+    resolveFileName(settings.fileNamePattern, { name: profile.basics.name, company: application.company, role: application.role, doc, date: new Date(), language: application.language });
 
   return (
     <ApplicationView
@@ -242,6 +241,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       sections={sections}
       ownSections={ownSections}
       sent={sent}
+      senderFromProfile={senderFromProfile}
       canUpdate={
         resume !== null &&
         profileUpdate({
@@ -262,11 +262,6 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       anlagen={anlagen}
       letterAsks={letterAvailability(application.postingText, settings.applyAnswers).missing}
       known={(await peopleAt([application.company]))[application.company] ?? []}
-      version={
-        (application.arm === "A" || application.arm === "B") && settings.experiment && inRun(settings.experiment, application)
-          ? { experiment: settings.experiment.name, label: armLabel(settings.experiment, application.arm) }
-          : null
-      }
       doubts={recruiterDoubts({
         profile,
         answers: settings.applyAnswers,

@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { checkRuns, waitSeconds } from "@/lib/announcements/check";
+import { waitSeconds } from "@/lib/announcements/check";
 import { env } from "@/lib/env";
 import { logServerError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
@@ -103,13 +103,17 @@ const globalForCatalog = globalThis as unknown as { catalogReading?: Promise<str
 
 type ReadOptions = { now?: Date; fetchImpl?: typeof fetch; base?: string; force?: boolean; db?: Db };
 
+/** Whether this server reads the catalog at all: off in this fork (jobauto) unless DOSSIER_PORTAL_CATALOG is on. */
+export const catalogOn = (): boolean => env.DOSSIER_PORTAL_CATALOG === "on";
+
 /**
  * Reads the catalog when it's due, or now for Browse portals (`force`, at
  * most once a minute), and keeps it. When to ask next is saved before asking,
- * so a backend that fails isn't asked on every page.
+ * so a backend that fails isn't asked on every page. Never while the catalog
+ * is off (catalogOn), not even for Browse portals.
  */
 export async function readCatalog({ now = new Date(), fetchImpl = fetch, base = env.DOSSIER_API_URL ?? API_URL, force = false, db = prisma }: ReadOptions = {}): Promise<"read" | "same" | "skipped" | "failed"> {
-  if (!checkRuns() && !force) return "skipped";
+  if (!catalogOn()) return "skipped";
   // Pages loading together share one read.
   if (globalForCatalog.catalogReading) return (await globalForCatalog.catalogReading) as "read";
   const reading = (async () => {
@@ -197,7 +201,15 @@ export type CatalogPortalView = {
   installedVersion: string | null;
 };
 
-export type CatalogView = { portals: CatalogPortalView[]; readAt: string | null };
+/** `off`: this server doesn't read the catalog (catalogOn), so Browse portals says so instead of "can't be reached". */
+export type CatalogView = { portals: CatalogPortalView[]; readAt: string | null; off: boolean };
+
+/**
+ * The catalog's company job boards (jobauto fork): Careers pages reads
+ * Greenhouse, Lever and Ashby boards itself, for the employers she follows,
+ * so Browse portals and the setup guide leave these entries out.
+ */
+export const readByCareersPages = (portal: { id: string; name: string }): boolean => [portal.id, portal.name].some((text) => /^(greenhouse|lever|ashby)(?![a-z])/i.test(text));
 
 /** The catalog for Browse portals, each entry with where it stands on this install. */
 export async function catalogView(installed: ReadonlyMap<string, string>, builtIns: ReadonlySet<string>, db: Db = prisma): Promise<CatalogView> {
@@ -205,8 +217,9 @@ export async function catalogView(installed: ReadonlyMap<string, string>, builtI
   const gone = new Set(withdrawn.map((entry) => entry.id));
   return {
     readAt: readAt?.toISOString() ?? null,
+    off: !catalogOn(),
     portals: portals
-      .filter((portal) => !gone.has(portal.id))
+      .filter((portal) => !gone.has(portal.id) && !readByCareersPages(portal))
       .map(({ config, ...entry }) => ({
         ...entry,
         countries: entry.countries ? [...entry.countries] : null,

@@ -2,13 +2,13 @@ import { execFileSync } from "node:child_process";
 import { crc32, deflateSync } from "node:zlib";
 
 import { expect, type Locator, type Page } from "@playwright/test";
-import { Pool } from "pg";
+import { defaults, Pool, types } from "pg";
 
 // What the end-to-end tests (E11-2) run against: a production build on its
 // own port, with its own database and a fake AI server, so a run never
 // touches development data.
 
-export const APP_PORT = 3100;
+export const APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
 export const FAKE_AI_PORT = 3999;
 export const FAKE_JOBS_PORT = 3998;
 export const FAKE_GOOGLE_PORT = 3997;
@@ -57,15 +57,24 @@ export function appEnv(): Record<string, string> {
     DOSSIER_TYPESAFE_TEST_BASE_URL: `http://localhost:${FAKE_JOBS_PORT}/typesafe`,
     // A production server, so it would ask the project's backend for its notices (E18).
     DOSSIER_API_URL: `http://localhost:${FAKE_JOBS_PORT}/v1`,
+    // The portal catalog is off in this fork unless switched on; the specs read the fake's.
+    DOSSIER_PORTAL_CATALOG: "on",
     PORT: String(APP_PORT),
   };
 }
 
 let pool: Pool | undefined;
 
+// Prisma keeps a DateTime as UTC in a "timestamp" column, without a zone.
+// pg would read and write those in this machine's zone, and the database's
+// now() would be its own zone's time, so a spec run outside UTC (a laptop in
+// Berlin) would be hours off; UTC throughout, as in CI.
+types.setTypeParser(types.builtins.TIMESTAMP, (value) => new Date(`${value.replace(" ", "T")}Z`));
+defaults.parseInputDatesAsUTC = true;
+
 /** Runs SQL against the test database, for setting up and checking data. */
 export async function sql<Row extends object = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<Row[]> {
-  pool ??= new Pool({ connectionString: e2eDatabaseUrl(), max: 2 });
+  pool ??= new Pool({ connectionString: e2eDatabaseUrl(), max: 2, options: "-c TimeZone=UTC" });
   return (await pool.query<Row>(text, values)).rows;
 }
 
@@ -98,6 +107,8 @@ export async function resetData(): Promise<void> {
   execFileSync("yarn", ["prisma", "db", "seed", "--", "--demo"], {
     env: { ...process.env, DATABASE_URL: e2eDatabaseUrl() },
     stdio: "pipe",
+    // Windows runs yarn as yarn.cmd, which needs a shell.
+    shell: process.platform === "win32",
   });
 }
 

@@ -2,45 +2,39 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { buttonClassName } from "@/components/ui/button";
-import { StatusDot } from "@/components/ui/status-dot";
-import type { ApplicationStatus } from "@/generated/prisma/enums";
-import { statusHref } from "@/lib/applications-list";
 import { DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
+import { doToday, doTodaySummary } from "@/lib/do-today";
 import type { DayPeriod } from "@/lib/greeting";
 import type { SetupStep } from "@/lib/setup-checklist";
 import type { TodayItem } from "@/lib/today";
-import type { Insights } from "@/lib/insights";
-import type { ArmResult, Experiment } from "@/lib/experiments";
+import { SHOW_WORKING_FROM, type Insights } from "@/lib/insights";
 import type { ScoringOffNotice } from "@/lib/scoring-off";
-import { STATUSES } from "@/lib/status";
 import type { WeeklyProgress } from "@/lib/weekly-target";
 
 import { ActivityChart } from "./activity-chart";
 import { DailyNote, type DailyNoteValue } from "./daily-note";
+import { DoToday } from "./do-today";
 import { FunnelChart } from "./funnel-chart";
 import { Greeting } from "./greeting";
-import { NeedsYou } from "./needs-you";
 import { PeriodControl, PeriodProvider, PeriodScoped } from "./period-filter";
 import { WeeklyTarget } from "./weekly-target";
 import { WhatsWorking } from "./whats-working";
-import { ExperimentCard } from "./experiment-card";
 import { SetupCard } from "./setup-card";
-import { TodayCard } from "./today-card";
 import { ScoringOffNotice as ScoringOff } from "./scoring-off-notice";
 
 const card = "flex flex-col rounded-panel border border-line-card bg-card";
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /**
  * The dashboard (DSH-1 to DSH-6, laid out as the UI refresh's 2a, E28-1): a
  * header with today's date, the greeting and what needs the user this week;
- * then two zones. On the left, "Your search so far", which the period
- * scopes: the funnel, week by week, and where things stand. On the right,
- * this week, which it doesn't: Needs you, the weekly target (jobauto fork)
- * and the calendar. Below about 1500px they stack, the left zone first.
- * What's working (jobauto fork) runs across both, below them. Today's three
- * and Start here (jobauto fork) run across both above them, and the
- * experiment (jobauto fork) comes last.
+ * then Do today (jobauto fork: Needs you and Today's three in one list) and
+ * Start here across the page; then two zones. On the left, "Your search so
+ * far", which the period scopes: the funnel and week by week (Where things
+ * stand, which repeated the sidebar's counts, is gone in the fork). On the
+ * right, this week, which it doesn't: the weekly target (jobauto fork) and
+ * the calendar, when there's one to show. Below about 1500px they stack, the
+ * left zone first. What's working (jobauto fork) runs across both, below
+ * them, once there are enough sent to say something.
  */
 export function Dashboard({
   figures,
@@ -54,7 +48,6 @@ export function Dashboard({
   note,
   week,
   working,
-  experiment,
   todaysThree,
   setup,
   scoringOff = null,
@@ -70,17 +63,15 @@ export function Dashboard({
   quietDays?: number;
   /** No applications at all yet. */
   empty: boolean;
-  /** The calendar (E15-6), which the time filter doesn't scope. */
+  /** The calendar (E15-6), which the time filter doesn't scope; left out when there's nothing for it to show (jobauto fork). */
   calendar?: ReactNode;
   /** Today's note (E28-6): its text, null until it's written, "hidden" for today, or undefined for none. */
   note?: DailyNoteValue | "hidden";
   /** This week against the weekly target (jobauto fork); the time filter doesn't scope it either. */
   week?: WeeklyProgress;
-  /** What's working (jobauto fork), from every sent application; left out until one is sent. */
+  /** What's working (jobauto fork), from every sent application; left out until about 10 are sent. */
   working?: Insights;
-  /** The experiment running, with its results so far; null when none runs, missing in older callers. */
-  experiment?: { experiment: Experiment; results: ArmResult[] } | null;
-  /** Today's three (today.ts); missing in older callers. */
+  /** Today's three (today.ts), folded into Do today; missing in older callers. */
   todaysThree?: TodayItem[];
   /** Start here (setup-checklist.ts); missing in older callers. */
   setup?: SetupStep[];
@@ -88,7 +79,8 @@ export function Dashboard({
   scoringOff?: ScoringOffNotice | null;
 }) {
   const { sent, heardBack } = figures.overall;
-  const thisWeek = figures.needsYou.filter((item) => item.soon).length;
+  // Needs you and Today's three, each thing once (do-today.ts, jobauto fork).
+  const rows = doToday(empty ? [] : figures.needsYou, todaysThree ?? []);
   return (
     <>
       <header className="-mx-px bg-paper pt-2">
@@ -104,9 +96,7 @@ export function Dashboard({
           </h1>
           <p className="pt-1 text-lead text-pretty text-muted">
             {sent > 0 ? `${sent} sent, ${heardBack} heard back. ` : "Nothing sent yet. "}
-            <strong className="font-medium text-ink">
-              {thisWeek > 0 ? `${plural(thisWeek, "thing needs", "things need")} you this week.` : empty ? "Your first application is only a paste away." : "Nothing needs you this week."}
-            </strong>
+            <strong className="font-medium text-ink">{doTodaySummary(rows, { empty })}</strong>
           </p>
         </div>
       </header>
@@ -115,8 +105,8 @@ export function Dashboard({
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 @min-[1500px]:grid-cols-[minmax(0,1fr)_580px]">
           {/* Scoring is off (jobauto fork): first, across both zones, until the levels are chosen. */}
           {scoringOff && <ScoringOff off={scoringOff} className="col-span-full" />}
-          {/* What gets applications out today, and the ways in not used yet (jobauto fork): first, across both zones. Before the first application, only when something waits. */}
-          {todaysThree && (todaysThree.length > 0 || !empty) && <TodayCard items={todaysThree} />}
+          {/* What to do today, and the ways in not used yet (jobauto fork): first, across both zones. Before the first application, only when something waits. */}
+          {(rows.length > 0 || !empty) && <DoToday rows={rows} quietDays={quietDays} />}
           {setup && <SetupCard steps={setup} />}
           {empty ? (
             <Welcome />
@@ -131,29 +121,26 @@ export function Dashboard({
                 </div>
                 <PeriodScoped className="flex flex-col gap-5">
                   <Funnel figures={figures} />
-                  <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @min-[900px]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-                    <ActivityChart weeks={figures.weeks} />
-                    <WhereThingsStand byStatus={figures.byStatus} />
-                  </div>
+                  <ActivityChart weeks={figures.weeks} />
                 </PeriodScoped>
               </section>
             </PeriodProvider>
           )}
-          <section aria-labelledby="week-heading" className="@container/week flex min-w-0 flex-col gap-3">
-            <h2 id="week-heading" className="flex min-h-[30px] items-center text-meta text-muted">
-              This week · not affected by the period
-            </h2>
-            {/* One above the other in the 580px column; side by side when the zones stack and there's room. */}
-            <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @min-[900px]/week:grid-cols-2">
-              {!empty && <NeedsYou items={figures.needsYou} quietDays={quietDays} />}
-              {!empty && week && <WeeklyTarget progress={week} />}
-              {calendar}
-            </div>
-          </section>
-          {/* Every sent application counts here, whatever the period, so it sits below both zones, across them. */}
-          {!empty && working && working.sent > 0 && <WhatsWorking insights={working} />}
-          {/* The experiment running (jobauto fork) counts every application since it started, whatever the period. */}
-          {!empty && experiment !== undefined && <ExperimentCard running={experiment} />}
+          {(week || calendar) && (
+            <section aria-labelledby="week-heading" className="@container/week flex min-w-0 flex-col gap-3">
+              <h2 id="week-heading" className="flex min-h-[30px] items-center text-meta text-muted">
+                This week · not affected by the period
+              </h2>
+              {/* One above the other in the 580px column; side by side when the zones stack and there's room. */}
+              <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @min-[900px]/week:grid-cols-2">
+                {/* The one place the weekly target is set; Start here's step links to it (jobauto fork). */}
+                {week && <WeeklyTarget progress={week} />}
+                {calendar}
+              </div>
+            </section>
+          )}
+          {/* Every sent application counts here, whatever the period, so it sits below both zones, across them; with fewer than about 10 sent it can't say anything yet (jobauto fork). */}
+          {!empty && working && working.sent >= SHOW_WORKING_FROM && <WhatsWorking insights={working} />}
         </div>
       </div>
     </>
@@ -191,43 +178,6 @@ function Figure({ value, label }: { value: string; label: string }) {
       <dt className="text-label text-muted">{label}</dt>
       <dd className="font-serif text-[32px] leading-none tabular-nums">{value}</dd>
     </div>
-  );
-}
-
-/** "Where things stand" (DSH-4): every application by its status now, each row opening that status's list (E28-3). */
-function WhereThingsStand({ byStatus }: { byStatus: Record<ApplicationStatus, number> }) {
-  const present = STATUSES.filter(({ value }) => byStatus[value] > 0);
-  return (
-    <section aria-labelledby="standing-heading" className={`${card} gap-[18px] px-7 py-[26px]`}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="standing-heading" className="text-[15px] font-medium">
-          Where things stand
-        </h2>
-        <Link href="/applications?view=board" className="text-meta text-muted underline underline-offset-3 hover:text-ink">
-          Open board
-        </Link>
-      </div>
-      {/* The legend below says the same in words. */}
-      <div aria-hidden="true" className="flex h-3 gap-0.5 overflow-hidden rounded-[6px] bg-hover">
-        {present.map(({ value, color }) => (
-          <span key={value} style={{ flex: byStatus[value], backgroundColor: color }} />
-        ))}
-      </div>
-      <ul className="grid grid-cols-2 gap-x-5 gap-y-1">
-        {STATUSES.map(({ value, label }) => (
-          <li key={value}>
-            <Link
-              href={statusHref(value)}
-              className={`-mx-2 flex items-center gap-[9px] rounded-control px-2 py-1.5 text-sm no-underline hover:bg-hover hover:text-ink ${byStatus[value] > 0 ? "text-ink" : "text-muted"}`}
-            >
-              <StatusDot status={value} />
-              <span className="flex-1">{label}</span>
-              <span className="tabular-nums">{byStatus[value]}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

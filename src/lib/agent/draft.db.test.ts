@@ -5,14 +5,14 @@ import type { JobContext } from "@/lib/jobs/runner";
 import { loadApplicationRows } from "@/lib/applications-data";
 import { DEFAULT_SORT } from "@/lib/applications-list";
 import { loadDashboard } from "@/lib/dashboard-data";
-import { postingStates } from "@/lib/postings";
+import { postingStates, storePosting } from "@/lib/postings";
 import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
 import { MockProvider } from "../ai/providers/mock";
 
 import { candidateData } from "./candidates";
-import { approveCandidate, dismissCandidate, draftCandidate, restoreCandidate } from "./draft";
+import { agentDraftJob, approveCandidate, dismissCandidate, draftCandidate, restoreCandidate, startCandidateDraft } from "./draft";
 import { resetInterruptedDrafts } from "./schedule";
 import { attributeAgentCandidates } from "./attribution";
 
@@ -223,6 +223,40 @@ describe("preparing a draft (E16-5)", () => {
     await expect(draftCandidate(id, context())).rejects.toThrow("That posting is no longer waiting for a draft.");
     await resetInterruptedDrafts();
     expect(await draftCandidate(id, context())).toBeTruthy();
+  });
+
+  it("makes no second application for a posting that has one: the candidate takes it (one writer, audit round 2)", async () => {
+    const { id } = await candidate();
+    const { emit } = await import("@/lib/notifications/notify");
+    const kept = await storePosting(posting);
+    const made = await prisma().application.create({ data: { title: "Prepared on Positions", company: "Ledgerly", postingUrl: posting.url, profileId: TEST_PROFILE_ID } });
+    await prisma().posting.update({ where: { id: kept.id }, data: { applicationId: made.id } });
+    // Prepare it for me on the Agent screen answers with it, writing nothing.
+    expect(await startCandidateDraft(id)).toEqual({ jobId: null, applicationId: made.id, started: false });
+    expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "APPROVED", applicationId: made.id });
+    expect(await prisma().application.count()).toBe(1);
+
+    // Auto-draft takes it the same way, and sends no "A draft is ready".
+    // The same job from another portal, which Positions merged into the one it keeps.
+    const elsewhere: FoundPosting = { ...posting, source: "ADZUNA", externalId: "ledgerly-2", title: "Product Designer (Payments)", url: "https://adzuna.example/ledgerly-2" };
+    const merged = await storePosting(elsewhere);
+    await prisma().posting.update({ where: { id: merged.id }, data: { mergedIntoId: kept.id } });
+    const other = await candidate(elsewhere);
+    vi.mocked(emit).mockClear();
+    const ran = await agentDraftJob.run({ candidateId: other.id, auto: true }, context());
+    expect(ran).toEqual({ applicationId: made.id });
+    expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({ status: "APPROVED", applicationId: null });
+    expect(emit).not.toHaveBeenCalled();
+    expect(await prisma().application.count()).toBe(1);
+  });
+
+  it("waits for Prepare it for me on Positions rather than writing beside it", async () => {
+    const { id } = await candidate();
+    const kept = await storePosting(posting);
+    const preparing = await prisma().job.create({ data: { type: "prepare-application", key: `prepare:${kept.id}`, status: "RUNNING", input: { postingId: kept.id } } });
+    expect(await startCandidateDraft(id)).toEqual({ jobId: preparing.id, applicationId: null, started: false });
+    await expect(draftCandidate(id, context())).rejects.toThrow(/Prepare it for me is writing/);
+    expect(await prisma().application.count()).toBe(0);
   });
 });
 

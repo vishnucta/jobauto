@@ -8,7 +8,7 @@ import { seedBuiltIns } from "../../../prisma/seed/built-ins";
 import { MockProvider } from "../ai/providers/mock";
 
 import { prepareApplicationJob, startPreparing } from "./prepare-application";
-import type { JobContext } from "./runner";
+import { startJob, type JobContext } from "./runner";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -81,6 +81,8 @@ const found: FoundPosting = {
   complete: true,
 };
 const context = (id = "prepare-job"): JobContext => ({ id, step: async () => {}, signal: new AbortController().signal });
+/** The job's input as Positions starts it: the posting alone. */
+const postingOnly = (postingId: string) => prepareApplicationJob.input.parse({ postingId });
 
 beforeEach(async () => {
   await resetDatabase(prisma());
@@ -92,7 +94,7 @@ describe("Prepare it for me (jobauto fork)", () => {
   it("writes a Draft from a kept posting, linked to it, without review", async () => {
     const posting = await storePosting(found);
     await prisma().job.create({ data: { id: "prepare-job", type: "prepare-application", key: `prepare:${posting.id}`, status: "RUNNING", input: { postingId: posting.id } } });
-    const result = await prepareApplicationJob.run({ postingId: posting.id }, context());
+    const result = await prepareApplicationJob.run(postingOnly(posting.id), context());
     expect(result.route).toBe("web");
     const application = await prisma().application.findUniqueOrThrow({ where: { id: result.applicationId }, include: { documents: true } });
     expect(application).toMatchObject({ status: "DRAFT", awaitingReview: false, company: "Ledgerly", postingUrl: found.url });
@@ -123,13 +125,26 @@ describe("Prepare it for me (jobauto fork)", () => {
     await score(TEST_PROFILE_ID, 1);
     await score(reporting.id, 3);
     const posting = await storePosting(found);
-    const result = await prepareApplicationJob.run({ postingId: posting.id }, context());
+    const result = await prepareApplicationJob.run(postingOnly(posting.id), context());
     expect(await prisma().application.findUniqueOrThrow({ where: { id: result.applicationId } })).toMatchObject({ profileId: reporting.id });
+  });
+
+  it("writes it from the profile and with the note Claude's draft_application gives (round 2 of the audit)", async () => {
+    const reporting = await prisma().profile.create({ data: { name: "Reporting", sort: 1 } });
+    const posting = await storePosting(found);
+    const result = await prepareApplicationJob.run({ postingId: posting.id, profileId: reporting.id, note: "Stress COREP" }, context());
+    const application = await prisma().application.findUniqueOrThrow({ where: { id: result.applicationId }, include: { facts: true } });
+    expect(application.profileId).toBe(reporting.id);
+    expect(application.facts.map((fact) => fact.text)).toEqual(["Stress COREP"]);
+    // Started from draft_application, it goes under the same key, so Positions follows it.
+    const other = await storePosting({ ...found, externalId: "ledgerly-2", url: "https://ledgerly.example/careers/2" });
+    expect(await startPreparing(other.id, { profileId: reporting.id, note: "Stress COREP" })).toEqual({ jobId: "new-run", applicationId: null });
+    expect(vi.mocked(startJob)).toHaveBeenLastCalledWith(prepareApplicationJob, { postingId: other.id, profileId: reporting.id, note: "Stress COREP" }, { key: `prepare:${other.id}` });
   });
 
   it("writes the email too when the employer takes applications by email, to the posting's address", async () => {
     const posting = await storePosting({ ...found, url: "", description: `${found.description} Bitte senden Sie Ihre Bewerbung an bewerbung@ledgerly.example.` });
-    const result = await prepareApplicationJob.run({ postingId: posting.id }, context());
+    const result = await prepareApplicationJob.run(postingOnly(posting.id), context());
     expect(result.route).toBe("email");
     const email = await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: result.applicationId, kind: "EMAIL" } } });
     expect(email.units).toMatchObject([{ id: "to", text: "bewerbung@ledgerly.example" }, { id: "subject" }, { id: "body" }]);
@@ -138,17 +153,17 @@ describe("Prepare it for me (jobauto fork)", () => {
   it("makes one application for a posting, however often it runs", async () => {
     const posting = await storePosting(found);
     const [first, second] = await Promise.all([
-      prepareApplicationJob.run({ postingId: posting.id }, context("one")),
-      prepareApplicationJob.run({ postingId: posting.id }, context("two")),
+      prepareApplicationJob.run(postingOnly(posting.id), context("one")),
+      prepareApplicationJob.run(postingOnly(posting.id), context("two")),
     ]);
     expect(second.applicationId).toBe(first.applicationId);
-    expect((await prepareApplicationJob.run({ postingId: posting.id }, context())).applicationId).toBe(first.applicationId);
+    expect((await prepareApplicationJob.run(postingOnly(posting.id), context())).applicationId).toBe(first.applicationId);
     expect(await prisma().application.count()).toBe(1);
   });
 
   it("refuses a posting with no text to write from", async () => {
     const posting = await storePosting({ ...found, description: "" });
-    await expect(prepareApplicationJob.run({ postingId: posting.id }, context())).rejects.toThrow(/no text to write from/);
+    await expect(prepareApplicationJob.run(postingOnly(posting.id), context())).rejects.toThrow(/no text to write from/);
     expect(await prisma().application.count()).toBe(0);
   });
 
@@ -157,8 +172,45 @@ describe("Prepare it for me (jobauto fork)", () => {
     expect(await startPreparing(posting.id)).toEqual({ jobId: "new-run", applicationId: null });
     const queued = await prisma().job.create({ data: { type: "prepare-application", key: `prepare:${posting.id}`, status: "QUEUED", input: { postingId: posting.id } } });
     expect(await startPreparing(posting.id)).toEqual({ jobId: queued.id, applicationId: null });
-    const { applicationId } = await prepareApplicationJob.run({ postingId: posting.id }, context());
+    const { applicationId } = await prepareApplicationJob.run(postingOnly(posting.id), context());
     expect(await startPreparing(posting.id)).toEqual({ jobId: null, applicationId });
     await expect(startPreparing("gone")).rejects.toThrow(/no longer kept/);
+  });
+
+  it("makes no second application for a posting the job agent drafted or is drafting (one writer, audit round 2)", async () => {
+    const posting = await storePosting(found);
+    const draft = await prisma().application.create({ data: { title: "Agent draft", company: "Ledgerly", awaitingReview: true, profileId: TEST_PROFILE_ID } });
+    const candidate = await prisma().agentCandidate.create({
+      data: { source: found.source, externalId: found.externalId, dedupeKey: "ledgerly|analyst", title: found.title, company: found.company, url: found.url, status: "DRAFTED", applicationId: draft.id, score: 80 },
+    });
+    // The agent's draft is the posting's application; it stays the agent's to approve.
+    expect(await startPreparing(posting.id)).toEqual({ jobId: null, applicationId: draft.id });
+    expect((await prepareApplicationJob.run(postingOnly(posting.id), context())).applicationId).toBe(draft.id);
+    expect(await prisma().application.count()).toBe(1);
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ awaitingReview: true });
+
+    // While the agent writes it, Prepare it for me follows its job.
+    await prisma().agentCandidate.update({ where: { id: candidate.id }, data: { status: "DRAFTING", applicationId: null } });
+    await prisma().application.delete({ where: { id: draft.id } });
+    const drafting = await prisma().job.create({ data: { type: "agent-draft", key: `agent-candidate:${candidate.id}`, status: "RUNNING", input: { candidateId: candidate.id } } });
+    expect(await startPreparing(posting.id)).toEqual({ jobId: drafting.id, applicationId: null });
+    await expect(prepareApplicationJob.run(postingOnly(posting.id), context())).rejects.toThrow(/job agent is writing/);
+    expect(await prisma().application.count()).toBe(0);
+  });
+
+  it("answers with an application made from the same link, and keeps it with the posting", async () => {
+    const posting = await storePosting(found);
+    const made = await prisma().application.create({ data: { title: "By hand", company: "Ledgerly", postingUrl: `${found.url}?utm_source=mail`, profileId: TEST_PROFILE_ID } });
+    expect(await startPreparing(posting.id)).toEqual({ jobId: null, applicationId: made.id });
+    expect(await prisma().posting.findUniqueOrThrow({ where: { id: posting.id } })).toMatchObject({ applicationId: made.id });
+  });
+
+  it("takes the posting out of the job agent's queue once it has its application", async () => {
+    const posting = await storePosting(found);
+    const candidate = await prisma().agentCandidate.create({
+      data: { source: found.source, externalId: found.externalId, dedupeKey: "ledgerly|analyst", title: found.title, company: found.company, url: found.url, status: "SCORED", score: 80 },
+    });
+    const { applicationId } = await prepareApplicationJob.run(postingOnly(posting.id), context());
+    expect(await prisma().agentCandidate.findUniqueOrThrow({ where: { id: candidate.id } })).toMatchObject({ status: "APPROVED", applicationId });
   });
 });

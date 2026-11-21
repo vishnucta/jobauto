@@ -23,7 +23,7 @@ import {
   startReplyDraft,
   takeSuggestedStatus,
 } from "@/lib/google/replies";
-import { EMAIL_CHANGED, previewApplicationEmail, replySubject, sendApplicationEmail, sendReply } from "@/lib/google/send";
+import { EMAIL_CHANGED, previewApplicationEmail, previewReply, REPLY_CHANGED, sendApplicationEmail, sendReply } from "@/lib/google/send";
 import { googleSettingsSchema, saveGoogleSettingChanges } from "@/lib/google/settings";
 import { formatSlot } from "@/lib/google/slots";
 import { checkInboxNow } from "@/lib/google/sync";
@@ -38,7 +38,8 @@ import { failure, started, text, type ToolContext } from "../kit";
 // The inbox (E15, jobauto fork): employers' replies from Gmail, their answers,
 // interview times from Google Calendar, sending the application with Gmail,
 // and the settings for all of it. Only the two send tools send anything, and
-// only once the user has said to. The user's own address stays out of answers.
+// only once the user has said to: each first shows what would go out, with a
+// confirm_token that sends exactly that, once. The user's own address stays out of answers.
 
 const NOT_CONNECTED = "Google isn't connected to Dossier. Connect it in the app under Settings → Google.";
 const NO_SENDING = "Dossier isn't allowed to send with Gmail yet. Allow it in the app under Settings → Google.";
@@ -319,15 +320,41 @@ export function registerInboxTools({ server, linkTo }: ToolContext): void {
     {
       title: "Send an answer",
       description:
-        "Sends an answer to an employer's email from the user's Gmail, in the same thread, and marks the email as answered. It can't be unsent: call it only after the user said to send this exact text.",
-      inputSchema: z.object({ email_id: id, text: z.string().min(1).max(20_000).describe("The answer, exactly as the user agreed to send it") }),
+        "Sends an answer to an employer's email from the user's Gmail, in the same thread, and marks the email as answered. It can't be unsent. " +
+        "Without confirm it only shows what would go out, with a confirm_token: show the user who it's to, the subject and the answer. " +
+        "Call again with the same text, confirm true and that confirm_token only after they said to send it.",
+      inputSchema: z.object({
+        email_id: id,
+        text: z.string().min(1).max(20_000).describe("The answer, exactly as the user agreed to send it"),
+        confirm: z.boolean().optional().describe("true sends it; left out, nothing is sent and you get what would go out"),
+        confirm_token: z.string().max(100).optional().describe("With confirm: the confirm_token of what the user agreed to send"),
+      }),
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    ({ email_id, text: answer }) =>
+    ({ email_id, text: answer, confirm, confirm_token }) =>
       withGoogle(async (connection) => {
         if (!connection.canSend) return failure(NO_SENDING);
+        if (confirm && !confirm_token) {
+          return failure("First show the user what would go out: call send_email_reply without confirm. Then call it with confirm true and its confirm_token once they said to send it.");
+        }
         const email = await incoming(email_id);
         if ("error" in email) return failure(email.error);
+        // As send_application_email does: what would go out first, with a token that matches only this answer, once (round 2 of the audit).
+        const preview = await previewReply(email.id, answer);
+        if (!confirm) {
+          return text({
+            email_id: email.id,
+            sent: false,
+            from: "The user's Gmail account",
+            to: who(email),
+            subject: preview.subject,
+            message: preview.body,
+            confirm_token: preview.token,
+            next: "Show the user all of this. Call again with the same text, confirm true and this confirm_token only after they said to send it.",
+            link: linkFor(email),
+          });
+        }
+        if (confirm_token !== preview.token) return failure(REPLY_CHANGED);
         // A call repeated after a lost answer, or made twice at once, must not send the answer twice.
         if (replying.has(email.id)) return failure("That answer is being sent right now. Check read_email in a moment instead of sending it again.");
         const repeat = await prisma.emailMessage.findFirst({
@@ -337,11 +364,12 @@ export function registerInboxTools({ server, linkTo }: ToolContext): void {
         if (repeat) return failure("That exact answer went out a few minutes ago, so it isn't sent again. Check read_email.");
         replying.add(email.id);
         try {
-          await sendReply(email.id, answer);
+          // Checked again as it goes out, in case it changed in the meantime.
+          await sendReply(email.id, answer, { expected: confirm_token });
         } finally {
           replying.delete(email.id);
         }
-        return text({ email_id: email.id, sent: true, to: who(email), subject: replySubject(email.subject), link: linkFor(email) });
+        return text({ email_id: email.id, sent: true, to: who(email), subject: preview.subject, link: linkFor(email) });
       }),
   );
 

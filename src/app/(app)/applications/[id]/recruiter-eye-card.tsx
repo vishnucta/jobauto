@@ -29,9 +29,11 @@ export function RecruiterEyeCard({ doubts, onOpenAnswers }: { doubts: readonly D
             </span>
             <div className="flex min-w-0 flex-col gap-0.5">
               <p className="text-sm">
-                <span className="sr-only">{doubt.answered ? "Answered: " : "Open: "}</span>
+                <span className="sr-only">{doubt.answered ? "Answered: " : doubt.stated ? "Stated, but below what they ask: " : "Open: "}</span>
                 {doubt.question}
               </p>
+              {/* Her German is in the letter, but short of what the job needs (germanDecision, jobauto fork). */}
+              {doubt.stated && <p className="text-meta font-medium text-warning">Stated, but below what they ask</p>}
               {!doubt.answered && <p className="text-meta text-pretty text-muted">{doubt.fix}</p>}
             </div>
           </li>

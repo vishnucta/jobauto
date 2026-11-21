@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { Prisma } from "@/generated/prisma/client";
 import { AgentCandidateStatus, ApplicationOrigin, ApplicationStatus, type Tone } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { summaryText, tailoringSummary } from "@/lib/ai/tailoring-summary";
@@ -11,7 +10,6 @@ import { documentLanguage } from "@/lib/document-language";
 import { postingWriteLanguage, profileGerman } from "@/lib/german-need";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 import { newFrame, withFrame } from "@/lib/letter-frame";
-import { nextArm, runWhere, type Arm, type Experiment } from "@/lib/experiments";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { loadProfileSettings, profileIdOr } from "@/lib/profiles";
@@ -76,16 +74,6 @@ export type CreateApplicationInput = {
 
 const CLAIMED = "application:";
 
-/** While an experiment runs, a new application gets the version with fewer so far (experiments.ts, jobauto fork). */
-async function experimentVersion(tx: Prisma.TransactionClient, experiment: Experiment | null): Promise<{ experiment?: string; arm?: Arm }> {
-  if (!experiment) return {};
-  const arm = nextArm({
-    A: await tx.application.count({ where: { ...runWhere(experiment), arm: "A" } }),
-    B: await tx.application.count({ where: { ...runWhere(experiment), arm: "B" } }),
-  });
-  return { experiment: experiment.name, arm };
-}
-
 /** Creates the application once; creating again with the same claim returns the one that exists. */
 export async function createApplicationFromDocuments({ reading, documents, match, details, postingUrl, tone, note, language: chosen, claim, profileId: asked }: CreateApplicationInput): Promise<string> {
   const profileId = await profileIdOr(asked);
@@ -146,12 +134,9 @@ export async function createApplicationFromDocuments({ reading, documents, match
       if (linked?.applicationId) return { id: linked.applicationId, isNew: false };
     }
 
-    const version = await experimentVersion(tx, settings.experiment);
-
     const application = await tx.application.create({
       data: {
         profileId,
-        ...version,
         // An agent draft stays on the Agent screen until it's approved (#195).
         ...(claim.kind === "agent" ? { origin: ApplicationOrigin.AGENT, agentScore: claim.score, awaitingReview: true } : {}),
         title: details.title || [details.role, details.company].filter(Boolean).join(" · ") || "Untitled application",
@@ -276,11 +261,9 @@ export async function createDraftApplication(input: DraftApplicationInput): Prom
       if (claimed.key?.startsWith(CLAIMED) && claimed.key !== `${CLAIMED}pending`) return { id: claimed.key.slice(CLAIMED.length), isNew: false };
       throw new ActionError("This application is already being created.");
     }
-    const version = await experimentVersion(tx, settings.experiment);
     const application = await tx.application.create({
       data: {
         profileId,
-        ...version,
         title: details.title || [details.role, details.company].filter(Boolean).join(" · ") || "Untitled application",
         company: details.company,
         role: details.role,

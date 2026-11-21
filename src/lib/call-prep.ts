@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { ApplyAnswers } from "@/lib/apply/answers";
+
 // The phone-screen prep pack (Phase 3, jobauto fork): for one application,
 // the questions a German first call asks, with her answers in short German
 // she can say and the English beside them, a salary line, the sentence for
@@ -77,4 +79,99 @@ export function spokenMatch(written: string, spoken: string): number {
     }
   }
   return Math.round((found / expected.length) * 100);
+}
+
+/**
+ * Her standard answers as call prep uses them (jobauto fork): saved once
+ * (applyAnswers) and said the same way in every call. A work
+ * permit she never confirmed is no answer; "" is one she hasn't saved.
+ */
+export type CallAnswers = { startDate: string; noticePeriod: string; salary: string; workPermit: boolean | null; germanCourse: string };
+
+export function callAnswers(answers: Pick<ApplyAnswers, "startDate" | "noticePeriod" | "salary" | "workPermit" | "confirmed" | "germanCourse">): CallAnswers {
+  return {
+    startDate: answers.startDate.trim(),
+    noticePeriod: answers.noticePeriod.trim(),
+    salary: answers.salary.trim(),
+    workPermit: answers.confirmed === false ? null : answers.workPermit,
+    germanCourse: answers.germanCourse.trim(),
+  };
+}
+
+/** The standard answers call prep needs, by name. */
+export const ANSWER_NAMES = { startDate: "earliest start date", noticePeriod: "notice period", salary: "salary expectation", workPermit: "work permit" } as const;
+type AnswerId = keyof typeof ANSWER_NAMES;
+
+/** What a model's "decide before the call" item asks about, to drop the ones her answers settle. */
+const ASKS_ABOUT: Record<AnswerId, RegExp> = {
+  startDate: /\bstart|anfangen|beginn|eintritt|availab|verf[uü]gbar/i,
+  noticePeriod: /\bnotice|k[uü]ndigung/i,
+  salary: /salary|gehalt|pay\b|compensation/i,
+  workPermit: /permit|visa|sponsor|arbeitserlaubnis|aufenthalt/i,
+};
+
+/**
+ * The answers for the prompt, as lines ("Earliest start date: sofort"), and
+ * the ones she hasn't saved, which the pack leaves as "[…]" for her to fill in.
+ */
+export function answerLines(answers: CallAnswers): { known: string[]; missing: AnswerId[] } {
+  const known = [
+    answers.startDate && `Earliest start date: ${answers.startDate}${/^\d{4}-\d{2}-\d{2}$/.test(answers.startDate) ? " (a date: say it as the language says dates)" : ""}`,
+    answers.noticePeriod && `Notice period: ${answers.noticePeriod}`,
+    answers.salary && `Salary expectation: ${answers.salary}`,
+    answers.workPermit !== null && (answers.workPermit ? "Work permit: may work in Germany without a visa or sponsorship" : "Work permit: needs a visa or sponsorship to work in Germany"),
+    answers.germanCourse && `German course: ${answers.germanCourse}`,
+  ].filter((line): line is string => Boolean(line));
+  const missing = (Object.keys(ANSWER_NAMES) as AnswerId[]).filter((id) => (id === "workPermit" ? answers.workPermit === null : !answers[id]));
+  return { known, missing };
+}
+
+/**
+ * What to settle before the call: one line per standard answer she hasn't
+ * saved, pointing to where it's saved, then the model's own, less those her
+ * saved answers already settle.
+ */
+export function prepGaps(answers: CallAnswers, written: readonly string[]): string[] {
+  const { missing } = answerLines(answers);
+  const settled = (Object.keys(ANSWER_NAMES) as AnswerId[]).filter((id) => !missing.includes(id));
+  const own = missing.map((id) => `Your ${ANSWER_NAMES[id]} isn't in your standard answers. Fill it in under Settings → Standard answers, then prepare again.`);
+  return [...own, ...written.filter((gap) => !settled.some((id) => ASKS_ABOUT[id].test(gap)) && !missing.some((id) => ASKS_ABOUT[id].test(gap)))];
+}
+
+/** The salary line, written from her saved answer so it's never made up; null leaves it to the AI, with "[…]". */
+export function salaryLine(answers: CallAnswers): Pair | null {
+  return answers.salary ? { de: `Meine Gehaltsvorstellung liegt bei ${answers.salary}.`, en: `My salary expectation is ${answers.salary}.` } : null;
+}
+
+/**
+ * The whole sentences the fact guard's flags are in, to check against the
+ * profile: "Europe, 1, three" alone means nothing to her. A flag no sentence
+ * holds stays as it is.
+ */
+export function flaggedSentences(text: string, flags: readonly string[]): string[] {
+  const sentences = sentencesOf(text);
+  const found: string[] = [];
+  for (const flag of flags) {
+    const sentence = sentences.find((entry) => entry.includes(flag));
+    const shown = sentence ?? flag;
+    if (!found.includes(shown)) found.push(shown);
+  }
+  return found;
+}
+
+const sentencesOf = (text: string) =>
+  text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+const STUDY_LENGTH = /\b(?:learn(?:ing|ed|t)?|stud(?:y|ying|ied)|taking)\b[^.!?\n]{0,30}\bGerman\b[^.!?\n]{0,10}\b(?:for|since)\b|\bGerman (?:for|since) (?:a|one|two|\d+|last)\b/i;
+
+/**
+ * The sentences that say how long she's been learning German when her saved
+ * German course doesn't (the audit's "for a year"): an answer she'd read out
+ * word for word in an A2 call, made up.
+ */
+export function unsavedStudyLength(text: string, answers: Pick<CallAnswers, "germanCourse">): string[] {
+  return answers.germanCourse ? [] : sentencesOf(text).filter((sentence) => STUDY_LENGTH.test(sentence));
 }

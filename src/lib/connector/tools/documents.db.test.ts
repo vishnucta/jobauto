@@ -97,7 +97,7 @@ const summaryText = async () => (await units()).find((unit) => unit.id === "summ
 /** The revision get_document shows for a part, which a change names. */
 const revision = async (document: "resume" | "cover_letter" | "email", partId: string) =>
   (await tool("get_document", { application_id: id, document })).json.parts.find((part) => part.id === partId)!.revision;
-const PRIVATE = "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.";
+const PRIVATE = "The letter's sender and signature hold contact details. They come from the profile's basics, so they're changed in the profile in Dossier.";
 
 type CheckLine = { id: string; level: "ok" | "warn" | "fail"; title: string; detail?: string; fix?: Record<string, unknown> };
 type RequirementLine = { index: number; requirement: string; named: boolean; in_profile: boolean; skill: string | null };
@@ -233,7 +233,7 @@ describe("the connector's document tools", () => {
 
     expect(await tool("edit_document", { application_id: id, document: "cover_letter", action: "change", part_id: "sender", text: "Jane" })).toMatchObject({
       isError: true,
-      text: "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.",
+      text: PRIVATE,
     });
     expect((await tool("edit_document", { application_id: id, document: "resume", action: "change", part_id: "experience:nope", text: "Hi" })).text).toMatch(
       /^There's no part "experience:nope" in the resume\. Its parts are summary, experience:/,

@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 // search's postings is the costly part, so the result is kept until a
 // search, posting or find is added or removed.
 
-export type SeenPosting = { title: string; description: string; salary: string };
+export type SeenPosting = { title: string; company: string; description: string; salary: string };
 export type SeenPostings = { postings: SeenPosting[]; searchedKeywords: string[] };
 
 let kept: { stamp: string; value: Promise<SeenPostings> } | null = null;
@@ -27,12 +27,12 @@ async function stamp(): Promise<string> {
 async function read(): Promise<SeenPostings> {
   const [searches, postings, candidates] = await Promise.all([
     prisma.postingSearch.findMany({ select: { postings: true, query: true } }),
-    prisma.posting.findMany({ select: { source: true, externalId: true, title: true, description: true, salary: true } }),
-    prisma.agentCandidate.findMany({ select: { source: true, externalId: true, title: true, description: true, salary: true } }),
+    prisma.posting.findMany({ select: { source: true, externalId: true, title: true, company: true, description: true, salary: true } }),
+    prisma.agentCandidate.findMany({ select: { source: true, externalId: true, title: true, company: true, description: true, salary: true } }),
   ]);
   const seen = new Map<string, SeenPosting>();
   const keep = (posting: { source: string; externalId: string } & SeenPosting) =>
-    seen.set(`${posting.source}:${posting.externalId}`, { title: posting.title, description: posting.description, salary: posting.salary });
+    seen.set(`${posting.source}:${posting.externalId}`, { title: posting.title, company: posting.company, description: posting.description, salary: posting.salary });
   const searchedKeywords: string[] = [];
   for (const search of searches) {
     const query = searchQuerySchema.safeParse(search.query);

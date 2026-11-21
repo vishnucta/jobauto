@@ -7,11 +7,12 @@ import { isAiUsable } from "@/lib/ai/config";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { prepareCall } from "@/lib/ai/tasks";
 import { extractedOf } from "@/lib/application-data";
-import { callPrepSchema, PREP_STATUSES, prepJobKey } from "@/lib/call-prep";
+import { callAnswers, callPrepSchema, PREP_STATUSES, prepJobKey } from "@/lib/call-prep";
 import { profileGerman } from "@/lib/german-need";
 import { logServerError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
+import { loadSettings } from "@/lib/settings-data";
 
 import { defineJob, findUnfinishedJobs, startJob } from "./runner";
 
@@ -29,7 +30,7 @@ export const prepareCallJob = defineJob({
     await step("Preparing for the call");
     const application = await prisma.application.findUniqueOrThrow({ where: { id: applicationId } });
     // The profile the application is written from (E24-6); German is a shared language, the same for every profile.
-    const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(application.profileId), loadFactTexts(applicationId)]);
+    const [provider, options, profile, facts, settings] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(application.profileId), loadFactTexts(applicationId), loadSettings()]);
     const german = profileGerman(profile.languages);
     const { data, promptVersion } = await prepareCall(
       provider,
@@ -41,6 +42,8 @@ export const prepareCallJob = defineJob({
         role: application.role || application.title,
         german: german === "NONE" ? "none listed" : german,
         facts,
+        // Her start date, notice period, salary and permit as she saved them, never made up (jobauto fork).
+        answers: callAnswers(settings.applyAnswers),
       },
       { ...options, language: null, signal },
     );

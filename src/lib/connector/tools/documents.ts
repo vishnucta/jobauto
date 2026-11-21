@@ -69,7 +69,7 @@ const MISSING: Record<DocumentKind, string> = {
   [DocumentKind.EMAIL]: "This application has no email yet.",
 };
 
-const PRIVATE = "The letter's sender and signature hold contact details, so they're changed on the application's page in Dossier.";
+const PRIVATE = "The letter's sender and signature hold contact details. They come from the profile's basics, so they're changed in the profile in Dossier.";
 
 /** The PDFs export_pdf makes, by the `?doc=` the Download PDF buttons ask src/app/api/pdf for. */
 const PDF_DOCS = { resume: "resume", cover_letter: "letter", base_resume: "base", bewerbungsmappe: "mappe", kurzprofil: "kurzprofil" } as const satisfies Record<string, PdfDocument>;
@@ -704,7 +704,7 @@ export function registerDocumentTools({ server, linkTo }: ToolContext): void {
         "Checks a resume's PDF the way an applicant tracking system's parser reads it: whether it reads correctly (the text, contact details and headings are in the text layer; one column; its pages counted; the file named after the user), " +
         "whether it names the posting's requirements and job title, and whether its text is clean (no ligature glyphs, odd hyphens or invisible characters; written in the language its headings and dates follow). " +
         "Prints the PDF as Download PDF does (one Chromium render, no quota) and answers with verdicts, labels and counts only, never the document's text or contact details. " +
-        "An item's fix names what puts it right: single-column, photo and language through set_document_look; theme, a single-column base theme with set_base_theme; " +
+        "An item's fix names what puts it right: single-column, photo and language through set_document_look; theme, a single-column base theme, chosen by the user on the Base resume screen; " +
         "settings, in Settings → Documents; clean-up, on the application's Resume tab in Dossier. " +
         "A requirement that isn't named but is in_profile can go into the resume, with the user's OK: its skill (the profile's spelling) added to the skills part with edit_document, or worked into the summary with rewrite_document. " +
         "One that isn't in_profile stays out: the resume only says what the profile has.",

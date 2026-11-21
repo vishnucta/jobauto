@@ -26,8 +26,10 @@ import {
   testNotificationChannel,
 } from "./notifications-actions";
 import { SettingsSectionIntro } from "./settings-screen";
+import { SupporterDigest, type SupporterDigestSettings } from "./supporter-digest";
 
-export type NotificationsView = { channels: ChannelView[]; log: DeliveryView[] };
+/** `supporter`: the weekly digest's day and hour (jobauto fork); missing in older callers. */
+export type NotificationsView = { channels: ChannelView[]; log: DeliveryView[]; supporter?: SupporterDigestSettings };
 
 /**
  * Settings → Notifications (E26, #416–#418): the channels messages go to,
@@ -90,6 +92,9 @@ export function NotificationsSection({ initial }: { initial: NotificationsView }
       </section>
 
       {channels.length > 0 && <EventGrid channels={channels} onChange={replace} />}
+
+      {/* The supporter digest (jobauto fork): an event here, to a channel of the supporter's own. */}
+      {initial.supporter && <SupporterDigest initial={initial.supporter} channels={channels} onAdded={replace} onLog={setLog} />}
 
       <DeliveryLog log={log} />
     </>

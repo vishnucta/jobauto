@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emit } from "@/lib/notifications/notify";
-import { loadSettings } from "@/lib/settings-data";
+import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { placeOf } from "./place";
@@ -314,6 +314,7 @@ describe("refreshing startups (#222)", () => {
   });
 
   it("keeps what both sources found, says which failed, and looks up the best new sites", async () => {
+    await saveSettings({ startupSources: { YC: true, HN: true, LICENCE: true } });
     sources.yc = [startup({ source: "YC", externalId: "1" }), startup({ source: "YC", externalId: "2", company: "No site", website: "" })];
     sources.hnFails = true;
     web.emails = [address("jobs@acme.io")];
@@ -329,7 +330,7 @@ describe("refreshing startups (#222)", () => {
       ],
       emailsFound: 1,
     });
-    expect(steps).toEqual(["Asking Y Combinator, Hacker News and ESMA's registers", "Scoring 2 startups against your profile", "Looking for application addresses on their own sites"]);
+    expect(steps).toEqual(["Asking Y Combinator, Hacker News and ESMA registers", "Scoring 2 startups against your profile", "Looking for application addresses on their own sites"]);
     expect(web.looked).toEqual(["https://acme.io"]);
     expect((await loadSettings()).startupsLastRefresh).toEqual(result);
 
@@ -337,5 +338,24 @@ describe("refreshing startups (#222)", () => {
     web.looked = [];
     await refreshStartupsJob.run({}, { step: async () => {}, signal: new AbortController().signal } as never);
     expect(web.looked).toEqual([]);
+  });
+
+  it("asks only ESMA's registers until YC and Hacker News are switched on, and keeps what those found before (jobauto fork)", async () => {
+    // A YC startup found months ago, before its source was switched off.
+    await upsertStartups([startup({ source: "YC", externalId: "old", company: "Old Yc", website: "" })], new Date("2026-08-01T00:00:00Z"));
+    sources.yc = [startup({ source: "YC", externalId: "new", company: "New Yc" })];
+    sources.hnFails = true;
+    const steps: string[] = [];
+    const result = await refreshStartups(async (name) => void steps.push(name), new AbortController().signal, now);
+    expect(result.sources).toEqual([{ source: "LICENCE", found: 0, error: null }]);
+    expect(steps[0]).toBe("Asking ESMA registers");
+    // Not asked, and not swept: what YC found stays.
+    expect((await prisma().startup.findMany({ where: { source: "YC" } })).map((row) => row.company)).toEqual(["Old Yc"]);
+
+    await saveSettings({ startupSources: { YC: true, HN: false, LICENCE: true } });
+    const both = await refreshStartups(async () => {}, new AbortController().signal, now);
+    expect(both.sources.map((entry) => entry.source)).toEqual(["YC", "LICENCE"]);
+    // YC is asked again, so its stale entry is tidied away as before.
+    expect((await prisma().startup.findMany({ where: { source: "YC" } })).map((row) => row.company)).toEqual(["New Yc"]);
   });
 });

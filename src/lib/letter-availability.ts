@@ -8,7 +8,7 @@ const ASKS_SALARY =
   /gehaltsvorstellung|gehaltswunsch|gehaltsangabe|gehaltsrahmen ihrer wahl|einkommensvorstellung|vorstellungen? (?:zu(?:m|r)|bez[uü]glich (?:des|der)) (?:gehalt|verg[uü]tung|einkommen)|verg[uü]tungsvorstellung|salary expectations?|expected salary|desired salary|salary requirements?/i;
 
 const ASKS_START =
-  /eintrittstermin|eintrittsdatum|fr[uü]heste(?:n|r|s)? (?:m[oö]gliche[nr]? )?(?:eintritt|starttermin|beginn)|fr[uü]hestm[oö]glich\w*|verf[uü]gbarkeit|k[uü]ndigungsfrist|earliest (?:possible )?(?:start|starting date|availability)|(?:possible|desired|your) start(?:ing)? date|notice period|when (?:you )?(?:can|could) start/i;
+  /eintrittstermin|eintrittsdatum|eintrittszeitpunkt|starttermin|startdatum|m[oö]gliche[nrs]? (?:eintritt|start)|fr[uü]heste(?:n|r|s)? (?:m[oö]gliche[nr]? )?(?:eintritt|starttermin|beginn)|fr[uü]hestm[oö]glich\w*|verf[uü]gbarkeit|k[uü]ndigungsfrist|earliest (?:possible )?(?:start|starting date|availability)|(?:possible|desired|your) start(?:ing)? date|notice period|when (?:you )?(?:can|could) start/i;
 
 /** What the posting asks the letter to say: salary expectations, the earliest start date, or both. */
 export function postingAsks(text: string): { salary: boolean; start: boolean } {

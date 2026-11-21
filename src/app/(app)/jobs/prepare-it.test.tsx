@@ -99,8 +99,10 @@ describe("Prepare it for me (jobauto fork)", () => {
     const [, options] = vi.mocked(toast).mock.calls.at(-1)!;
     (options as { action: { onClick: () => void } }).action.onClick();
     expect(router.push).toHaveBeenCalledWith("/applications/app-1");
-    // Now it has one: a link to it instead of the buttons.
-    expect(screen.getByRole("link", { name: "Open the application" })).toHaveAttribute("href", "/applications/app-1");
+    // Now it has one, a Draft: "Draft ready" and a link to it instead of the buttons, no second application step by step.
+    expect(screen.getByRole("link", { name: "Open the draft" })).toHaveAttribute("href", "/applications/app-1");
+    expect(within(screen.getByRole("list", { name: "Postings" })).getByText("Draft ready")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Step by step|Start application/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Prepare it for me" })).not.toBeInTheDocument();
   });
 
@@ -123,10 +125,10 @@ describe("Prepare it for me (jobauto fork)", () => {
     expect(screen.queryByRole("button", { name: "Prepare it for me" })).not.toBeInTheDocument();
   });
 
-  it("leaves a posting the job agent scored to the agent's Prepare draft, so it gets one draft", () => {
+  it("leaves a posting the job agent scored to the agent's Prepare it for me, so it gets one draft", () => {
     open([posting("a", { agent: { candidateId: "cand-1", status: "SCORED", applicationId: null } })]);
-    expect(screen.getByRole("button", { name: "Prepare draft" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Prepare it for me" })).not.toBeInTheDocument();
+    // One button, the agent's: the same name, the same writer.
+    expect(screen.getAllByRole("button", { name: "Prepare it for me" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Start application →" })).toBeInTheDocument();
   });
 });

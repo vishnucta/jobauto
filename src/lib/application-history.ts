@@ -6,6 +6,9 @@ import { DOCUMENT_LABELS } from "@/lib/file-name";
 // built from their versions (E8-10), with the questions answered in Ask
 // (E30-10), which make no version. Newest first.
 
+/** "answer-question@", the start of every Ask answer's writtenWith, whatever its prompt version. */
+const ASK_PROMPT = `${ANSWER_QUESTION_VERSION.split("@")[0]}@`;
+
 /** A version of one of its documents, as the feed reads it. */
 export type VersionRow = { id: string; document: DocumentKind; cause: VersionCause; detail: string; createdAt: Date };
 
@@ -128,9 +131,9 @@ export function historyFeed({ versions, messages }: { versions: readonly Version
     };
   });
 
-  // Answers from Ask, with the question just before each.
+  // Answers from Ask, with the question just before each, from any version of its prompt.
   const answers: HistoryEntry[] = messages.flatMap((message, index) => {
-    if (message.role !== "AI" || message.writtenWith !== ANSWER_QUESTION_VERSION) return [];
+    if (message.role !== "AI" || !message.writtenWith?.startsWith(ASK_PROMPT)) return [];
     const question = messages.slice(0, index).findLast((entry) => entry.role === "USER");
     return [{ kind: "answer", id: message.id, at: message.createdAt.toISOString(), question: question?.text ?? "", text: message.text }];
   });

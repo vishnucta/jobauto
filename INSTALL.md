@@ -213,13 +213,13 @@ When the app runs on a server, such as a NAS, and you open it from a laptop, the
    tailscale serve --bg --tcp 9222 tcp://127.0.0.1:9222
    ```
    To undo it later: `tailscale serve reset`.
-4. **Tell the app.** Start **Chrome for Apply**. In the app, open an application's **Apply** tab, enter `http://` followed by the laptop's address and `:9222` under **Browser window**, such as `http://100.101.102.103:9222`, then click **Test** and **Save**. Use the address, not the laptop's name: Chrome doesn't answer names.
+4. **Tell the app.** Start **Chrome for Apply**. In the app, open **Settings → Standard answers**, enter `http://` followed by the laptop's address and `:9222` under **The apply assistant's browser window**, such as `http://100.101.102.103:9222`, then click **Test** and **Save**. Use the address, not the laptop's name: Chrome doesn't answer names.
 
 From then on, start **Chrome for Apply** before you click **Open and fill it in**. Sign in to job sites in that window: it remembers you. If it isn't open, the Apply tab says so and nothing happens.
 
 While **Chrome for Apply** is open, any device in your Tailscale network can control it, which is how the server fills in forms. Use it only for applying, and close it when you're done. To let only the server reach it, add a rule in Tailscale's access controls that allows port 9222 on the laptop only from the server.
 
-The address under **Browser window** is how the server reaches your laptop, not how you reach the app. Opening the app at its home network address, such as `http://192.168.0.246:3000`, doesn't change it.
+The address under **The apply assistant's browser window** is how the server reaches your laptop, not how you reach the app. Opening the app at its home network address, such as `http://192.168.0.246:3000`, doesn't change it.
 
 ### Applying from another laptop
 

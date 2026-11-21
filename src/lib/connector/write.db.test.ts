@@ -90,7 +90,8 @@ describe("an application written in Claude chat (#221)", () => {
     // The greeting and sign-off belong to the frame, not the paragraphs.
     expect(letter.find((unit) => unit.id === "paragraph:1")?.text).toBe("I'd like to help Acme design its product.");
     expect(letter.find((unit) => unit.id === "paragraph:2")?.text).toBe("Let's talk.");
-    expect(letter.some((unit) => unit.id === "sender")).toBe(true);
+    // The sender is drawn from the profile when the letter is shown, not stored (jobauto fork).
+    expect(letter.some((unit) => unit.id === "sender")).toBe(false);
   });
 
   it("takes the characters a parser reads wrong out of what Claude wrote", async () => {

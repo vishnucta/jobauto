@@ -124,7 +124,7 @@ describe("the setup guide's job search step (E22-9)", () => {
   });
 
   it("lists the catalog's reviewed portals too, and says more come later only when it can't be reached (E23-4)", async () => {
-    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: view(), catalog: { readAt: null, portals: [] } } });
+    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: view(), catalog: { readAt: null, off: false, portals: [] } } });
     const entry = { id: "CANAL", name: "Canal Board", version: "1.0.0", description: "Design jobs.", countries: ["de"], kinds: ["any"], access: "public-feed", needsKey: false, builtIn: false, termsUrl: "", hosts: ["api.board.example"], asks: [], remoteOnly: false, needsList: false, state: "available" as const, installedVersion: null };
     const user = userEvent.setup();
     const { unmount } = render(<JobsStep initial={view(["JSEARCH"])} countries={countries} country="de" catalog={[entry]} />);
@@ -140,7 +140,7 @@ describe("the setup guide's job search step (E22-9)", () => {
   });
 
   it("ticks a free remote-only portal from the catalog only for remote work, and leaves one that needs a list to Settings (E23)", async () => {
-    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: view(), catalog: { readAt: null, portals: [] } } });
+    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: view(), catalog: { readAt: null, off: false, portals: [] } } });
     const base = { version: "1.0.0", description: "Jobs.", countries: null, kinds: ["any"], access: "official-api", needsKey: false, builtIn: false, termsUrl: "", hosts: ["feed.example"], asks: [], state: "available" as const, installedVersion: null };
     const catalog = [
       { ...base, id: "FEED", name: "Remote Feed", remoteOnly: true, needsList: false },

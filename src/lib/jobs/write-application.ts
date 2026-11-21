@@ -192,6 +192,7 @@ export async function writeApplication(
     claim,
     profileId: asked,
     scored,
+    note = "",
   }: {
     /** The posting's whole text, as postingText() gives it. */
     posting: string;
@@ -204,6 +205,8 @@ export async function writeApplication(
     profileId?: string | null;
     /** The posting as Positions keeps it: its score for that profile, when there is one, answers How you match with no new call (E25-7). */
     scored?: { source: string; externalId: string };
+    /** What the documents should stress, in the user's words (the connector's draft_application). */
+    note?: string;
   },
   context: JobContext,
 ): Promise<string> {
@@ -213,7 +216,7 @@ export async function writeApplication(
   await context.step(`Writing the draft for ${name}`);
   const settings = await loadSettings();
   const documents = await writeDocumentsJob.run(
-    { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note: "", write: write ?? settings.documentsToWrite, profileId },
+    { readJobId: context.id, posting, extracted: reading.extracted, match: reading.match, tone: settings.defaultTone, note, write: write ?? settings.documentsToWrite, profileId },
     context,
   );
   const applicationId = await createApplicationFromDocuments({
@@ -223,7 +226,7 @@ export async function writeApplication(
     details: detailsFrom(reading.extracted),
     postingUrl,
     tone: settings.defaultTone,
-    note: "",
+    note,
     claim,
     profileId,
   });

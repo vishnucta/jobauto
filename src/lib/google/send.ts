@@ -38,6 +38,7 @@ export type SentApplication = { threadId: string; eventId: string | null; attach
 
 /** For Claude (#221): the email it showed the user isn't the one that would go out now. */
 export const EMAIL_CHANGED = "The email changed or already went out. Show the user the preview again.";
+export const REPLY_CHANGED = "The answer changed or one already went out in that thread. Show the user the preview again.";
 
 // The applications whose email is going out right now. On globalThis, so
 // the dev server's hot reloads keep them.
@@ -60,7 +61,7 @@ async function applicationEmail(applicationId: string) {
 
   const [name, settings] = await Promise.all([loadProfileName(), loadSettings()]);
   const printed = PRINTED.filter(({ kind }) => application.documents.some((document) => document.kind === kind)).map(({ kind, path }) => ({
-    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date() }),
+    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date(), language: application.language }),
     page: `/print/${path}/${applicationId}`,
   }));
   // The Anlagen that are on go along after the documents (jobauto fork).
@@ -171,17 +172,46 @@ export async function sendApplicationEmail(applicationId: string, { expected }: 
 /** "Re: …", unless it already is. */
 export const replySubject = (subject: string) => (/^\s*(re|aw|sv|antw)\s*:/i.test(subject) ? subject.trim() : `Re: ${subject.trim()}`);
 
-/** Sends the answer to an employer's mail in its thread, and marks the mail as answered. */
-export async function sendReply(emailId: string, body: string): Promise<{ applicationId: string | null }> {
-  const account = await loadGoogleAccount();
-  if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
+/** The employer's mail an answer goes to, checked, with who it's to and its subject. */
+async function replyTo(emailId: string, body: string) {
   const email = await prisma.emailMessage.findUnique({ where: { id: emailId } });
   if (!email) throw new GoogleError("unavailable", "That email is no longer in Dossier.");
   if (!body.trim()) throw new GoogleError("unavailable", "Write the answer first.");
   if (/\[…\]|\[\.\.\.\]/.test(body)) throw new GoogleError("unavailable", "Fill in the parts marked […] first.");
-
   const to = email.fromName ? `${email.fromName.replace(/[<>"]/g, "")} <${email.fromAddress}>` : email.fromAddress;
-  const subject = replySubject(email.subject);
+  return { email, to, subject: replySubject(email.subject) };
+}
+
+/**
+ * A fingerprint of an answer as it would go out, and of the answers sent in
+ * its thread before, for Claude to send only what it showed (round 2 of the
+ * audit, as the application's email does): it stops matching once the text
+ * changes or an answer goes out in the thread.
+ */
+async function replyFingerprint({ email, to, subject }: Awaited<ReturnType<typeof replyTo>>, body: string): Promise<string> {
+  const sends = await prisma.emailMessage.count({ where: { threadId: email.threadId, direction: EmailDirection.OUTGOING } });
+  return createHash("sha256").update(JSON.stringify([email.id, to, subject, body, sends])).digest("base64url").slice(0, 16);
+}
+
+export type ReplyPreview = { to: string; subject: string; body: string; token: string };
+
+/** What sendReply would send, for Claude to show before it goes. */
+export async function previewReply(emailId: string, body: string): Promise<ReplyPreview> {
+  const reply = await replyTo(emailId, body);
+  return { to: reply.to, subject: reply.subject, body, token: await replyFingerprint(reply, body) };
+}
+
+/**
+ * Sends the answer to an employer's mail in its thread, and marks the mail as
+ * answered. With `expected`, a preview's token, it sends only the answer that
+ * preview showed, and only once.
+ */
+export async function sendReply(emailId: string, body: string, { expected }: { expected?: string } = {}): Promise<{ applicationId: string | null }> {
+  const account = await loadGoogleAccount();
+  if (!account) throw new GoogleError("not-connected", "Connect your Google account in Settings → Google first.");
+  const reply = await replyTo(emailId, body);
+  if (expected !== undefined && (await replyFingerprint(reply, body)) !== expected) throw new GoogleError("unavailable", REPLY_CHANGED);
+  const { email, to, subject } = reply;
   const sent = await sendMail(
     { from: await sender(account.email), to, subject, body, inReplyTo: email.messageId || undefined },
     { threadId: email.threadId },

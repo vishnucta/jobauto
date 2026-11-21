@@ -47,6 +47,9 @@ import { FindWorkLinks, type JobsCounts } from "./find-work-links";
 import { PostingResults } from "./posting-results";
 import { countryCoverage, RemoteOnlyField, searchCost, SearchFields } from "./search-fields";
 
+/** A group of the profile's search words as Edit search shows them (jobauto fork): "Job titles", each word with why it's there. */
+export type SearchWordGroupView = { title: string; words: readonly { text: string; why: string }[] };
+
 export type JobsScreenProps = {
   /** The first portal switched on in Settings; null while none is (E22-3). */
   /** The portals switched on, in order: a search asks all of them. */
@@ -81,10 +84,12 @@ export type JobsScreenProps = {
   editing?: boolean;
   /** Search words from the profile, for one-click chips in the form (jobauto fork). */
   suggestions?: readonly string[];
+  /** All of the profile's search words, by group, under "All search words": their one place (jobauto fork). */
+  wordGroups?: readonly SearchWordGroupView[];
   /** The profile they're from, named when there are several; null with one. */
   suggestionsFrom?: string | null;
-  /** Titles of jobs seen that ask for the profile's skills but its searches miss (hidden-titles.ts), with how many postings (jobauto fork). */
-  alsoAdvertised?: readonly { title: string; postings: number }[];
+  /** Titles of jobs seen that ask for the profile's skills but its searches miss (hidden-titles.ts), with how many employers use each (jobauto fork). */
+  alsoAdvertised?: readonly { title: string; employers: number }[];
   /** The profile's German, which each posting's is read against (jobauto fork). */
   german?: ProfileGerman;
   /** The people she knows at each employer on screen, by the posting's company (network.ts, jobauto fork). */
@@ -124,6 +129,7 @@ export function JobsScreen({
   profiles = [],
   editing: editingAsked = false,
   suggestions = [],
+  wordGroups = [],
   suggestionsFrom = null,
   alsoAdvertised = [],
   german = "NONE",
@@ -238,6 +244,7 @@ export function JobsScreen({
                   pending={pending}
                   onSearch={run}
                   suggestions={suggestions}
+                  wordGroups={wordGroups}
                   suggestionsFrom={suggestionsFrom}
                   alsoAdvertised={alsoAdvertised}
                 />
@@ -277,6 +284,21 @@ export function JobsScreen({
   );
 }
 
+/** A search word as a chip: one click fills in What (jobauto fork). */
+function WordChip({ word, why, chosen, onChoose }: { word: string; why?: string; chosen: boolean; onChoose: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={chosen}
+      title={why}
+      onClick={onChoose}
+      className={cn("rounded-full border px-3 py-1 text-control", chosen ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink")}
+    >
+      {word}
+    </button>
+  );
+}
+
 function SearchForm({
   sources,
   countries,
@@ -284,6 +306,7 @@ function SearchForm({
   pending,
   onSearch,
   suggestions,
+  wordGroups,
   suggestionsFrom,
   alsoAdvertised,
 }: {
@@ -293,10 +316,12 @@ function SearchForm({
   pending: boolean;
   onSearch: (query: SearchQuery) => void;
   suggestions: readonly string[];
+  wordGroups: readonly SearchWordGroupView[];
   suggestionsFrom: string | null;
-  alsoAdvertised: readonly { title: string; postings: number }[];
+  alsoAdvertised: readonly { title: string; employers: number }[];
 }) {
   const [form, setForm] = useState(query);
+  const [allWords, setAllWords] = useState(false);
   const [errors, setErrors] = useState<{ keywords?: string; country?: string }>({});
   // Back and forward change the URL's search; the form follows.
   const [shown, setShown] = useState(query);
@@ -333,28 +358,36 @@ function SearchForm({
         <div role="group" aria-label="Search words from your profile" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-6">
           <span className="text-meta text-muted">From {suggestionsFrom ?? "your profile"}:</span>
           {suggestions.map((word) => (
-            <button
-              key={word}
-              type="button"
-              aria-pressed={form.keywords === word}
-              onClick={() => set({ keywords: word })}
-              className={cn(
-                "rounded-full border px-3 py-1 text-control",
-                form.keywords === word ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink",
-              )}
-            >
-              {word}
-            </button>
+            <WordChip key={word} word={word} chosen={form.keywords === word} onChoose={() => set({ keywords: word })} />
           ))}
+          {wordGroups.length > 0 && (
+            <button type="button" aria-expanded={allWords} aria-controls="all-search-words" onClick={() => setAllWords(!allWords)} className="px-1 text-meta text-muted underline underline-offset-2 hover:text-ink">
+              {allWords ? "Fewer words" : "All search words"}
+            </button>
+          )}
+        </div>
+      )}
+      {/* Every search word from the profile (jobauto fork): their one place; Profile links here. */}
+      {allWords && (
+        <div id="all-search-words" className="flex flex-col gap-3 rounded-card bg-track px-4 py-3 sm:col-span-2 lg:col-span-6">
+          {wordGroups.map((group) => (
+            <div key={group.title} role="group" aria-label={group.title} className="flex flex-wrap items-center gap-2">
+              <span className="w-full text-label font-semibold tracking-wide text-muted uppercase">{group.title}</span>
+              {group.words.map((word) => (
+                <WordChip key={word.text} word={word.text} why={word.why} chosen={form.keywords === word.text} onChoose={() => set({ keywords: word.text })} />
+              ))}
+            </div>
+          ))}
+          <p className="text-meta text-muted">Worked out from your profile as it is now: short on purpose, so each finds plenty. Search one at a time, with your place.</p>
         </div>
       )}
       {/* The titles employers use for the profile's skills (jobauto fork, hidden-titles.ts). */}
       {alsoAdvertised.length > 0 && (
         <div role="group" aria-label="Titles employers use for your skills" className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-6">
-          <span className="text-meta text-muted" title="Titles of jobs you've seen that ask for your skills, which your searches don't cover.">
+          <span className="text-meta text-muted" title="Titles that at least two employers use for jobs you've seen that ask for your skills, which your searches don't cover.">
             Also advertised as:
           </span>
-          {alsoAdvertised.map(({ title, postings }) => (
+          {alsoAdvertised.map(({ title, employers }) => (
             <button
               key={title}
               type="button"
@@ -365,7 +398,11 @@ function SearchForm({
                 form.keywords === title ? "border-primary bg-selected font-medium text-primary-text" : "border-line-field bg-paper text-ink hover:border-ink",
               )}
             >
-              {title} <span className="text-xs opacity-65">{postings}</span>
+              {title}{" "}
+              <span className="text-xs opacity-65">
+                {employers}
+                <span className="sr-only"> employers</span>
+              </span>
             </button>
           ))}
         </div>

@@ -115,7 +115,7 @@ describe("Interview practice through the Claude connector", () => {
     expect((await tool("get_practice_prep")).json).toEqual({
       prepared: false,
       message: "There's no practice pack yet. prepare_practice prepares one.",
-      link: `${APP}/practice`,
+      link: `${APP}/call-prep`,
     });
 
     expect((await tool("prepare_practice")).json).toMatchObject({ task_id: "practice-job", status: "started" });
@@ -129,7 +129,7 @@ describe("Interview practice through the Claude connector", () => {
 
   it("reads the pack, with the sentences for when German runs out", async () => {
     await saveSettings({ practicePrep: PACK });
-    expect((await tool("get_practice_prep")).json).toEqual({ prepared: true, when_german_runs_out: FALLBACK, to_hear_it_again: expect.any(Object), ...PACK, link: `${APP}/practice` });
+    expect((await tool("get_practice_prep")).json).toEqual({ prepared: true, when_german_runs_out: FALLBACK, to_hear_it_again: expect.any(Object), ...PACK, link: `${APP}/call-prep` });
   });
 
   it("needs Dossier's own AI to prepare it", async () => {

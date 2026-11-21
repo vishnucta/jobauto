@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useJob } from "@/hooks/use-job";
 import { FALLBACK, SAY_AGAIN, spokenMatch, type CallPrep, type Pair } from "@/lib/call-prep";
 
-import { preparePractice } from "../../practice/actions";
+import { preparePractice } from "../../call-prep/actions";
 import { prepareForCall } from "./prep-actions";
 
 export type PrepTabData = {
@@ -30,7 +31,8 @@ const PRINT_CSS = `@media print {
  * Call prep (Phase 3, jobauto fork): what to say on the first phone call, in
  * German she can say with the English beside it, ready to print and keep by
  * the phone, and a practice mode that reads each question aloud and listens
- * to her answer.
+ * to her answer. Its general practice (jobauto fork, /call-prep) is the same
+ * pack from her profile alone, before there's a call; each mode links to it.
  */
 export function PrepTab({
   applicationId,
@@ -43,7 +45,7 @@ export function PrepTab({
   data: PrepTabData;
   aiReady: boolean;
   company: string;
-  /** Interview practice (jobauto fork): the pack from her profile alone, before there's a call. */
+  /** General practice (jobauto fork, /call-prep): the pack from her profile alone, before there's a call. */
   practice?: boolean;
 }) {
   const router = useRouter();
@@ -91,6 +93,7 @@ export function PrepTab({
             </p>
           )}
           {aiReady ? prepareButton(practice ? "Prepare my practice call" : "Prepare for the call") : <p className="text-meta text-warning">Set up an AI provider in Settings → AI provider first.</p>}
+          {!practice && <GeneralPracticeLink />}
           <SayItCard pair={FALLBACK} title="When German runs out" />
         </div>
       </div>
@@ -108,6 +111,7 @@ export function PrepTab({
           Print
         </Button>
         {prepareButton("Prepare again")}
+        {!practice && <GeneralPracticeLink />}
       </div>
 
       {practising ? (
@@ -127,9 +131,15 @@ export function PrepTab({
             </section>
           )}
           {pack.unverified.length > 0 && (
-            <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
-              Check these against your profile before you say them: {pack.unverified.join(", ")}
-            </p>
+            // Each in the sentence it's in (jobauto fork); packs from before list the bare words.
+            <div role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
+              <p className="font-medium">Check these against your profile before you say them:</p>
+              <ul className="list-disc pl-5">
+                {pack.unverified.map((sentence) => (
+                  <li key={sentence}>{sentence}</li>
+                ))}
+              </ul>
+            </div>
           )}
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -208,6 +218,15 @@ function SayItCard({ pair, title }: { pair: Pair; title: string }) {
       <p className="text-[17px] leading-relaxed">{pair.de}</p>
       <p className="text-meta text-muted">{pair.en}</p>
     </section>
+  );
+}
+
+/** Call prep's other mode (jobauto fork): the general practice pack, from the profile alone. */
+function GeneralPracticeLink() {
+  return (
+    <Link href="/call-prep" className="text-meta text-muted underline underline-offset-3 hover:text-ink">
+      General practice
+    </Link>
   );
 }
 

@@ -234,7 +234,7 @@ test("axe: a resume's sections (#297, #298)", async ({ page }) => {
 
 test("axe: Positions with a search's results, and filtered (E14, E22-5)", async ({ page }) => {
   await page.goto("/jobs");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("list", { name: "Postings" })).toBeVisible();
   await page.waitForLoadState("networkidle");
   await expectAccessible(page);

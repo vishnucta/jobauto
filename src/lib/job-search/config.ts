@@ -70,7 +70,6 @@ type JobEnv = Pick<
   | "DOSSIER_SERPAPI_KEY"
   | "DOSSIER_ADZUNA_APP_ID"
   | "DOSSIER_ADZUNA_KEY"
-  | "DOSSIER_JOOBLE_KEY"
   | "DOSSIER_FREEHIRE_URL"
   | "DOSSIER_JOBS_ARBEITSAGENTUR"
 >;
@@ -79,7 +78,6 @@ const FROM_ENV: Record<NonNullable<Env["DOSSIER_JOBS_SOURCE"]>, JobSource | null
   jsearch: "JSEARCH",
   serpapi: "SERPAPI",
   adzuna: "ADZUNA",
-  jooble: "JOOBLE",
   arbeitsagentur: "ARBEITSAGENTUR",
   freehire: "FREEHIRE",
   off: null,
@@ -90,12 +88,12 @@ const BUILT_IN_ENV: Partial<Record<JobSource, Record<string, keyof JobEnv>>> = {
   JSEARCH: { key: "DOSSIER_JSEARCH_KEY", host: "DOSSIER_JSEARCH_HOST" },
   SERPAPI: { key: "DOSSIER_SERPAPI_KEY" },
   ADZUNA: { appId: "DOSSIER_ADZUNA_APP_ID", key: "DOSSIER_ADZUNA_KEY" },
-  JOOBLE: { key: "DOSSIER_JOOBLE_KEY" },
 };
 
 /**
  * The settings from before E22-3 (one chosen source, a key per source) in
- * the new shape, or null when nothing was saved. What `moveJobSettings`
+ * the new shape, or null when nothing was saved. Jooble's key moves too,
+ * though the fork no longer searches it (jobauto fork): no key is lost. What `moveJobSettings`
  * writes once, and what's read until then.
  */
 export function portalsFromLegacy(saved: LegacyJobSettings): { portals: SavedPortals; keys: SavedPortalKeys } | null {

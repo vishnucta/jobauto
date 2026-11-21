@@ -66,11 +66,13 @@ export function SidebarProfiles({ profiles, openId, expanded: initiallyExpanded 
           return (
             <li key={profile.id} className="flex flex-col">
               <div className="relative flex">
+                {/* min-w-0, so a long name is cut short with "…" instead of widening the sidebar; the title shows it whole (jobauto fork). */}
                 <Link
                   href={`/profile?profile=${profile.id}`}
                   aria-current={here && !expanded ? "page" : undefined}
+                  title={profile.name}
                   className={cn(
-                    "flex flex-1 items-center gap-2 rounded-control border py-[6px] pr-8 pl-2.5 text-sm motion-safe:transition-colors",
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-control border py-[6px] pr-8 pl-2.5 text-sm motion-safe:transition-colors",
                     here && !expanded
                       ? "border-line-nav-active bg-nav-active font-medium text-ink shadow-raised"
                       : cn("border-transparent hover:bg-hover hover:text-ink", isOpen ? "text-ink" : "text-muted"),
@@ -79,7 +81,7 @@ export function SidebarProfiles({ profiles, openId, expanded: initiallyExpanded 
                 >
                   <UserRound size={16} aria-hidden="true" className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{profile.name}</span>
-                  {index === 0 && profiles.length > 1 && <span className="text-[11px] font-normal text-muted">Default</span>}
+                  {index === 0 && profiles.length > 1 && <span className="shrink-0 text-[11px] font-normal text-muted">Default</span>}
                   {!isOpen && <ChevronRight size={14} aria-hidden="true" className="absolute right-2 text-muted" />}
                 </Link>
                 {isOpen && (

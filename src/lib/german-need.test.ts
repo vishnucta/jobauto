@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { adLanguage, germanFit, germanNeed, germanVerdict, postingWriteLanguage, profileGerman } from "./german-need";
+import { adLanguage, germanDecision, germanFit, germanNeed, germanVerdict, postingWriteLanguage, profileGerman } from "./german-need";
 
 const GERMAN_AD = `Für unser Team in Hamburg suchen wir zum nächstmöglichen Zeitpunkt einen Financial Analyst (m/w/d).
 Ihre Aufgaben: Sie sind verantwortlich für das regulatorische Meldewesen und die Abstimmung der Konten mit unseren Partnern.
@@ -42,6 +42,15 @@ describe("germanNeed", () => {
     const need = germanNeed("Fließend Englisch, Deutschkenntnisse von Vorteil");
     expect(need).toMatchObject({ level: null, optional: true, evidence: "Deutschkenntnisse von Vorteil" });
     expect(germanNeed("German is a plus but not required").optional).toBe(true);
+  });
+
+  it("quotes a list item without its dash", () => {
+    expect(germanNeed("Ihr Profil:\n- Sehr gute Deutschkenntnisse in Wort und Schrift").evidence).toBe("Sehr gute Deutschkenntnisse in Wort und Schrift");
+  });
+
+  it("doesn't take the German-speaking region for the language (jobauto fork)", () => {
+    expect(germanNeed("Wir haben uns auf eigentümergeführte mittelständische Unternehmen im deutschsprachigen Raum konzentriert.").level).toBeNull();
+    expect(germanNeed("Clients across the German-speaking region. Fluent German required.").level).toBe("C1");
   });
 
   it("doesn't take Germany, a company or German law for the language", () => {
@@ -118,5 +127,43 @@ describe("postingWriteLanguage", () => {
     expect(postingWriteLanguage("English", "We are hiring.", "A2")).toBe("English");
     expect(postingWriteLanguage("Dutch", "Wij zoeken", "NONE")).toBe("Dutch");
     expect(postingWriteLanguage(null, "", "A2")).toBeNull();
+  });
+});
+
+describe("germanDecision", () => {
+  const german = "Wir suchen eine Analystin für unser Team in Hamburg. Ihre Aufgaben sind die Meldungen nach EMIR und MiFIR, die Abstimmung der Daten und die Arbeit mit unseren Kollegen.";
+
+  it("says English, and why, for a German ad that needs more German than hers", () => {
+    const decision = germanDecision({ text: `${german} Sehr gute Deutschkenntnisse sind erforderlich.`, adLanguage: "German", german: "A2" });
+    expect(decision).toMatchObject({ writeLanguage: "English", toEnglish: true, below: true, verdict: "out" });
+    expect(decision.reason).toBe("The ad asks for more German (C1) than your A2: “Sehr gute Deutschkenntnisse sind erforderlich.”");
+  });
+
+  it("keeps German, and says so, when she has the German it asks for", () => {
+    const decision = germanDecision({ text: `${german} Deutschkenntnisse (A2) sind erforderlich.`, adLanguage: "German", german: "B1" });
+    expect(decision).toMatchObject({ writeLanguage: "German", toEnglish: false, below: false });
+    expect(decision.reason).toMatch(/^The ad asks for German you have/);
+  });
+
+  it("explains an ad written in German that names no level", () => {
+    expect(germanDecision({ text: german, adLanguage: "German", german: "A2" }).reason).toBe(
+      "The ad is written in German and names no level, so expect about B2 at work, more than your A2.",
+    );
+    expect(germanDecision({ text: german, adLanguage: "German", german: "NONE" }).reason).toMatch(/more than your profile, which lists no German\.$/);
+  });
+
+  it("keeps the posting's language with the rule off, but still says the job needs more German", () => {
+    const decision = germanDecision({ text: `${german} Verhandlungssichere Deutschkenntnisse.`, adLanguage: "German", german: "A2", onlyWhenFit: false });
+    expect(decision).toMatchObject({ writeLanguage: "German", toEnglish: false, below: true });
+  });
+
+  it("is the reading postingWriteLanguage follows", () => {
+    for (const [text, level] of [[german, "A2"], [`${german} Unsere Arbeitssprache ist Englisch.`, "C2"], [`${german} Deutsch von Vorteil.`, "C2"]] as const) {
+      expect(postingWriteLanguage("German", text, level)).toBe(germanDecision({ text, adLanguage: "German", german: level }).writeLanguage);
+    }
+  });
+
+  it("says nothing for an ad that's silent about German in another language", () => {
+    expect(germanDecision({ text: "Wij zoeken", adLanguage: "Dutch", german: "A2" })).toMatchObject({ writeLanguage: "Dutch", reason: "", below: false });
   });
 });

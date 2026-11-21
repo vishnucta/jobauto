@@ -5,10 +5,9 @@ import { announcementFeedSchema } from "@/lib/announcements/contract";
 import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
 import { callPrepSchema } from "@/lib/call-prep";
-import { experimentSchema } from "@/lib/experiments";
 import { setupGuideSchema } from "@/lib/setup-guide";
 import { SCORERS } from "@/lib/scoring/scorers";
-import { startupsRefreshSchema } from "@/lib/startups/types";
+import { DEFAULT_STARTUP_SOURCES, startupSourcesSchema, startupsRefreshSchema } from "@/lib/startups/types";
 import { AGENT_MAX_SLOTS_PER_RUN } from "@/lib/agent/limits";
 import { AI_TIMEOUT_LIMITS } from "@/lib/ai/provider-options";
 import { COVERS, coversFromScore, type Covers } from "@/lib/posting-coverage";
@@ -188,8 +187,7 @@ const settingsSchema = z.object({
   applicationsSort: z.string().catch("updated"),
   /** The dashboard's period as last left (E9-8). */
   dashboardPeriod: z.enum(["30d", "90d", "all"]).catch("all"),
-  /** The experiment running (experiments.ts); null when none is. */
-  experiment: json(experimentSchema).nullable().catch(null),
+  // The experiment (A/B) once kept here is gone (jobauto fork); an old row is ignored.
   /** Applications to send each week, Monday to Sunday (weekly-target.ts); 0 is no target. */
   weeklyTarget: z.coerce.number().int().min(0).max(50).catch(0),
   /** Days without news before Needs you suggests a follow-up (E9-9). */
@@ -267,17 +265,20 @@ const settingsSchema = z.object({
   alertAddress: z.string().nullable().catch(null),
   /** Strong new matches (the job agent's notification of them): postings that cover what this 0–100 score maps to (coversFromScore). */
   alertMinScore: z.coerce.number().int().min(0).max(100).catch(80),
-  // The supporter digest (supporter-digest.ts): an ntfy topic of the
-  // supporter's own, the weekday (1 = Monday) and hour it goes, and the day
-  // it last went. The topic is as good as a password and belongs to the
-  // install, as does the day, so exports leave both out (INSTALL_SETTINGS).
+  // The supporter digest (supporter-digest.ts): the weekday (1 = Monday) and
+  // hour it goes, and the day it last went. Notifications delivers it now
+  // (jobauto fork); the ntfy topic of the supporter's own that it went to is
+  // kept only to be carried over to their channel (supporter-digest-data.ts),
+  // and nothing sets it any more. The topic is as good as a password and
+  // belongs to the install, as does the day, so exports leave both out
+  // (INSTALL_SETTINGS).
   supporterAddress: z.string().nullable().catch(null),
   supporterDay: z.coerce.number().int().min(1).max(7).catch(1),
   supporterHour: z.coerce.number().int().min(0).max(23).catch(8),
   supporterSentOn: z.string().nullable().catch(null),
   /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
   careersCheckedOn: z.string().nullable().catch(null),
-  /** Interview practice (jobs/prepare-practice.ts): the call prep pack from her profile alone, and the prompt that wrote it. */
+  /** Call prep's general practice (jobs/prepare-practice.ts): the call prep pack from her profile alone, and the prompt that wrote it. */
   practicePrep: json(callPrepSchema).nullable().catch(null),
   practicePrepWith: z.string().nullable().catch(null),
   // Startups (#222): when the screen was last opened, since the daily refresh
@@ -285,6 +286,12 @@ const settingsSchema = z.object({
   // to the install, not its data, so exports leave them out (INSTALL_SETTINGS).
   startupsViewedAt: z.iso.datetime().nullable().catch(null),
   startupsLastRefresh: json(startupsRefreshSchema).nullable().catch(null),
+  /**
+   * Which sources a Startups refresh asks (jobauto fork), switched in the
+   * screen's Sources: YC's job posts and Hacker News' "Who is hiring?" are
+   * tech startups, so they start off; ESMA's newly licensed firms start on.
+   */
+  startupSources: json(startupSourcesSchema).catch(DEFAULT_STARTUP_SOURCES),
   /** "Check for updates daily" in Settings → About (update-check.ts). */
   updateCheck: flag(true),
   // The newest release the update check has seen, the UTC day it last

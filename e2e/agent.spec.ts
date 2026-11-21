@@ -48,8 +48,8 @@ test("finds, scores, drafts and dismisses, and never brings a posting back", asy
   await expect(posting("Senior Product Designer, Payments").getByRole("img", { name: /^\d+ of \d+ requirements covered$/ })).toBeVisible();
   await expect(list.locator("button[data-posting]").last()).toContainText("UX Designer");
 
-  // Prepare a draft there: it waits for review on the Agent screen, out of Applications.
-  await page.getByRole("button", { name: "Prepare draft" }).click();
+  // Prepare it there: the draft waits for review on the Agent screen, out of Applications.
+  await page.getByRole("button", { name: "Prepare it for me" }).click();
   await expect(page.getByText("The draft is ready for your review on the Agent screen.")).toBeVisible({ timeout: 60_000 });
   await page.goto("/agent");
   const drafts = page.getByRole("list", { name: "Drafts to review" });

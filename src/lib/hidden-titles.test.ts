@@ -12,10 +12,12 @@ describe("coreTitle", () => {
 });
 
 describe("hiddenTitles", () => {
-  const job = (title: string, description: string) => ({ title, description });
+  let employer = 0;
+  // Each job at an employer of its own, unless it names one.
+  const job = (title: string, description: string, company = `Employer ${(employer += 1)}`) => ({ title, description, company });
   const asks = "You run EMIR and MiFIR transaction reporting and the daily reconciliation.";
 
-  it("finds the titles of jobs that ask for her skills, most frequent first, that her searches don't cover", () => {
+  it("finds the titles of jobs that ask for her skills, used by the most employers first, that her searches don't cover", () => {
     const postings = [
       job("Trade Support Analyst (m/w/d)", asks),
       job("Senior Trade Support Analyst", asks),
@@ -28,19 +30,29 @@ describe("hiddenTitles", () => {
       job("Marketing Manager", "Brand campaigns and events."),
     ];
     expect(hiddenTitles(postings, REPORTING_TERMS, ["Regulatory Reporting"])).toEqual([
-      { title: "Middle Office Specialist", postings: 3 },
-      { title: "Trade Support Analyst", postings: 2 },
+      { title: "Middle Office Specialist", employers: 3 },
+      { title: "Trade Support Analyst", employers: 2 },
     ]);
   });
 
-  it("needs two of her terms in a posting, and a title seen at least twice", () => {
+  it("needs two of her terms in a posting, and a title used by at least two employers", () => {
     const postings = [job("Operations Analyst", "Some reconciliation work."), job("Operations Analyst", "Some reconciliation work."), job("Fund Accountant", asks)];
+    expect(hiddenTitles(postings, REPORTING_TERMS, [])).toEqual([]);
+  });
+
+  it("counts each employer once: one employer's own title, posted five times, isn't one employers use (jobauto fork)", () => {
+    const postings = [...Array.from({ length: 5 }, () => job("MSC Finance Analyst 5", asks, "Ledgerly AG")), job("FP&A Analyst", asks, "Ledgerly AG"), job("FP&A Analyst", asks, "Northwind GmbH")];
+    expect(hiddenTitles(postings, REPORTING_TERMS, [])).toEqual([{ title: "FP&A Analyst", employers: 2 }]);
+  });
+
+  it("leaves out engineering titles, which ask for her tools but aren't her job (jobauto fork)", () => {
+    const postings = [job("Financial Analytics Engineer", asks), job("Financial Analytics Engineer", asks), job("Reporting Developer (m/w/d)", asks), job("Reporting Developer", asks)];
     expect(hiddenTitles(postings, REPORTING_TERMS, [])).toEqual([]);
   });
 
   it("counts a past search as covering a title only word for word", () => {
     const postings = [job("Credit Risk Analyst", asks), job("Credit Risk Analyst", asks)];
-    expect(hiddenTitles(postings, REPORTING_TERMS, ["IT"])).toEqual([{ title: "Credit Risk Analyst", postings: 2 }]);
+    expect(hiddenTitles(postings, REPORTING_TERMS, ["IT"])).toEqual([{ title: "Credit Risk Analyst", employers: 2 }]);
     expect(hiddenTitles(postings, REPORTING_TERMS, ["Risk Analyst"])).toEqual([]);
   });
 

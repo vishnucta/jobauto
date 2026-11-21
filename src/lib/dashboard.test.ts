@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dashboardFigures, periodFromParam, type DashboardApplication } from "./dashboard";
+import { dashboardFigures, needsYouHref, periodFromParam, type DashboardApplication } from "./dashboard";
 
 const now = new Date(2026, 8, 28, 12);
 const daysAgo = (days: number) => new Date(now.getTime() - days * 86_400_000);
@@ -229,5 +229,14 @@ describe("Needs you (E28-4)", () => {
       ["offer", "Answer", "conversation", "2 replies are waiting. Asks about your start date.", true],
       ["other", "Review offer", null, "An offer is waiting on your decision.", false],
     ]);
+  });
+});
+
+describe("needsYouHref (E30-6, E30-8)", () => {
+  it("opens the right tab and starts the work its click asks for", () => {
+    expect(needsYouHref({ id: "a1", action: "Prepare" })).toBe("/applications/a1?start=prepare");
+    expect(needsYouHref({ id: "a1", action: "Follow up" })).toBe("/applications/a1?tab=email&start=follow-up");
+    expect(needsYouHref({ id: "a1", action: "Answer", tab: "conversation" })).toBe("/applications/a1?tab=conversation");
+    expect(needsYouHref({ id: "a1", action: "Finish draft" })).toBe("/applications/a1");
   });
 });

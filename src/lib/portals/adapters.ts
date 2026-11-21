@@ -1,6 +1,5 @@
 import "server-only";
 
-import { jooble } from "@/lib/job-search/jooble";
 import { serpapi } from "@/lib/job-search/serpapi";
 
 import { BUILT_IN_PORTALS } from "./built-in";
@@ -12,10 +11,7 @@ import { builtInUpdate, installedPortal } from "./installed";
 // An installed portal's hosts are reached only on the public internet.
 
 /** The built-ins that run on code of their own instead of the engine (jobauto fork; see ./built-in.ts). */
-const IN_CODE = new Map<string, PortalAdapter>([
-  [serpapi.id, serpapi],
-  [jooble.id, jooble],
-]);
+const IN_CODE = new Map<string, PortalAdapter>([[serpapi.id, serpapi]]);
 
 const ADAPTERS = new Map(BUILT_IN_PORTALS.map((config) => [config.id, IN_CODE.get(config.id) ?? portalAdapter(config)]));
 const INSTALLED = new Map<string, { version: string; adapter: PortalAdapter }>();

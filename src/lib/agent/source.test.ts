@@ -16,7 +16,7 @@ vi.mock("@/lib/job-search/config", async () => {
   };
 });
 
-const ALL = ["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE", "FREEHIRE", "ARBEITSAGENTUR"];
+const ALL = ["JSEARCH", "SERPAPI", "ADZUNA", "FREEHIRE", "ARBEITSAGENTUR"];
 /** Every built-in, in Settings order, with those given switched on in Settings → Job search. */
 const config = (...on: string[]) => ({ portals: ALL.map((id) => ({ id, on: on.includes(id) })) }) as unknown as JobSearchConfig;
 
@@ -34,7 +34,9 @@ describe("the job agent's own portals (jobauto fork)", () => {
   });
 
   it("on Automatic with only the Bundesagentur on, takes the first portal with a key instead, or none", () => {
-    keys.ready = new Set(["FREEHIRE", "ADZUNA", "JOOBLE"]);
+    keys.ready = new Set(["FREEHIRE", "ADZUNA", "SERPAPI"]);
+    expect(agentPortals(config("ARBEITSAGENTUR"), null)).toEqual(["SERPAPI"]);
+    keys.ready = new Set(["FREEHIRE", "ADZUNA"]);
     expect(agentPortals(config("ARBEITSAGENTUR"), null)).toEqual(["ADZUNA"]);
     keys.ready = new Set(["FREEHIRE"]);
     expect(agentPortals(config("ARBEITSAGENTUR"), null)).toEqual([]);

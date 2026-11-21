@@ -5,21 +5,19 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 
 import { toast } from "@/components/toast";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { ProgressSteps } from "@/components/ui/progress-steps";
-import { Select } from "@/components/ui/select";
-import { Toggle } from "@/components/ui/toggle";
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
-import { LANGUAGE_LEVEL_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
+import type { ApplyAnswers } from "@/lib/apply/answers";
+import { sendChannel } from "@/lib/apply/send-step";
 import { APPLY_STEPS, FILL_STEPS } from "@/lib/apply/steps";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyTabData } from "@/lib/apply/view";
 import { cn } from "@/lib/cn";
 import type { ApplyJobResult } from "@/lib/jobs/apply";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { fillThisPage, saveApplyAnswers, saveApplyBrowser, settleApplyAttempt, startApply, testApplyBrowser } from "./apply-actions";
+import { APPLY_BROWSER_HREF } from "../../settings/apply-browser-card";
+import { fillThisPage, settleApplyAttempt, startApply } from "./apply-actions";
 import { JobWatcher } from "./job-watcher";
 
 /** How often the tab asks the server whether the browser saw the confirmation, while it's watching. */
@@ -39,10 +37,24 @@ const STATUS_LABELS: Record<ApplyAttemptStatus, string> = {
  * or on her laptop, the form is filled from the profile and the standard
  * answers, the PDFs are attached, and the user checks and presses Send; the
  * tab shows what was filled, what's left to her, and how each run ended.
- * It opens with a warning about what can go wrong. When the posting asks
- * for an email instead, it points to the Email tab.
+ * One send path (send-step.ts, audit round 2): the assistant and its
+ * warnings show only when the employer takes applications on a form; a job
+ * board says to apply there by hand, with the assistant one click away; an
+ * email posting points to the Email tab. Where the window opens is set in
+ * Settings → Standard answers.
  */
-export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: string; data: ApplyTabData; onGoToEmail: () => void }) {
+export function ApplyTab({
+  applicationId,
+  data,
+  onGoToEmail,
+  gmailSends = false,
+}: {
+  applicationId: string;
+  data: ApplyTabData;
+  onGoToEmail: () => void;
+  /** The Email tab can send with Gmail: without it, nothing promises it does. */
+  gmailSends?: boolean;
+}) {
   const router = useRouter();
   // The job to follow: one started here, else the one the server reports (e.g. since before a reload), unless it's the one just seen finish.
   const [started, setStarted] = useState<{ id: string; revision: number; kind: "run" | "page" } | null>(null);
@@ -100,36 +112,67 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
   const current = step ? Math.max(0, ((filling ? FILL_STEPS : APPLY_STEPS) as readonly string[]).indexOf(step)) : 0;
   const { plan } = data;
   const busy = job !== null || starting;
+  // The assistant is offered for the employer's own form; on a job board only when she asks, or once it has run there.
+  const channel = sendChannel(plan);
+  const [tryAssistant, setTryAssistant] = useState(false);
+  const assistant = channel === "form" || (channel === "board" && (tryAssistant || latest !== null || job !== null));
 
   return (
     <div className="flex flex-1 flex-col items-center gap-4 overflow-auto bg-canvas px-10 pt-11 pb-[var(--composer-space,4rem)]">
       {job && <JobWatcher<ApplyJobResult> key={job.id} id={job.id} revision={job.revision} onChange={jobChanged} />}
 
-      <Panel title="Before you use it" tone="warning">
-        <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-pretty">
-          <li>
-            The browser window opens on the computer the app runs on. When it runs on a server, such as a NAS, there&apos;s no screen there: connect the Chrome on
-            your laptop under Browser window below, or it won&apos;t work.
-          </li>
-          <li>
-            Job boards such as StepStone, Indeed and LinkedIn may forbid automated tools in their terms, and their bot checks can stop it. If in doubt, apply
-            there by hand.
-          </li>
-          <li>Forms differ and change, so a field can be filled wrongly or missed. Check every field, and every answer the AI wrote, before you press Send.</li>
-          {data.browserAddress && <li>While your laptop&apos;s Chrome is connected, the server controls it: use that window only for applying, not for your own browsing.</li>}
-        </ul>
-      </Panel>
+      {/* One send path (send-step.ts, jobauto fork): the assistant only where the employer takes applications on a form. */}
+      {channel === "board" && plan.kind === "web" && (
+        <Panel title="Apply on the job board">
+          <p className="text-sm text-pretty text-muted">
+            The posting is on a job board, <strong className="font-medium text-ink">{plan.host}</strong>. Apply there by hand, and upload the Bewerbungsmappe: your
+            letter, resume and Anlagen in one PDF. Then mark it as sent on the Email tab.
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <a href={plan.url} target="_blank" rel="noopener noreferrer" className={buttonClassName("primary", "md", "hover:text-on-primary")}>
+              Open the posting<span aria-hidden>↗</span>
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+            {!assistant && (
+              <Button variant="text" onClick={() => setTryAssistant(true)}>
+                Try the apply assistant anyway
+              </Button>
+            )}
+          </div>
+        </Panel>
+      )}
 
-      <Panel title="Apply on the employer's page">
-        {plan.kind === "web" && (
-          <>
+      {assistant && plan.kind === "web" && (
+        <>
+          <Panel title="Before you use it" tone="warning">
+            <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-pretty">
+              {plan.board && (
+                <li>
+                  Job boards such as StepStone, Indeed and LinkedIn may forbid automated tools in their terms, and their bot checks can stop it. If in doubt, apply
+                  there by hand.
+                </li>
+              )}
+              <li>Forms differ and change, so a field can be filled wrongly or missed. Check every field, and every answer the AI wrote, before you press Send.</li>
+            </ul>
+          </Panel>
+
+          <Panel title="Apply on the employer's page">
             <p className="text-sm text-pretty text-muted">
               The form for this posting is on <strong className="font-medium text-ink">{plan.host}</strong>
               {plan.atsLabel !== "the employer's website" && <> ({plan.atsLabel})</>}.{" "}
               {plan.account
                 ? "That site asks you to sign in. The browser window keeps you signed in from one application to the next, so you only do it once."
-                : `I open it in ${data.browserAddress ? "the Chrome on your laptop" : "a Chrome window on the computer the app runs on"}, fill in what I know, attach your PDFs, and leave the checking and the Send button to you.`}
+                : "I open it, fill in what I know, attach your PDFs, and leave the checking and the Send button to you."}
               {plan.board && " It's a job board: its apply button may lead on to the employer's own page, and I'll follow it."}
+            </p>
+            {/* Where the window opens is set up once, in Settings (audit round 2). */}
+            <p className="text-meta text-pretty text-muted">
+              {data.browserAddress
+                ? `The window opens in the Chrome on your laptop, at ${data.browserAddress}.`
+                : "The window opens on the computer the app runs on. On a server with no screen, such as a NAS, connect your laptop's Chrome first."}{" "}
+              <Link href={APPLY_BROWSER_HREF} className="underline underline-offset-2 hover:text-ink">
+                Change where it opens
+              </Link>
             </p>
             {data.missing.length > 0 && (
               <p className="rounded-control bg-warning-surface px-3 py-2 text-sm text-warning">
@@ -153,26 +196,29 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
                 </span>
               </div>
             )}
-          </>
-        )}
-        {plan.kind === "email" && (
-          <>
-            <p className="text-sm text-pretty text-muted">
-              This posting asks for applications by email, at <strong className="font-medium text-ink">{plan.to}</strong>. The Email tab writes the email and
-              sends it with your PDFs attached, so there&apos;s no form to fill here.
-            </p>
-            <Button variant="secondary" className="mt-1 self-start" onClick={onGoToEmail}>
-              Go to the Email tab
-            </Button>
-          </>
-        )}
-        {plan.kind === "none" && (
+          </Panel>
+        </>
+      )}
+
+      {plan.kind === "email" && (
+        <Panel title="Apply by email">
+          <p className="text-sm text-pretty text-muted">
+            This posting asks for applications by email, at <strong className="font-medium text-ink">{plan.to}</strong>. The Email tab writes the email
+            {gmailSends ? " and sends it with your PDFs attached" : ", to send from your own mail with your PDFs attached"}, so there&apos;s no form to fill here.
+          </p>
+          <Button variant="secondary" className="mt-1 self-start" onClick={onGoToEmail}>
+            Go to the Email tab
+          </Button>
+        </Panel>
+      )}
+      {plan.kind === "none" && (
+        <Panel title="Apply by hand">
           <p className="text-sm text-pretty text-muted">
             No link to apply at was saved with this application, and the posting names no email address. Apply by hand with the PDFs from the
             Resume and Cover letter tabs, then mark it as sent.
           </p>
-        )}
-      </Panel>
+        </Panel>
+      )}
 
       {latest && (!job || filling) && (
         <AttemptPanel
@@ -184,9 +230,7 @@ export function ApplyTab({ applicationId, data, onGoToEmail }: { applicationId: 
         />
       )}
 
-      {plan.kind === "web" && <BrowserPanel applicationId={applicationId} address={data.browserAddress} />}
-
-      <AnswersPanel applicationId={applicationId} answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} salaryGuide={data.salaryGuide ?? null} />
+      <AnswersPanel answers={data.answers} autoSubmitOk={plan.kind === "web" && plan.autoSubmitOk} salaryGuide={data.salaryGuide ?? null} />
 
       {data.attempts.length > 1 && (
         <Panel title="Earlier runs">
@@ -347,157 +391,55 @@ function pagesOf(filled: ApplyAttemptView["filled"]): { page: number; entries: A
   return [...byPage].map(([page, entries]) => ({ page, entries })).sort((a, b) => b.page - a.page);
 }
 
-/** Where the browser window opens: on the computer the app runs on, or in the Chrome on a laptop. */
-function BrowserPanel({ applicationId, address: saved }: { applicationId: string; address: string | null }) {
-  const router = useRouter();
-  const [address, setAddress] = useState(saved ?? "");
-  const [saving, startSaving] = useTransition();
-  const [testing, startTesting] = useTransition();
-  const dirty = address.trim() !== (saved ?? "");
+/** Where the standard answers are edited (jobauto fork): Settings, their one place. */
+export const ANSWERS_HREF = "/settings?section=answers";
 
-  const save = () =>
-    startSaving(async () => {
-      const result = await saveApplyBrowser({ id: applicationId, address: address.trim() });
-      if (!result.ok) return toast(result.error);
-      if (result.toast) toast(result.toast);
-      router.refresh();
-    });
-
-  const test = () =>
-    startTesting(async () => {
-      const result = await testApplyBrowser({ address: address.trim() });
-      toast(result.ok ? `${result.data.version} answered. It's ready.` : result.error);
-    });
-
-  return (
-    <Panel title="Browser window">
-      <p className="text-sm text-pretty text-muted">
-        {saved
-          ? `The window opens in the Chrome on your laptop, at ${saved}. Start Chrome with the Apply shortcut before you click Open and fill it in.`
-          : "The window opens on the computer the app runs on. If the app runs on a server, such as a NAS, enter the address of your laptop's Chrome here."}{" "}
-        How to set up the laptop is in the install guide, under Apply from a laptop.
-      </p>
-      <Input
-        label="Your laptop's Chrome"
-        hint="The laptop's Tailscale IP address and the port, e.g. http://100.101.102.103:9222. Leave it empty for a window on the computer the app runs on."
-        placeholder="http://100.101.102.103:9222"
-        value={address}
-        onChange={(event) => setAddress(event.target.value)}
-      />
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant={dirty ? "primary" : "secondary"} aria-disabled={saving || !dirty || undefined} onClick={() => !saving && dirty && save()}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-        <Button variant="text" aria-disabled={testing || !address.trim() || undefined} onClick={() => !testing && address.trim() && test()}>
-          {testing ? "Testing…" : "Test"}
-        </Button>
-        {dirty && <span className="text-meta text-muted">Not saved yet</span>}
-      </div>
-    </Panel>
-  );
-}
-
-/** The standard answers every form asks for, saved once. */
+/**
+ * The standard answers every form asks for (jobauto fork): read-only here,
+ * as this application uses them, with the salary guide for this job beside
+ * the salary; they're edited in one place, Settings → Standard answers.
+ */
 function AnswersPanel({
-  applicationId,
-  answers: saved,
+  answers,
   autoSubmitOk,
   salaryGuide,
 }: {
-  applicationId: string;
   answers: ApplyAnswers;
   autoSubmitOk: boolean;
-  /** What postings like this one pay (salary-guide.ts), as a hint under the salary; null with too few. */
+  /** What postings like this one pay (salary-guide.ts), beside the salary; null with too few. */
   salaryGuide: string | null;
 }) {
-  const router = useRouter();
-  const [answers, setAnswers] = useState<ApplyAnswers>(saved);
-  const [saving, startSaving] = useTransition();
-  const set = <K extends keyof ApplyAnswers>(key: K, value: ApplyAnswers[K]) => setAnswers((current) => ({ ...current, [key]: value }));
-  const dirty = JSON.stringify(answers) !== JSON.stringify(saved);
-
-  const save = () =>
-    startSaving(async () => {
-      const result = await saveApplyAnswers({ id: applicationId, answers });
-      if (!result.ok) return toast(result.error);
-      if (result.toast) toast(result.toast);
-      router.refresh();
-    });
-
+  const level = (value: ApplyAnswers["germanLevel"]) => (value === "native" ? "Native" : value);
+  const rows: { label: string; value: string; note?: string }[] = [
+    { label: "Salary expectation", value: answers.salary, note: salaryGuide ? `Postings like this one: ${salaryGuide}.` : undefined },
+    { label: "Earliest start date", value: answers.startDate },
+    { label: "Notice period", value: answers.noticePeriod },
+    { label: "German course", value: answers.germanCourse },
+    { label: "Where you'd work", value: answers.mobility },
+    { label: "Degree recognition", value: answers.degreeRecognition },
+    { label: "German level", value: level(answers.germanLevel) },
+    { label: "English level", value: level(answers.englishLevel) },
+    { label: "Work permit", value: answers.workPermit ? "Allowed to work in Germany without sponsorship" : "Needs sponsorship" },
+    { label: "Press Send for me", value: answers.autoSubmit ? (autoSubmitOk ? "On, and this site is one where it's safe" : "On, but on this site you press Send yourself") : "Off: you press Send yourself" },
+  ];
   return (
     <Panel title="Your standard answers">
-      <p className="text-sm text-pretty text-muted">
-        What German forms ask for and your profile doesn&apos;t hold. Saved once, used on every form; leave one empty and I&apos;ll leave that field to you. When a posting asks for your
-        salary expectation or earliest start date, the cover letter states them from here too.
+      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-pretty text-muted">
+        <span>Used for every application: forms, the letter, call prep and your Kurzprofil. An empty one is left to you.</span>
+        <Link href={ANSWERS_HREF} className="font-medium text-ink underline underline-offset-2">
+          Edit them in Settings
+        </Link>
       </p>
-      <div className="grid gap-4 @min-[560px]:grid-cols-2">
-        <Input
-          label="Salary expectation"
-          placeholder="e.g. 55.000 € brutto/Jahr"
-          hint={salaryGuide ? `Postings you've seen: ${salaryGuide}.` : undefined}
-          value={answers.salary}
-          onChange={(event) => set("salary", event.target.value)}
-        />
-        <Input label="Earliest start date" hint="“sofort”, or a day as YYYY-MM-DD" placeholder="sofort" value={answers.startDate} onChange={(event) => set("startDate", event.target.value)} />
-        <Input label="Notice period" placeholder="e.g. keine, or 3 Monate" value={answers.noticePeriod} onChange={(event) => set("noticePeriod", event.target.value)} />
-        <Input
-          label="German course"
-          hint="What you're doing to improve, and the exam date"
-          placeholder="e.g. B1 course since Sept 2026, exam March 2027"
-          value={answers.germanCourse}
-          onChange={(event) => set("germanCourse", event.target.value)}
-        />
-        <Input
-          label="Where you'd work"
-          hint="For agencies and your Kurzprofil"
-          placeholder="e.g. Ganz Deutschland, auch remote"
-          value={answers.mobility}
-          onChange={(event) => set("mobility", event.target.value)}
-        />
-        <Input
-          label="Degree recognition"
-          hint="Your degree's German equivalence, if assessed"
-          placeholder="e.g. ZAB: equivalent to a German Bachelor"
-          value={answers.degreeRecognition}
-          onChange={(event) => set("degreeRecognition", event.target.value)}
-        />
-        <Select label="German level" value={answers.germanLevel} onChange={(event) => set("germanLevel", event.target.value as ApplyAnswers["germanLevel"])}>
-          {LANGUAGE_LEVEL_ANSWERS.map((level) => (
-            <option key={level} value={level}>
-              {level === "native" ? "Native" : level}
-            </option>
-          ))}
-        </Select>
-        <Select label="English level" value={answers.englishLevel} onChange={(event) => set("englishLevel", event.target.value as ApplyAnswers["englishLevel"])}>
-          {LANGUAGE_LEVEL_ANSWERS.map((level) => (
-            <option key={level} value={level}>
-              {level === "native" ? "Native" : level}
-            </option>
-          ))}
-        </Select>
-        <Checkbox
-          className="self-end"
-          label="I'm allowed to work in Germany without sponsorship"
-          checked={answers.workPermit}
-          onChange={(event) => set("workPermit", event.target.checked)}
-        />
-      </div>
-      <Toggle
-        label="Press Send for me"
-        description={
-          autoSubmitOk
-            ? "Only on systems whose forms are simple and stable (Personio, Greenhouse, Lever, JOIN and a few more), only when nothing is left for you to fill, and never past a CAPTCHA. Everywhere else you press Send yourself."
-            : "On systems whose forms are simple and stable (Personio, Greenhouse, Lever, JOIN and a few more), when nothing is left for you to fill and there's no CAPTCHA. This posting's site isn't one of them, so here you press Send yourself either way."
-        }
-        checked={answers.autoSubmit}
-        onCheckedChange={(checked) => set("autoSubmit", checked)}
-      />
-      <div className="flex items-center gap-3">
-        <Button variant={dirty ? "primary" : "secondary"} aria-disabled={saving || !dirty || undefined} onClick={() => !saving && dirty && save()}>
-          {saving ? "Saving…" : "Save answers"}
-        </Button>
-        {dirty && <span className="text-meta text-muted">Not saved yet</span>}
-      </div>
+      {answers.confirmed === false && <p className="text-meta text-warning">Not saved yet: until they are, letters don&apos;t claim a work permit.</p>}
+      <dl aria-label="Your standard answers" className="grid gap-x-6 gap-y-2.5 text-sm @min-[560px]:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.label} className="flex min-w-0 flex-col gap-0.5">
+            <dt className="text-meta text-muted">{row.label}</dt>
+            <dd className={cn("text-pretty", row.value ? "text-ink" : "text-muted italic")}>{row.value || "Not filled in"}</dd>
+            {row.note && <dd className="text-meta text-pretty text-muted">{row.note}</dd>}
+          </div>
+        ))}
+      </dl>
     </Panel>
   );
 }

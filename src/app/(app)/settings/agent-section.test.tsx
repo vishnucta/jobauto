@@ -13,12 +13,6 @@ vi.mock("../agent/actions", () => ({
   saveAgentSettings: vi.fn(async () => ({ ok: true, data: null })),
   saveRecurringSearch: vi.fn(), moveRecurringSearch: vi.fn(), deleteRecurringSearch: vi.fn(), setRecurringSearchEnabled: vi.fn(),
 }));
-// The supporter digest's own actions (jobauto fork).
-vi.mock("./actions", () => ({
-  updateSettings: vi.fn(async () => ({ ok: true, data: null })),
-  saveSupporterAddress: vi.fn(async ({ address }: { address: string | null }) => ({ ok: true, data: { address } })),
-  sendDigestNow: vi.fn(async () => ({ ok: true, data: null })),
-}));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { ok: boolean; error?: string }) => (result.ok ? result : (toast(result.error!), result)) }));
 
 const initial: AgentSettings = { enabled: false, hour: 7, covers: "two-thirds", maxScores: 15, maxDrafts: 3, autoDraft: false, strongCovers: "two-thirds" };
@@ -216,9 +210,10 @@ describe("Settings → Job agent", () => {
     expect(screen.getByRole("checkbox", { name: "JSearch" })).not.toBeChecked();
   });
 
-  it("shows the weekly digest for a supporter when it's given (jobauto fork)", () => {
-    open({ supporter: { address: null, day: 7, hour: 18 } });
-    expect(screen.getByText("Weekly digest for a supporter")).toBeInTheDocument();
+  it("leaves the weekly digest for a supporter to Notifications, and links there (jobauto fork)", () => {
+    open();
+    expect(screen.queryByLabelText("Their topic address")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings → Notifications" })).toHaveAttribute("href", "/settings?section=notifications");
   });
 
   it("warns for Bundesagentur without disabling manual search and points to missing global providers", () => {
@@ -236,10 +231,11 @@ describe("Settings → Job agent", () => {
     expect(toast).toHaveBeenCalledWith("Enable a search first.");
   });
 
-  it("saves which new matches get a Strong new matches message (jobauto fork)", async () => {
+  it("saves only which new matches count as strong; Notifications delivers them (jobauto fork)", async () => {
     const user = userEvent.setup(); open();
-    expect(screen.getByLabelText("Tell me about new matches that cover")).toHaveValue("two-thirds");
-    await user.selectOptions(screen.getByLabelText("Tell me about new matches that cover"), "All of the requirements");
+    expect(screen.queryByLabelText("Tell me about new matches that cover")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("A new match is strong when it covers")).toHaveValue("two-thirds");
+    await user.selectOptions(screen.getByLabelText("A new match is strong when it covers"), "All of the requirements");
     expect(saveAgentSettings).toHaveBeenLastCalledWith({ strongCovers: "all" });
   });
 });

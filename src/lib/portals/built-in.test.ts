@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { jooble } from "@/lib/job-search/jooble";
 import { JOB_SOURCES } from "@/lib/job-search/search";
 import { serpapi } from "@/lib/job-search/serpapi";
 import { attributionHref, postingPage, SOURCE_INFO } from "@/lib/job-search/sources";
@@ -28,11 +27,11 @@ describe("the built-in portals", () => {
     expect(SOURCE_INFO.ARBEITSAGENTUR).toMatchObject({ countries: ["de"], keyUrl: null });
   });
 
-  it("give SerpApi and Jooble (jobauto fork) what the fork's sources showed, and run them on their own code", () => {
+  it("give SerpApi (jobauto fork) what the fork's source showed, and run it on its own code; Jooble is gone", () => {
     expect(SOURCE_INFO.SERPAPI).toMatchObject({ name: "SerpApi", quotaPeriod: "this month", attribution: null, countries: null, radius: true, keyUrl: "https://serpapi.com/manage-api-key" });
-    expect(SOURCE_INFO.JOOBLE).toMatchObject({ name: "Jooble", quotaPeriod: "in all", attribution: "Jobs by Jooble", attributionLink: null, countries: null, radius: true, keyUrl: "https://jooble.org/api/about" });
     expect(builtInAdapter("SERPAPI")).toBe(serpapi);
-    expect(builtInAdapter("JOOBLE")).toBe(jooble);
+    expect(SOURCE_INFO.JOOBLE).toBeUndefined();
+    expect(() => builtInAdapter("JOOBLE")).toThrow();
   });
 
   it("link Adzuna's credit to its site for the posting's country, and to nowhere else", () => {

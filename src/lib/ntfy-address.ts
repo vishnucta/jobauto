@@ -1,7 +1,7 @@
 // An ntfy topic's address (jobauto fork), checked on the server and in
 // Settings: "https://ntfy.sh/jobauto-k3x9…", or a topic on the user's own
-// ntfy server. The phone alerts' topic, moved into Notifications once
-// (alert-address.ts), and the supporter digest's (supporter-digest-data.ts)
+// ntfy server. The phone alerts' topic and the supporter digest's, each
+// moved into Notifications once (alert-address.ts, supporter-digest-data.ts),
 // are such addresses. Nothing here reaches the server, so the browser can
 // use it too.
 

@@ -118,6 +118,13 @@ export const frozenCopySchema = z.object({
   includeReferences: z.boolean(),
   /** It was following the base resume's sections, so undoing the send can put that back. */
   followedBase: z.boolean(),
+  /**
+   * The letter's sender and signature are drawn from this copy's profile, as
+   * they were from the profile until the send (letter-frame.ts, jobauto fork).
+   * Missing in copies made before: those letters keep the sender they stored,
+   * which is what went out.
+   */
+  senderFromProfile: z.boolean().optional(),
 });
 export type FrozenCopy = z.infer<typeof frozenCopySchema>;
 
@@ -148,7 +155,7 @@ async function loadShared(db: Db, profileId: string | null): Promise<Shared> {
 }
 
 /** What to write on an application to freeze it. */
-async function frozenData(db: Db, applicationId: string, { profile, settings, own, baseTheme }: Shared) {
+async function frozenData(db: Db, applicationId: string, { profile, settings, own, baseTheme }: Shared, { senderFromProfile = false } = {}) {
   const application = await db.application.findUniqueOrThrow({
     where: { id: applicationId },
     select: { sections: true, extracted: true, documents: { select: { kind: true, theme: { select: THEME_FIELDS } } } },
@@ -163,15 +170,23 @@ async function frozenData(db: Db, applicationId: string, { profile, settings, ow
     dateFormat: settings.dateFormat,
     includeReferences: settings.includeRefs && extracted.success && extracted.data.asksForReferences === true,
     followedBase: application.sections === null,
+    ...(senderFromProfile ? { senderFromProfile } : {}),
   };
   return { frozen: asJson(copy), sections: application.sections === null ? asJson(own.resumeSections) : asJson(application.sections) };
 }
 
-/** On an application's first send. */
+/** On an application's first send: its letter's sender is the profile's then, as it showed until now. */
 export async function frozenDataForSend(db: Db, applicationId: string) {
   const { profileId } = await db.application.findUniqueOrThrow({ where: { id: applicationId }, select: { profileId: true } });
-  return frozenData(db, applicationId, await loadShared(db, profileId));
+  return frozenData(db, applicationId, await loadShared(db, profileId), { senderFromProfile: true });
 }
+
+/**
+ * Whether a letter's sender and signature are drawn from the profile it's
+ * shown with rather than as it stored them: always for a draft, and for a
+ * letter sent since they were (jobauto fork).
+ */
+export const senderFromProfile = (copy: FrozenCopy | null) => copy === null || copy.senderFromProfile === true;
 
 /** Undoing that send: it follows the profile again, and the base resume's sections if it did. */
 export function unfrozenData(frozen: unknown) {

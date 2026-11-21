@@ -4,12 +4,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DashboardFigures } from "@/lib/dashboard";
 
-import { rememberQuietDays, rememberWeeklyTarget, startExperiment, stopExperiment } from "./actions";
+import type { TodayItem } from "@/lib/today";
+
+import { rememberQuietDays, rememberWeeklyTarget } from "./actions";
+import { prepareAgentDraft } from "./agent/actions";
 import { Dashboard } from "./dashboard";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null, useSearchParams: () => new URLSearchParams() }));
-vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })), startExperiment: vi.fn(async () => ({ ok: true, data: null })), stopExperiment: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./agent/actions", () => ({ prepareAgentDraft: vi.fn(async () => ({ ok: true, data: { jobId: "job-1", applicationId: null } })) }));
+vi.mock("@/hooks/use-job", () => ({ useJob: () => ({ step: "Writing your cover letter" }) }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
 
 const figures: DashboardFigures = {
@@ -67,7 +72,7 @@ describe("the dashboard (E9-7)", () => {
   });
 
   it("scopes only the left zone by the period; the header and this week stay (E28-1)", () => {
-    render(<Dashboard {...props} range="30d" figures={{ ...figures, sent: 2, heardBack: 1 }} />);
+    render(<Dashboard {...props} range="30d" figures={{ ...figures, sent: 2, heardBack: 1 }} week={{ target: 0, sent: 0, daysLeft: 3, streak: 0, weeks: [] }} />);
     // The header counts all time.
     expect(screen.getByText(/^7 sent, 5 heard back\./)).toBeInTheDocument();
     const search = screen.getByRole("region", { name: "Your search so far" });
@@ -75,7 +80,9 @@ describe("the dashboard (E9-7)", () => {
     expect(within(search).getByRole("radio", { name: "Last 30 days" })).toBeChecked();
     expect(within(search).getByRole("region", { name: "Your funnel" })).toBeInTheDocument();
     const week = screen.getByRole("region", { name: "This week · not affected by the period" });
-    expect(within(week).getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(within(week).getByRole("region", { name: "This week" })).toBeInTheDocument();
+    // Do today is about now: above both zones, outside the period.
+    expect(search.contains(screen.getByRole("region", { name: "Do today" }))).toBe(false);
   });
 
   it("shows the funnel with its figures and notes, in words", () => {
@@ -92,20 +99,15 @@ describe("the dashboard (E9-7)", () => {
     ]);
   });
 
-  it("breaks down where things stand, each status opening its list, with a link to the board (E28-3)", () => {
+  it("leaves out Where things stand, which repeated the sidebar's counts (jobauto fork)", () => {
     render(<Dashboard {...props} />);
-    const standing = screen.getByRole("region", { name: "Where things stand" });
-    expect(within(standing).getByRole("link", { name: "Open board" })).toHaveAttribute("href", "/applications?view=board");
-    const accepted = within(standing).getByRole("link", { name: /^Accepted/ });
-    expect(accepted).toHaveTextContent("Accepted0");
-    expect(accepted).toHaveClass("text-muted");
-    expect(accepted).toHaveAttribute("href", "/applications?status=accepted");
-    expect(within(standing).getByRole("link", { name: /^Sent/ })).toHaveAttribute("href", "/applications?status=sent");
+    expect(screen.queryByRole("region", { name: "Where things stand" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Week by week" })).toBeInTheDocument();
   });
 
-  it("lists what needs you, each row's button opening its application (E28-4)", () => {
+  it("lists what needs you in Do today, each row's button opening its application (E28-4)", () => {
     render(<Dashboard {...props} />);
-    const needs = screen.getByRole("region", { name: "Needs you" });
+    const needs = screen.getByRole("region", { name: "Do today" });
     const [draft, offer] = within(needs).getAllByRole("listitem");
     expect(draft).toHaveTextContent("Brightline Transit · Senior Service DesignerStill a draft. · apply by Thu 1 Oct");
     expect(within(draft).getByText("apply by Thu 1 Oct")).toHaveClass("text-warning");
@@ -123,7 +125,7 @@ describe("the dashboard (E9-7)", () => {
   it("shows six rows, then the rest on Show all", async () => {
     const many = Array.from({ length: 8 }, (_, index) => ({ ...figures.needsYou[1], id: `offer-${index}`, company: `Company ${index}` }));
     render(<Dashboard {...props} figures={{ ...figures, needsYou: many }} />);
-    const needs = screen.getByRole("region", { name: "Needs you" });
+    const needs = screen.getByRole("region", { name: "Do today" });
     expect(within(needs).getAllByRole("listitem")).toHaveLength(6);
     await userEvent.click(within(needs).getByRole("button", { name: "Show all 8" }));
     expect(within(needs).getAllByRole("listitem")).toHaveLength(8);
@@ -134,7 +136,7 @@ describe("the dashboard (E9-7)", () => {
   it("sets how long without news before a follow-up is suggested (E9-9)", async () => {
     const user = userEvent.setup();
     render(<Dashboard {...props} quietDays={7} />);
-    const threshold = within(screen.getByRole("region", { name: "Needs you" })).getByLabelText("Suggest a follow-up after");
+    const threshold = within(screen.getByRole("region", { name: "Do today" })).getByLabelText("Suggest a follow-up after");
     expect(threshold).toHaveValue("7");
     expect(within(threshold).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "3 days",
@@ -155,9 +157,12 @@ describe("the dashboard (E9-7)", () => {
     expect(screen.getByLabelText("Suggest a follow-up after")).toHaveValue("8");
   });
 
-  it("is all caught up when nothing needs you", () => {
-    render(<Dashboard {...props} figures={{ ...figures, needsYou: [] }} />);
-    expect(screen.getByText("All caught up. Nice.")).toBeInTheDocument();
+  it("is all caught up when nothing needs you, with where to find more", () => {
+    render(<Dashboard {...props} figures={{ ...figures, needsYou: [] }} todaysThree={[]} />);
+    const card = screen.getByRole("region", { name: "Do today" });
+    expect(card).toHaveTextContent(/All caught up/);
+    expect(within(card).getByRole("link", { name: "Open the job agent" })).toHaveAttribute("href", "/agent");
+    expect(within(card).getByRole("link", { name: "Open Positions" })).toHaveAttribute("href", "/jobs");
   });
 
   it("welcomes a new user", () => {
@@ -171,12 +176,66 @@ describe("the dashboard (E9-7)", () => {
     const calendar = <section aria-label="Calendar" />;
     const { rerender } = render(<Dashboard {...props} calendar={calendar} />);
     const region = screen.getByRole("region", { name: "Calendar" });
-    expect(screen.getByRole("region", { name: "Needs you" }).compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Do today" }).compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Not among the cards, which dim while another period loads.
     expect(screen.getByRole("region", { name: "Your funnel" }).parentElement!.contains(region)).toBe(false);
     // A new user has the calendar too.
     rerender(<Dashboard {...props} empty calendar={calendar} />);
     expect(screen.getByRole("region", { name: "Calendar" })).toBeInTheDocument();
+  });
+
+  it("leaves the this-week zone out when it has neither the target nor a calendar to show (jobauto fork)", () => {
+    render(<Dashboard {...props} />);
+    expect(screen.queryByRole("region", { name: "This week · not affected by the period" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Do today (jobauto fork)", () => {
+  const three: TodayItem[] = [
+    // The same draft Needs you lists: once only.
+    { kind: "finish", applicationId: "brightline", title: "Senior Service Designer", company: "Brightline Transit" },
+    { kind: "review", applicationId: "a2", title: "Regulatory Reporting Analyst", company: "Berenberg", coverage: { hit: 5, total: 6, mustMissing: 0 } },
+    { kind: "prepare", candidateId: "c1", title: "Middle Office Specialist", company: "Warburg", coverage: { hit: 4, total: 6, mustMissing: 1 }, url: "https://jobs.example/1", jobId: null },
+  ];
+
+  it("is one list at the top, Needs you and Today's three together, each thing once", () => {
+    render(<Dashboard {...props} todaysThree={three} />);
+    expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Today's three" })).not.toBeInTheDocument();
+    const card = screen.getByRole("region", { name: "Do today" });
+    expect(card.compareDocumentPosition(screen.getByRole("region", { name: "Your search so far" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const rows = within(card).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent?.split("·")[0].trim())).toEqual(["Brightline Transit", "Oaken Studio", "Berenberg", "Warburg"]);
+    expect(within(card).getAllByRole("link", { name: /Brightline Transit/ })).toHaveLength(1);
+    expect(within(rows[2]).getByRole("link", { name: "Review for Berenberg, Regulatory Reporting Analyst" })).toHaveAttribute("href", "/applications/a2");
+    expect(rows[2]).toHaveTextContent("The agent's draft: read it and send it · 5 of 6 requirements covered");
+  });
+
+  it("counts the agent's draft in the greeting, with what's due", () => {
+    render(<Dashboard {...props} todaysThree={three} />);
+    expect(screen.getByText(/^7 sent, 5 heard back\./)).toHaveTextContent("7 sent, 5 heard back. 1 thing needs you this week, and 1 draft is waiting.");
+  });
+
+  it("says an undated draft is waiting rather than that nothing needs you (the audit's case)", () => {
+    const draft = { id: "northwind", company: "Northwind Capital GmbH", role: "Analyst", status: "DRAFT" as const, reason: "Still a draft. Ready when you are.", due: null, soon: false, action: "Finish draft" as const };
+    render(<Dashboard {...props} figures={{ ...figures, needsYou: [draft] }} todaysThree={[{ kind: "finish", applicationId: "northwind", title: "Analyst", company: "Northwind Capital GmbH" }]} />);
+    expect(screen.getByText(/^7 sent, 5 heard back\./)).toHaveTextContent("7 sent, 5 heard back. 1 draft is waiting for you.");
+    expect(within(screen.getByRole("region", { name: "Do today" })).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("prepares a strong match in one click", async () => {
+    const user = userEvent.setup();
+    render(<Dashboard {...props} todaysThree={three} />);
+    const card = screen.getByRole("region", { name: "Do today" });
+    await user.click(within(card).getByRole("button", { name: "Prepare" }));
+    expect(prepareAgentDraft).toHaveBeenCalledWith({ candidateId: "c1" });
+    expect(await within(card).findByRole("button", { name: "Writing…" })).toBeInTheDocument();
+    expect(within(card).getByRole("status")).toHaveTextContent("Writing your cover letter");
+  });
+
+  it("links to Call prep's general practice", () => {
+    render(<Dashboard {...props} />);
+    expect(within(screen.getByRole("region", { name: "Do today" })).getByRole("link", { name: "Practise a first call" })).toHaveAttribute("href", "/call-prep");
   });
 });
 
@@ -193,50 +252,39 @@ describe("This week and What's working (jobauto fork)", () => {
     await waitFor(() => expect(rememberWeeklyTarget).toHaveBeenCalledWith({ target: 10 }));
   });
 
-  it("shows how often each kind of application moved on, once one is sent", () => {
+  it("shows how often each kind of application moved on, once about 10 are sent", () => {
     const working = {
-      sent: 6,
+      sent: 12,
       replies: 2,
       early: true,
       groups: [{ id: "found", title: "Where you found it", rows: [{ label: "Careers pages", sent: 3, replies: 2, rejections: 0, rate: 67 }, { label: "JSearch", sent: 3, replies: 0, rejections: 1, rate: 0 }] }],
     };
     render(<Dashboard {...props} working={working} />);
     const card = screen.getByRole("region", { name: "What's working" });
-    expect(card).toHaveTextContent("Of 6 sent, 2 moved on to a screening or further. With fewer than 20 sent, the differences below are hints, not answers yet.");
+    expect(card).toHaveTextContent("Of 12 sent, 2 moved on to a screening or further. With fewer than 20 sent, the differences below are hints, not answers yet.");
     expect(within(card).getByRole("row", { name: "Careers pages 3 sent 2 moved on 67%" })).toBeInTheDocument();
     expect(card).toHaveTextContent("Careers pages gets the most answers so far.");
   });
 
-  it("leaves What's working out until something is sent", () => {
-    render(<Dashboard {...props} working={{ sent: 0, replies: 0, early: true, groups: [] }} />);
+  it("leaves What's working out until about 10 are sent (jobauto fork)", () => {
+    const { rerender } = render(<Dashboard {...props} working={{ sent: 0, replies: 0, early: true, groups: [] }} />);
     expect(screen.queryByRole("region", { name: "What's working" })).not.toBeInTheDocument();
+    rerender(<Dashboard {...props} working={{ sent: 9, replies: 1, early: true, groups: [] }} />);
+    expect(screen.queryByRole("region", { name: "What's working" })).not.toBeInTheDocument();
+    rerender(<Dashboard {...props} working={{ sent: 10, replies: 1, early: true, groups: [] }} />);
+    expect(screen.getByRole("region", { name: "What's working" })).toBeInTheDocument();
+  });
+
+  it("shows This week before the first application, so Start here's target step has its control", () => {
+    render(<Dashboard {...props} empty figures={{ ...figures, sent: 0 }} week={{ target: 0, sent: 0, daysLeft: 3, streak: 0, weeks }} />);
+    expect(screen.getByLabelText("Aim for")).toHaveAttribute("id", "weekly-target");
   });
 });
 
-describe("Experiment (jobauto fork)", () => {
-  it("starts one from an idea, with two versions", async () => {
-    render(<Dashboard {...props} experiment={null} />);
-    const card = screen.getByRole("region", { name: "Experiment" });
-    await userEvent.click(within(card).getByRole("button", { name: "Letter language" }));
-    expect(within(card).getByLabelText("Version B")).toHaveValue("German letter");
-    await userEvent.click(within(card).getByRole("button", { name: "Start" }));
-    expect(startExperiment).toHaveBeenCalledWith({ name: "Letter language", a: "English letter", b: "German letter" });
-  });
-
-  it("shows how each version has done, how far from telling it is, and stops", async () => {
-    const running = {
-      experiment: { name: "Letter language", a: "English letter", b: "German letter", startedAt: "2026-11-20T10:00:00.000Z" },
-      results: [
-        { arm: "A" as const, label: "A: English letter", sent: 3, replies: 1 },
-        { arm: "B" as const, label: "B: German letter", sent: 2, replies: 0 },
-      ],
-    };
-    render(<Dashboard {...props} experiment={running} />);
-    const card = screen.getByRole("region", { name: "Experiment: Letter language" });
-    expect(within(card).getByRole("row", { name: "A: English letter 3 sent 1 moved on" })).toBeInTheDocument();
-    expect(card).toHaveTextContent("Too early to tell: send 2 more of A and 3 more of B.");
-    await userEvent.click(within(card).getByRole("button", { name: "Stop it" }));
-    expect(stopExperiment).toHaveBeenCalled();
+describe("Experiment, removed (jobauto fork)", () => {
+  it("has no A/B experiment card", () => {
+    render(<Dashboard {...props} />);
+    expect(screen.queryByRole("region", { name: /^Experiment/ })).not.toBeInTheDocument();
   });
 });
 

@@ -35,7 +35,6 @@ import {
 
 import { FindWorkLinks, type JobsCounts } from "../jobs/find-work-links";
 import { addRecruiter, addSuggestedRecruiters, deleteRecruiter, moveRecruiter, saveRecruiter, snoozeFollowUp } from "./actions";
-import { AgencyRound } from "./agency-round";
 import { NetworkCard } from "./network-card";
 
 export type RecruitersScreenProps = {
@@ -71,7 +70,9 @@ const TONE = {
  * conversation stands, when a follow-up is due, and the message to write
  * next, drafted from the profile. Dossier sends nothing: the message opens in
  * the user's own Gmail, and "I wrote to them" is the user's word. A screen
- * of its own under Positions (jobauto fork), which Find jobs had as a tab.
+ * of its own under Find work (jobauto fork), which Find jobs had as a tab.
+ * The agency round is its To contact view: the Kurzprofil, and "I wrote to
+ * them" on each one still to write to.
  */
 export function RecruitersScreen({ recruiters, facts, profileId, counts, today, network = { people: 0, importedAt: null } }: RecruitersScreenProps) {
   const router = useRouter();
@@ -85,6 +86,16 @@ export function RecruitersScreen({ recruiters, facts, profileId, counts, today, 
   const visible = recruiters.filter((recruiter) => matchesFilter(recruiter, filter, now)).toSorted((a, b) => listOrder(a, now) - listOrder(b, now));
   const count = (value: RecruiterFilter) => recruiters.filter((recruiter) => matchesFilter(recruiter, value, now)).length;
   const missingStarters = STARTER_RECRUITERS.some((starter) => !recruiters.some((recruiter) => recruiter.name.trim().toLowerCase() === starter.name.toLowerCase()));
+  const [writing, setWriting] = useState<string | null>(null);
+  const wrote = (recruiter: RecruiterView) => {
+    if (writing) return;
+    setWriting(recruiter.id);
+    startTransition(async () => {
+      const result = toastResult(await moveRecruiter({ id: recruiter.id, status: "CONTACTED" }));
+      setWriting(null);
+      if (result.ok) router.refresh();
+    });
+  };
 
   const addSuggested = () =>
     startTransition(async () => {
@@ -118,7 +129,6 @@ export function RecruitersScreen({ recruiters, facts, profileId, counts, today, 
           <Stat label="follow-ups due" value={count("DUE")} />
         </dl>
 
-        <AgencyRound recruiters={recruiters} facts={facts} profileId={profileId} onChanged={refresh} />
         <NetworkCard people={network.people} importedAt={network.importedAt} />
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
@@ -143,6 +153,7 @@ export function RecruitersScreen({ recruiters, facts, profileId, counts, today, 
                 </button>
               ))}
             </div>
+            {filter === "TO_CONTACT" && <KurzprofilNote profileId={profileId} toWrite={visible.length} />}
             {visible.length === 0 ? (
               <p className="py-6 text-sm text-muted">
                 {recruiters.length === 0
@@ -152,8 +163,17 @@ export function RecruitersScreen({ recruiters, facts, profileId, counts, today, 
             ) : (
               <ul className="flex flex-col">
                 {visible.map((recruiter) => (
-                  <li key={recruiter.id} className="border-t border-line first:border-t-0">
-                    <RecruiterRow recruiter={recruiter} now={now} selected={recruiter.id === selected} onSelect={() => setSelected(recruiter.id)} />
+                  <li key={recruiter.id} className="flex flex-wrap items-center gap-x-2 border-t border-line first:border-t-0">
+                    {/* On a phone the button goes under the row, so the name keeps its width. */}
+                    <div className="min-w-0 flex-[1_1_240px]">
+                      <RecruiterRow recruiter={recruiter} now={now} selected={recruiter.id === selected} onSelect={() => setSelected(recruiter.id)} />
+                    </div>
+                    {/* The agency round (jobauto fork): tick one off here once it's sent from her own mail. */}
+                    {filter === "TO_CONTACT" && (
+                      <Button variant="secondary" size="sm" className="mb-3 ml-2 flex-none sm:mb-0 sm:ml-0" aria-disabled={writing === recruiter.id || undefined} onClick={() => wrote(recruiter)}>
+                        I wrote to them <span className="sr-only">({recruiter.name})</span>
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -194,6 +214,27 @@ export function RecruitersScreen({ recruiters, facts, profileId, counts, today, 
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * The agency round's note (jobauto fork), above To contact: German agencies
+ * pitch candidates with a one-page Kurzprofil, made from the profile the
+ * messages are written from and the standard answers.
+ */
+function KurzprofilNote({ profileId, toWrite }: { profileId?: string; toWrite: number }) {
+  return (
+    <div role="note" className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-track px-4 py-3">
+      <p className="min-w-0 flex-[1_1_280px] text-meta text-pretty text-muted">
+        German agencies pitch candidates to employers with a one-page Kurzprofil, made from your profile and your standard answers.{" "}
+        {toWrite > 0
+          ? "Open each one for its message, attach the Kurzprofil and your resume, send it from your own mail, then press “I wrote to them”."
+          : "Everyone on your list has heard from you."}
+      </p>
+      <DownloadPdfButton href={profileId ? `/api/pdf?doc=kurzprofil&profile=${encodeURIComponent(profileId)}` : "/api/pdf?doc=kurzprofil"} variant="secondary" progress="Making your Kurzprofil…">
+        Kurzprofil (PDF)
+      </DownloadPdfButton>
+    </div>
   );
 }
 
@@ -369,6 +410,12 @@ function Draft({ recruiter, kind, facts, profileId }: { recruiter: RecruiterView
         <DownloadPdfButton href={profileId ? `/api/pdf?doc=base&profile=${encodeURIComponent(profileId)}` : "/api/pdf?doc=base"} variant="secondary">
           Download your resume
         </DownloadPdfButton>
+        {/* An agency's first message goes with the Kurzprofil (jobauto fork). */}
+        {recruiter.kind === "AGENCY" && kind === "first" && (
+          <DownloadPdfButton href={profileId ? `/api/pdf?doc=kurzprofil&profile=${encodeURIComponent(profileId)}` : "/api/pdf?doc=kurzprofil"} variant="secondary" progress="Making your Kurzprofil…">
+            Kurzprofil (PDF)
+          </DownloadPdfButton>
+        )}
       </div>
       {!recruiter.email && <p className="text-meta text-muted">There is no email for them yet. Add one under Details, or paste the message into your mail.</p>}
     </div>

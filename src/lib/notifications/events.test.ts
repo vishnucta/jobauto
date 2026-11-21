@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EVENT_NAMES, EVENTS, eventOn } from "./events";
+import { EVENT_NAMES, EVENTS, eventOn, onlyEvent } from "./events";
 
 describe("the events (E26-1)", () => {
   it("are on by default only for agent runs, the fork's alerts, withdrawn portals and documents written", () => {
@@ -80,5 +80,21 @@ describe("the events (E26-1)", () => {
       text: "Nordlicht Markets GmbH, Frankfurt am Main",
       path: "/startups?source=licence",
     });
+  });
+});
+
+describe("the supporter digest as an event (jobauto fork)", () => {
+  it("is off for her own channels, and its message is the digest as written", () => {
+    expect(eventOn({}, "supporter.digest")).toBe(false);
+    expect(EVENTS["supporter.digest"].message({ title: "Her week: 2 sent, 0 moved on", message: "Sent this week: 2 of 5." })).toEqual({
+      title: "Her week: 2 sent, 0 moved on",
+      text: "Sent this week: 2 of 5.",
+      path: "/",
+    });
+  });
+
+  it("gives the supporter's channel the digest and nothing else, not even events on by default", () => {
+    const events = onlyEvent("supporter.digest");
+    expect(EVENT_NAMES.filter((name) => eventOn(events, name))).toEqual(["supporter.digest"]);
   });
 });

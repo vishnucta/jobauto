@@ -1,19 +1,15 @@
 import "server-only";
 
-import type { CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { isAiUsable, loadAiSettingsView, PROVIDER_DEFAULTS } from "@/lib/ai/config";
 import { providerOption } from "@/lib/ai/provider-options";
 import { lastNightlyBackup } from "@/lib/backup-schedule";
-import { buildExport, exportFileName } from "@/lib/data-export";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import { FILE_NAME_TOKENS } from "@/lib/file-name";
 import { googleConnection } from "@/lib/google/account";
 import { sourceInfo, type JobSearchSettingsView } from "@/lib/job-search/sources";
-import { prisma } from "@/lib/prisma";
 import { loadProfileSettings, saveProfileSettings } from "@/lib/profiles";
-import { UPGRADE_GUIDE_URL } from "@/lib/releases";
 import { loadScoringConfig } from "@/lib/scoring/config";
 import { SCORER_INFO } from "@/lib/scoring/scorers";
 import { ARCHIVE_DAYS, DOCUMENTS_TO_WRITE, DOCUMENTS_TO_WRITE_LABELS, JOB_RETENTION_OPTIONS } from "@/lib/settings";
@@ -27,7 +23,6 @@ import {
   saveAiChoice,
   savePortalFieldValue,
   settingChoicesSchema,
-  startPdfZip,
   switchPortal,
   testAiProvider,
   testPortalConnection,
@@ -35,105 +30,24 @@ import {
   type SettingChoices,
 } from "@/lib/settings-changes";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
-import { copyTheme, createTheme, deleteCustomTheme, makeBaseTheme, updateCustomTheme } from "@/lib/theme-changes";
-import { loadTheme, loadThemes, loadThemeUsage } from "@/lib/theme-data";
-import { parseThemeFile, themeFieldsSchema, type ThemeFields } from "@/lib/theme-file";
-import type { ThemeData } from "@/lib/themes";
-import { availableUpdate, checkForUpdate } from "@/lib/update-check";
+import { availableUpdate } from "@/lib/update-check";
 import { appVersion } from "@/lib/version";
 
-import { chooseProfile, failure, profileInput, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, profileInput, text, type ToolContext } from "../kit";
 
-// Themes, settings without secrets, and exports (jobauto fork): what the
-// resume screen's themes and Settings do, through the same functions
-// (src/lib/theme-changes.ts, src/lib/settings-changes.ts). Keys stay in
+// Settings without secrets (jobauto fork): what Settings does, through the
+// same functions (src/lib/settings-changes.ts). Keys stay in
 // Settings: no tool takes one or gives one back, and get_settings only says
 // whether one is saved. Moving the AI to another server, which its key and
 // everything it reads would go to, deleting everything, importing an export,
 // the connector itself, adding or updating a portal, and the Bundesagentur
-// für Arbeit's "I understand" stay on the screen. The Base resume's theme
-// and language are each profile's own (E24-1).
-
-const THEME_GONE = "There's no theme with that id. list_themes shows them all.";
-const BUILT_IN = "Built-in themes can't be changed. Give its id as based_on to make a new theme from it.";
+// für Arbeit's "I understand" stay on the screen, and so do the resume themes,
+// Download all PDFs, Export and Check for updates (removed from the
+// connector, round 2 of the audit: an export holds contact details and
+// private notes). The Base resume's language is each profile's own (E24-1).
 
 /** An object without its undefined fields, so spreading it only changes what's given. */
 const given = <T extends object>(fields: T): Partial<T> => Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Partial<T>;
-
-/** Text as JSON, or null when it isn't any (parseThemeFile then says it isn't a theme file). */
-function parseJson(json: string): unknown {
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-/** "48 KB", "1.2 MB" */
-const sizeOf = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
-
-/**
- * The largest export handed over as a file: about 22,000 tokens, under the
- * 25,000 Claude Code takes from a tool by default. A bigger one, as most
- * with a profile photo are, is downloaded with Export in Settings.
- */
-const EXPORT_MAX_BYTES = 80 * 1024;
-
-// ─── Themes ──────────────────────────────────────────────────────────────────
-
-/** A theme's look, by the names the tools use for the theme builder's fields. */
-const lookOf = (theme: ThemeFields) => ({
-  head_font: theme.headFont,
-  body_font: theme.bodyFont,
-  accent: theme.accent,
-  layout: theme.layout,
-  align: theme.align,
-  heading_style: theme.headingStyle,
-  density: theme.density,
-  header_style: theme.headerStyle,
-  sidebar_style: theme.sidebarStyle,
-  date_style: theme.dateStyle,
-  photo_shape: theme.photoShape,
-  photo_position: theme.photoPosition,
-});
-
-const field = themeFieldsSchema.shape;
-
-/** The theme builder's fields as save_theme takes them, checked as the builder's are; each one left out stays as it is. */
-const themeLook = {
-  name: field.name.optional().describe("Up to 60 characters"),
-  head_font: field.headFont.optional(),
-  body_font: field.bodyFont.optional(),
-  accent: field.accent.optional().describe("A color like #1f6f5c; dark ones read best as text"),
-  layout: field.layout.optional(),
-  align: field.align.optional().describe("The header's; sidebar layouts always align it left"),
-  heading_style: field.headingStyle.optional().describe("How section titles look"),
-  density: field.density.optional().describe("Spacing"),
-  header_style: field.headerStyle.optional(),
-  sidebar_style: field.sidebarStyle.optional().describe("For sidebar layouts"),
-  date_style: field.dateStyle.optional(),
-  photo_shape: field.photoShape.optional(),
-  photo_position: field.photoPosition.optional().describe("SIDEBAR only in sidebar layouts"),
-};
-type LookInput = { [Name in keyof typeof themeLook]?: z.output<(typeof themeLook)[Name]> };
-
-/** The fields given, as a theme is saved with them. */
-const changesFrom = (look: LookInput): Partial<ThemeFields> =>
-  given({
-    name: look.name,
-    headFont: look.head_font,
-    bodyFont: look.body_font,
-    accent: look.accent,
-    layout: look.layout,
-    align: look.align,
-    headingStyle: look.heading_style,
-    density: look.density,
-    headerStyle: look.header_style,
-    sidebarStyle: look.sidebar_style,
-    dateStyle: look.date_style,
-    photoShape: look.photo_shape,
-    photoPosition: look.photo_position,
-  });
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -294,128 +208,13 @@ const choice = settingChoicesSchema.shape;
 
 /** A portal update_settings changes: its switch, and its fields that aren't keys (the JSearch host, the Adzuna app ID, companies' boards). */
 const portalChange = z.object({
-  id: portalIdSchema.describe("The portal's id from get_settings, e.g. JSEARCH, SERPAPI, ADZUNA, JOOBLE, FREEHIRE"),
+  id: portalIdSchema.describe("The portal's id from get_settings, e.g. JSEARCH, SERPAPI, ADZUNA, FREEHIRE"),
   on: z.boolean().optional(),
   fields: z.record(z.string().max(100), z.string().max(5000)).optional().describe("A field's new value by its name from get_settings; '' empties it. Keys stay with the user in Settings."),
 });
 
 /** Registers these tools on the connector's server. */
 export function registerSettingsTools({ server, linkTo }: ToolContext): void {
-  const resumeLink = (profileId: string) => linkTo(`/resume?profile=${profileId}`);
-  /** A theme saved, copied or imported, which is the profile's base theme now. */
-  const themeSaved = (theme: ThemeData, verb: "Saved" | "Made" | "Imported", profile: { id: string; name: string }) =>
-    text({
-      message: `${verb} “${theme.name}”. It's now the base resume theme of ${profile.name}.`,
-      profile: profile.name,
-      theme: { id: theme.id, name: theme.name, ...lookOf(theme) },
-      link: resumeLink(profile.id),
-    });
-
-  server.registerTool(
-    "list_themes",
-    {
-      title: "List the resume themes",
-      description: "Every resume theme, built-in and custom, with its look and how many applications use it, and which one is a profile's base theme.",
-      inputSchema: z.object({ profile: profileInput }),
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    },
-    async ({ profile }) => {
-      const chosen = await chooseProfile(profile);
-      if ("failure" in chosen) return chosen.failure;
-      const [themes, usage, { baseThemeId }] = await Promise.all([loadThemes(), loadThemeUsage(), loadProfileSettings(chosen.id)]);
-      return text({
-        profile: chosen.name,
-        base_theme_id: baseThemeId,
-        themes: themes.map((theme) => ({ id: theme.id, name: theme.name, built_in: theme.builtIn, applications: usage[theme.id] ?? 0, ...lookOf(theme) })),
-        link: resumeLink(chosen.id),
-      });
-    },
-  );
-
-  server.registerTool(
-    "set_base_theme",
-    {
-      title: "Set the base resume theme",
-      description: "Makes a theme from list_themes a profile's base resume theme, which its Base resume and every document without a theme of its own written from it use.",
-      inputSchema: z.object({ id: z.string().min(1).max(100), profile: profileInput }),
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    },
-    async ({ id, profile }) => {
-      const chosen = await chooseProfile(profile);
-      if ("failure" in chosen) return chosen.failure;
-      const theme = await makeBaseTheme(chosen.id, id);
-      if (!theme) return failure(THEME_GONE);
-      return text({ profile: chosen.name, base_theme: { id: theme.id, name: theme.name }, link: resumeLink(chosen.id) });
-    },
-  );
-
-  server.registerTool(
-    "save_theme",
-    {
-      title: "Save a resume theme",
-      description:
-        "Saves a resume theme and makes it a profile's base theme: changes the fields given on a custom theme by id, or makes a new one from based_on (else the base theme). " +
-        "based_on alone copies a theme, theme_file imports a theme file's JSON text, and delete: true deletes the custom theme id. Built-in themes never change.",
-      inputSchema: z.object({
-        profile: profileInput.describe("The profile whose base theme it becomes; the first when left out"),
-        id: z.string().min(1).max(100).optional().describe("A custom theme to change or delete; leave out for a new theme"),
-        based_on: z.string().min(1).max(100).optional().describe("The theme a new one starts from, built-in or custom"),
-        theme_file: z.string().max(20_000).optional().describe("A .dossier-theme.json file's text, imported as a new theme"),
-        delete: z.boolean().optional().describe("Deletes the custom theme id; documents that used it use the base theme"),
-        ...themeLook,
-      }),
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-    },
-    async ({ profile, id, based_on, theme_file, delete: remove, ...look }) => {
-      const changes = changesFrom(look);
-      const changing = Object.keys(changes).length > 0;
-      const chosen = await chooseProfile(profile);
-      if ("failure" in chosen) return chosen.failure;
-
-      if (remove) {
-        if (!id || based_on || theme_file !== undefined || changing) return failure("To delete a theme, give only its id and delete: true.");
-        const deleted = await deleteCustomTheme(chosen.id, id);
-        if (deleted === "not-found") return failure(THEME_GONE);
-        if (deleted === "built-in") return failure("Built-in themes can't be deleted.");
-        const base = await loadTheme(deleted.baseThemeId);
-        return text({ message: `Deleted “${deleted.name}”.`, profile: chosen.name, base_theme: { id: deleted.baseThemeId, name: base?.name }, link: resumeLink(chosen.id) });
-      }
-
-      if (theme_file !== undefined) {
-        if (id || based_on || changing) return failure("Import a theme file on its own, then change the new theme by its id.");
-        const read = parseThemeFile(parseJson(theme_file));
-        if (!read.ok) return failure(read.error);
-        return themeSaved(await createTheme(chosen.id, read.theme), "Imported", chosen);
-      }
-
-      if (id && based_on) return failure("Give id to change a custom theme, or based_on for a new one, not both.");
-      if (id) {
-        if (!changing) return failure("Say what to change, for example accent or head_font.");
-        const current = await loadTheme(id);
-        if (!current) return failure(THEME_GONE);
-        if (current.builtIn) return failure(BUILT_IN);
-        const fields = themeFieldsSchema.safeParse({ ...current, ...changes });
-        if (!fields.success) return failure(fields.error.issues[0].message);
-        const theme = await updateCustomTheme(chosen.id, id, fields.data);
-        if (theme === "not-found") return failure(THEME_GONE);
-        if (theme === "built-in") return failure(BUILT_IN);
-        return themeSaved(theme, "Saved", chosen);
-      }
-
-      // A copy as Duplicate makes it, "Modern copy"; with changes, a new theme as the builder starts one, "My theme".
-      if (based_on && !changing) {
-        const copy = await copyTheme(chosen.id, based_on);
-        return copy ? themeSaved(copy, "Made", chosen) : failure(THEME_GONE);
-      }
-      if (!changing) return failure("Say how the new theme looks, for example accent and head_font, or give based_on to copy a theme.");
-      const start = await loadTheme(based_on ?? (await loadProfileSettings(chosen.id)).baseThemeId);
-      if (!start) return failure(THEME_GONE);
-      const fields = themeFieldsSchema.safeParse({ ...start, name: "My theme", ...changes });
-      if (!fields.success) return failure(fields.error.issues[0].message);
-      return themeSaved(await createTheme(chosen.id, fields.data), "Saved", chosen);
-    },
-  );
-
   server.registerTool(
     "get_settings",
     {
@@ -558,12 +357,13 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       title: "Test a connection",
       description:
         "Tests the AI provider or a job portal in Dossier's settings, as their Test connection buttons do: whether it answered and how fast, or what's wrong. " +
-        "Testing a portal that limits searches, such as JSearch, SerpApi or Jooble, uses one search from the user's plan (Jooble's free plan has 500 in all).",
+        "Testing a portal spends one paid search from the user's plan when the portal limits them, as JSearch and SerpApi do: test one only when the user asks for exactly that.",
       inputSchema: z.object({
         connection: z.enum(["ai_provider", "portal"]),
         portal: portalIdSchema.optional().describe("For portal: its id from get_settings, e.g. JSEARCH"),
       }),
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      // Not read-only: a portal's test uses up one of the user's paid searches.
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async ({ connection, portal }) => {
       if (connection === "ai_provider") {
@@ -577,66 +377,6 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
       const test = await testPortalConnection(listed.id);
       const outcome = test.connected ? { connected: true, seconds: test.seconds } : { connected: false, problem: test.message };
       return text({ connection, portal: listed.name, ...outcome, link: linkTo("/settings?section=jobs") });
-    },
-  );
-
-  server.registerTool(
-    "zip_all_pdfs",
-    {
-      title: "Zip all PDFs",
-      description:
-        "Renders every application's tailored resume and cover letter as PDFs and zips them by company, as Download all PDFs in Settings does. " +
-        "Follow it with check_task, which gives the download link once it's done.",
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    },
-    async () => {
-      const zip = await startPdfZip();
-      if (!zip) return failure("There are no tailored documents to download yet.");
-      return started(zip.jobId, { documents: zip.documents });
-    },
-  );
-
-  server.registerTool(
-    "export_data",
-    {
-      title: "Export everything",
-      description:
-        "Everything in Dossier as one JSON file, as Export in Settings makes it: without API keys, but with contact details and private notes. " +
-        "Only when the user asks for an export or backup file; to read data, use get_profile, list_applications and get_application. " +
-        `A file up to ${sizeOf(EXPORT_MAX_BYTES)} comes embedded; a bigger one is downloaded with Export in Settings.`,
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    },
-    async (): Promise<CallToolResult> => {
-      const now = new Date();
-      const data = await buildExport(prisma, { now });
-      // The same file Export downloads.
-      const json = JSON.stringify(data, null, 2);
-      const name = exportFileName(now);
-      const bytes = Buffer.byteLength(json);
-      const about = { file: name, size: sizeOf(bytes), bytes, applications: data.applications.length, link: linkTo("/settings?section=data") };
-      if (bytes > EXPORT_MAX_BYTES) return text({ ...about, next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Data and backups." });
-      return {
-        content: [
-          { type: "text", text: JSON.stringify(about, null, 2) },
-          { type: "resource", resource: { uri: `dossier://export/${name}`, mimeType: "application/json", text: json } },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    "check_for_updates",
-    {
-      title: "Check for updates",
-      description: "Asks GitHub for Dossier's latest release, as Check for updates in Settings does, and says whether a newer version is out. Nothing about the user is sent.",
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    },
-    async () => {
-      const check = await checkForUpdate();
-      if (check.status === "unknown") return failure("Couldn't check for updates right now. Try again later.");
-      const link = linkTo("/settings?section=about");
-      if (check.status === "latest") return text({ status: "latest", version: check.version, message: "You're on the latest version.", link });
-      return text({ status: "newer", version: check.version, current_version: appVersion, whats_new: check.url, how_to_update: UPGRADE_GUIDE_URL, link });
     },
   );
 }

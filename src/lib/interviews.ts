@@ -1,6 +1,6 @@
 import "server-only";
 
-import { upcomingRound } from "@/lib/interview-rounds";
+import { prepSchema, upcomingRound } from "@/lib/interview-rounds";
 import { prisma } from "@/lib/prisma";
 
 export { prepSchema, upcomingRound } from "@/lib/interview-rounds";
@@ -51,4 +51,14 @@ export async function addNextRound(applicationId: string, now = new Date()): Pro
   const rounds = await prisma.interview.findMany({ where: { applicationId }, select: { id: true, round: true, at: true }, orderBy: { round: "asc" } });
   if (upcomingRound(rounds, now)) return null;
   return prisma.interview.create({ data: { applicationId, round: (rounds.at(-1)?.round ?? 0) + 1 }, select: { id: true, round: true } });
+}
+
+/** A tick on a round's "Getting ready" item, by its place in the list, with when; false when the round or the item is gone. */
+export async function tickPrepItem(applicationId: string, interviewId: string, index: number, done: boolean): Promise<boolean> {
+  const interview = await prisma.interview.findFirst({ where: { id: interviewId, applicationId }, select: { prep: true } });
+  const prep = prepSchema.safeParse(interview?.prep);
+  if (!interview || !prep.success || !prep.data[index]) return false;
+  prep.data[index] = { ...prep.data[index], done, doneAt: done ? new Date().toISOString() : null };
+  await prisma.interview.update({ where: { id: interviewId }, data: { prep: prep.data } });
+  return true;
 }

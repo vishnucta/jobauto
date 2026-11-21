@@ -73,6 +73,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     portalsOffNote(jobSearchView(config).portals),
   ]);
   const enabled = enabledPortals(config);
+  const words = searchWords(profile, now);
   // What an AI client or a careers page added was no search of the user's: the form doesn't start from it.
   const searched = foundSearch && !isAddedSource(foundSearch.source) ? foundSearch.query : null;
   const [network, alsoAdvertised] = await Promise.all([
@@ -90,8 +91,9 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       arbeitsagenturNote={enabled.includes("ARBEITSAGENTUR") && !portalSetup(config, "ARBEITSAGENTUR")?.acceptedAt}
       scoreInClaude={scoreInClaude}
       profiles={profiles}
-      // The profile's own search words, as one-click chips in the form; named when there are several profiles.
-      suggestions={searchChips(searchWords(profile, now))}
+      // The profile's own search words, as one-click chips in the form, and all of them under "All search words"; named when there are several profiles.
+      suggestions={searchChips(words)}
+      wordGroups={words.groups.map((group) => ({ title: group.title, words: group.words.map(({ text, why }) => ({ text, why })) }))}
       suggestionsFrom={profiles.length > 1 ? (profiles.find((entry) => entry.id === profileId)?.name ?? null) : null}
       alsoAdvertised={alsoAdvertised}
       // German is shared by every profile: each posting's is read against it.
@@ -101,8 +103,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
       query={typed ?? searched ?? (await latestQuery()) ?? (await profileSearch())}
-      // A search in the URL opens the form to run it (E32-3).
-      editing={typed !== null}
+      // A search in the URL opens the form to run it (E32-3); ?edit=1 opens it as it is, as Profile's link to the search words does (jobauto fork).
+      editing={typed !== null || params.edit === "1"}
       filters={filters}
       library={library}
       searches={searches}

@@ -582,6 +582,82 @@
   color: #69655d;
 }
 
+/* ─── Reading view (jobauto fork) ──────────────────────────────────────── */
+
+/*
+ * On a phone the preview shrinks the page to the screen, too small to read.
+ * The reading view (ReadingView in document-preview.tsx) lays the same
+ * document out again at a size to read: the body text at 16px, the lines
+ * reflowed to the screen's width, the columns, side headings and timeline
+ * stacked, and a small margin instead of the page padding. The sizes stay
+ * the theme's, scaled with the body text; the name and the photo are capped.
+ */
+.reading > .page {
+  --u: calc(16px / var(--font-size));
+  width: auto;
+  min-height: 0;
+  padding: 20px 18px 28px;
+}
+
+.reading :is(.name, .senderName) {
+  font-size: min(calc(var(--u) * var(--name-size)), 28px);
+}
+
+.reading .senderName {
+  font-size: min(calc(var(--u) * 20), 24px);
+}
+
+.reading .sectionTitle {
+  font-size: min(calc(var(--u) * var(--heading-size)), 18px);
+}
+
+.reading .photo {
+  width: 72px;
+  height: 96px;
+}
+
+.reading .split .columns,
+.reading .sidebarEnd .columns,
+.reading .tintedSidebar .columns {
+  display: block;
+}
+
+.reading .split .columns > .column + .column {
+  margin-top: calc(var(--u) * var(--gap));
+}
+
+.reading .sideHeadings .section {
+  padding-inline-start: 0;
+}
+
+.reading .sideHeadings .sectionTitle {
+  float: none;
+  width: auto;
+  margin-inline-start: 0;
+  margin-bottom: calc(var(--u) * 6);
+}
+
+.reading .timeline .entry {
+  padding-inline-start: 0;
+}
+
+.reading .timeline .dates {
+  float: none;
+  width: auto;
+  margin-inline-start: 0;
+}
+
+/* A long title line puts its dates on a line of their own. */
+.reading .entryHead {
+  flex-wrap: wrap;
+  column-gap: calc(var(--u) * 12);
+  row-gap: 0;
+}
+
+.reading .references {
+  grid-template-columns: 1fr;
+}
+
 /* ─── Print ────────────────────────────────────────────────────────────── */
 
 @media print {

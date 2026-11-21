@@ -10,7 +10,7 @@ import { removeRecruiter } from "@/lib/recruiters/store";
 import { encryptSecret, JOB_SOURCE_KEY } from "@/lib/secrets";
 import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase } from "@/test/db";
-import { joobleResponse, jsearchV2LastPage, jsearchV2Page, serpapiPage } from "@/test/job-search-fixtures";
+import { jsearchV2LastPage, jsearchV2Page, serpapiPage } from "@/test/job-search-fixtures";
 
 import { movePastSearches } from "./library";
 import { addClientSearch, countSearches, knownJobs, listSearches, loadSearch, removeSearch, retryPortal, runSearch, showMoreFor } from "./posting-searches";
@@ -295,7 +295,7 @@ describe("fullText", () => {
   });
 });
 
-describe("SerpApi and Jooble as portals (jobauto fork)", () => {
+describe("SerpApi as a portal, and Jooble no more (jobauto fork)", () => {
   const on = { on: true, fields: {}, acceptedAt: null };
   const usePortals = () =>
     saveSettings({
@@ -307,27 +307,21 @@ describe("SerpApi and Jooble as portals (jobauto fork)", () => {
       },
     });
 
-  it("asks them beside JSearch, each with its own key, into the library, with each one's next page", async () => {
+  it("asks SerpApi beside JSearch, each with its own key, and never Jooble, though it's still saved as on with its key", async () => {
     await usePortals();
-    const requests = stubFetch(({ url }) => (url.hostname === "serpapi.com" ? json(serpapiPage) : url.hostname === "jooble.org" ? json(joobleResponse) : json(jsearchV2Page)));
+    const requests = stubFetch(({ url }) => (url.hostname === "serpapi.com" ? json(serpapiPage) : json(jsearchV2Page)));
     const run = await runSearch(query, { wait: true });
     const id = run.ok ? run.id : "";
     expect(requests.find((request) => request.url.hostname === "serpapi.com")!.url.searchParams.get("api_key")).toBe("serp_test");
-    const jooble = requests.find((request) => request.url.hostname === "jooble.org");
-    expect(jooble).toMatchObject({ method: "POST" });
-    expect(jooble!.url.pathname).toBe("/api/jooble_test");
-    expect((await prisma().postingSearch.findUniqueOrThrow({ where: { id } })).portals).toMatchObject([
-      { id: "JSEARCH", status: "done", next: "cursor:CURSOR-PAGE-2" },
-      { id: "SERPAPI", status: "done", next: "TOKEN-PAGE-2" },
-      { id: "JOOBLE", status: "done", next: "page:2:4" },
+    expect(requests.some((request) => request.url.hostname === "jooble.org")).toBe(false);
+    expect((await prisma().postingSearch.findUniqueOrThrow({ where: { id } })).portals).toEqual([
+      expect.objectContaining({ id: "JSEARCH", status: "done", next: "cursor:CURSOR-PAGE-2" }),
+      expect.objectContaining({ id: "SERPAPI", status: "done", next: "TOKEN-PAGE-2" }),
     ]);
-    const search = await loadSearch(id);
-    expect(search!.postings.some((posting) => posting.source === "JOOBLE" && posting.title === "Meldewesen Spezialist")).toBe(true);
 
-    // Show more asks Jooble for the page after, by number.
-    const more = stubFetch(({ url }) => (url.hostname === "jooble.org" ? json({ totalCount: 45, jobs: [] }) : json(jsearchV2LastPage)));
+    const more = stubFetch(() => json(jsearchV2LastPage));
     await showMoreFor(id, { wait: true });
-    expect(more.find((request) => request.url.hostname === "jooble.org")!.body).toMatchObject({ page: "2" });
+    expect(more.some((request) => request.url.hostname === "jooble.org")).toBe(false);
   });
 
   it("says what's missing for one without its key, and the others carry on", async () => {

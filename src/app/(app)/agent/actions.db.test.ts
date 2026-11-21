@@ -97,15 +97,15 @@ describe("the drafts' actions (E16-5)", () => {
   it("prepares a draft in its own job, reuses one under way, and answers with one already made", async () => {
     const { startJob } = await import("@/lib/jobs/runner");
     const scored = await candidate();
-    expect(await prepareAgentDraft({ candidateId: scored.id })).toEqual({ ok: true, data: { jobId: "new-run", applicationId: null } });
+    expect(await prepareAgentDraft({ candidateId: scored.id })).toEqual({ ok: true, data: { jobId: "new-run", applicationId: null, started: true } });
     expect(startJob).toHaveBeenLastCalledWith(expect.objectContaining({ type: "agent-draft" }), { candidateId: scored.id, auto: false }, { key: `agent-candidate:${scored.id}` });
 
     const queued = await prisma().job.create({ data: { type: "agent-draft", key: `agent-candidate:${scored.id}`, input: { candidateId: scored.id } } });
-    expect(await prepareAgentDraft({ candidateId: scored.id })).toEqual({ ok: true, data: { jobId: queued.id, applicationId: null } });
+    expect(await prepareAgentDraft({ candidateId: scored.id })).toEqual({ ok: true, data: { jobId: queued.id, applicationId: null, started: false } });
 
     const application = await prisma().application.create({ data: { origin: "AGENT", awaitingReview: true } });
     const drafted = await candidate({ status: "DRAFTED", applicationId: application.id });
-    expect(await prepareAgentDraft({ candidateId: drafted.id })).toEqual({ ok: true, data: { jobId: null, applicationId: application.id } });
+    expect(await prepareAgentDraft({ candidateId: drafted.id })).toEqual({ ok: true, data: { jobId: null, applicationId: application.id, started: false } });
     expect(await prepareAgentDraft({ candidateId: "gone" })).toEqual({ ok: false, error: "That posting is no longer in the agent's queue." });
   });
 

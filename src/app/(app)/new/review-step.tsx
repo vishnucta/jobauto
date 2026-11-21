@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { FitDetails } from "@/components/fit-details";
+import { GermanBadge } from "@/components/german-badge";
 import { ScoreRing } from "@/components/score-ring";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -17,6 +18,7 @@ import { applicationFlag } from "@/lib/application-flag";
 import { cn } from "@/lib/cn";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import type { PostingFit } from "@/lib/fit";
+import type { GermanDecision } from "@/lib/german-need";
 import { postingHighlights } from "@/lib/posting-highlights";
 import { DOCUMENTS_TO_WRITE, type DocumentsToWrite } from "@/lib/settings";
 import { TONES } from "@/lib/tones";
@@ -84,6 +86,7 @@ export function ReviewStep({
   language,
   onLanguage,
   languages,
+  german = null,
   note,
   onNote,
   starting,
@@ -122,6 +125,8 @@ export function ReviewStep({
    * when Settings names one, the posting's own: "German, like the posting".
    */
   languages: { fallback: string; names?: readonly string[]; posting?: string | null };
+  /** The German the job needs against hers and what it does to the language (german-need.ts, jobauto fork); null before the reading. */
+  german?: GermanDecision | null;
   note: string;
   onNote: (note: string) => void;
   starting: boolean;
@@ -207,7 +212,8 @@ export function ReviewStep({
           }
         />
 
-        <div className="flex min-h-0 flex-1">
+        {/* On a phone the Fit column is a button above the review, as on an application's page (jobauto fork). */}
+        <div className="flex min-h-0 flex-1 max-sm:flex-col">
           <FitColumn match={match}>
             {match && scoreWaits ? (
               <p role="note" className="rounded-card bg-warning-surface px-4 py-3 text-meta text-warning">
@@ -289,6 +295,7 @@ export function ReviewStep({
                     fallback={languages.fallback}
                     names={languages.names}
                     posting={languages.posting ?? null}
+                    german={german}
                     note={note}
                     onNote={onNote}
                   />
@@ -438,6 +445,7 @@ function HowToWrite({
   fallback,
   names = DOCUMENT_LANGUAGES.map((entry) => entry.name),
   posting,
+  german = null,
   note,
   onNote,
 }: {
@@ -451,6 +459,7 @@ function HowToWrite({
   names?: readonly string[];
   /** The posting's own language as an option over Settings' (jobauto fork), or null. */
   posting: string | null;
+  german?: GermanDecision | null;
   note: string;
   onNote: (note: string) => void;
 }) {
@@ -508,6 +517,7 @@ function HowToWrite({
             ))}
         </select>
       </div>
+      {german?.reason && <GermanLine german={german} language={language} onLanguage={onLanguage} />}
       <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-[150px_1fr]">
         <span aria-hidden="true" className="pt-2 text-[13.5px] text-muted">
           Anything I should know?
@@ -522,5 +532,36 @@ function HowToWrite({
         />
       </div>
     </section>
+  );
+}
+
+/**
+ * Under Language (jobauto fork): how much German the job needs against
+ * hers, as the documents' language follows it, with German one click away
+ * when the rule chose English, and the way back.
+ */
+function GermanLine({ german, language, onLanguage }: { german: GermanDecision; language: string | null; onLanguage: (language: string | null) => void }) {
+  const chosenGerman = language !== null && /^(german|deutsch)$/i.test(language);
+  return (
+    <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-[150px_1fr]">
+      <span aria-hidden="true" className="max-sm:hidden" />
+      <p role="note" className={cn("flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-card px-3 py-2 text-meta text-pretty", german.below ? "bg-warning-surface text-warning" : "bg-track text-ink")}>
+        <GermanBadge fit={german} />
+        <span>{german.reason}</span>
+        {german.toEnglish && !chosenGerman && (
+          <button type="button" className="font-medium underline underline-offset-2" onClick={() => onLanguage("German")}>
+            Write it in German anyway
+          </button>
+        )}
+        {german.toEnglish && chosenGerman && (
+          <>
+            <span>German it is: expect the interview in German too.</span>
+            <button type="button" className="font-medium underline underline-offset-2" onClick={() => onLanguage("")}>
+              Back to English
+            </button>
+          </>
+        )}
+      </p>
+    </div>
   );
 }

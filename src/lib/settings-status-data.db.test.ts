@@ -48,7 +48,7 @@ describe("the parts of the status (E34-1)", () => {
 describe("loadSettingsStatus (E34-1)", () => {
   it("reads every section from what's stored", async () => {
     const status = await loadSettingsStatus(now);
-    expect(Object.keys(status)).toEqual(["ai", "documents", "scoring", "jobs", "agent", "google", "notifications", "connector", "data", "about"]);
+    expect(Object.keys(status)).toEqual(["ai", "documents", "answers", "scoring", "jobs", "agent", "google", "notifications", "connector", "data", "about"]);
     expect(status.documents.state).toBe("A4 · The posting's language · warm tone");
     expect(status.jobs.tone).toBe("off");
     expect(status.agent.tone).toBe("off");

@@ -51,6 +51,12 @@ export type EventData = {
   "followup.due": { applications: { id: string; title: string; company: string; days: number }[] };
   /** A new version of Dossier (E26-7). */
   "version.new": { version: string; url: string };
+  /**
+   * The weekly digest for her supporter (jobauto fork, supporter-digest.ts):
+   * once a week, a summary of the search for whoever supports it. Its own
+   * channel, the supporter's, has only this event on.
+   */
+  "supporter.digest": { title: string; message: string };
 };
 
 export type EventName = keyof EventData;
@@ -146,7 +152,7 @@ export const EVENTS: { [N in EventName]: EventDefinition<N> } = {
   },
   "draft.ready": {
     label: "A draft is ready",
-    hint: "When the job agent prepares a draft on its own. Prepare draft never sends it.",
+    hint: "When the job agent prepares a draft on its own. Prepare it for me never sends it.",
     on: false,
     message: (data) => ({
       title: `A draft is ready: ${data.title}`,
@@ -200,9 +206,19 @@ export const EVENTS: { [N in EventName]: EventDefinition<N> } = {
     on: false,
     message: (data) => ({ title: `Dossier ${data.version} is out`, text: "See what's new, and how to upgrade.", path: null, url: data.url }),
   },
+  // Off for her own channels: it goes to the supporter's (jobauto fork).
+  "supporter.digest": {
+    label: "Weekly digest for a supporter",
+    hint: "Once a week, on the day and hour below: what went out, what moved on, interviews coming and how they can help. Company names and interview times are in it.",
+    on: false,
+    message: (data) => ({ title: data.title, text: data.message, path: "/" }),
+  },
 };
 
 export const EVENT_NAMES = Object.keys(EVENTS) as EventName[];
+
+/** A channel's events with only this one on (jobauto fork): the supporter's channel gets the digest and nothing else. */
+export const onlyEvent = (name: EventName): Record<EventName, boolean> => Object.fromEntries(EVENT_NAMES.map((each) => [each, each === name])) as Record<EventName, boolean>;
 
 /** Whether an event is on for a channel: its own choice, else the event's default. */
 export const eventOn = (events: Readonly<Record<string, boolean>>, name: EventName) => events[name] ?? EVENTS[name].on;

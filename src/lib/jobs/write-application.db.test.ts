@@ -54,11 +54,11 @@ describe("writeApplicationJob (E31-4)", () => {
     expect(steps).toEqual([...WRITE_APPLICATION_STEPS]);
     const documents = await prisma().document.findMany({ where: { applicationId: "app-1" }, include: { versions: true } });
     expect(documents.map((document) => [document.kind, document.writtenWith, document.versions.map((version) => version.cause)]).sort()).toEqual([
-      ["COVER_LETTER", "write-cover-letter@8", ["WRITTEN"]],
+      ["COVER_LETTER", "write-cover-letter@9", ["WRITTEN"]],
       ["RESUME", "tailor-resume@10", ["WRITTEN"]],
     ]);
     const letter = documents.find((document) => document.kind === "COVER_LETTER")!;
-    expect((letter.units as { id: string }[]).map((unit) => unit.id)).toEqual(["sender", "date", "recipient", "greeting", "paragraph:1", "sign-off", "signature"]);
+    expect((letter.units as { id: string }[]).map((unit) => unit.id)).toEqual(["date", "recipient", "greeting", "paragraph:1", "sign-off"]);
     // The opening message, with what the guard found and the note taken into account.
     const [message] = await prisma().chatMessage.findMany({ where: { applicationId: "app-1" } });
     expect(message.text).toMatch(/^Here's what I tailored for Ledgerly:/);

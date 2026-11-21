@@ -17,7 +17,7 @@ import { sourceInfo } from "@/lib/job-search/sources";
 export const agentMayAsk = (id: string) => id !== "ARBEITSAGENTUR";
 
 /** Tried in this order on Automatic, when only the Bundesagentur is switched on: the portals with a key. */
-const FALLBACK: readonly JobSource[] = ["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE"];
+const FALLBACK: readonly JobSource[] = ["JSEARCH", "SERPAPI", "ADZUNA"];
 
 /** Why a portal can't be asked (a key missing, paused, not offered), or null. */
 export function portalProblem(config: JobSearchConfig, id: JobSource): string | null {

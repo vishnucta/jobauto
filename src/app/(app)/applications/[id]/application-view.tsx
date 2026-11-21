@@ -11,10 +11,11 @@ import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
 import { ResumeCheckCard } from "@/components/documents/resume-check-card";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
 import { toast, toastResult } from "@/components/toast";
-import { Button } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KnownPeople } from "@/components/known-people";
+import { ScrollEdges } from "@/components/scroll-edges";
 import {
   DocumentKind,
   type ApplicationStatus,
@@ -28,11 +29,12 @@ import type { HistoryEntry } from "@/lib/application-history";
 import type { MessageDraft, MessageKind } from "@/lib/message-draft";
 import { changedLines, lineText } from "@/lib/changed-lines";
 import { rowAction } from "@/lib/applications-list";
+import { sendStep } from "@/lib/apply/send-step";
 import { cn } from "@/lib/cn";
 import { EMAIL_UNITS, WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
 import { documentLabels } from "@/lib/document-labels";
 import { copyText } from "@/lib/copy-text";
-import { defaultFrame, isFrameUnit, isParagraph, letterText, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
+import { defaultFrame, isFrameUnit, isParagraph, letterText, PROFILE_FRAME_UNITS, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import { missingWords } from "@/lib/letter-availability";
 import type { Doubt } from "@/lib/recruiter-eye";
 import type { Person } from "@/lib/network";
@@ -254,6 +256,8 @@ export type ApplicationViewProps = {
   ownSections: boolean;
   /** It was sent, so changes to the profile no longer reach it (#299). */
   sent: boolean;
+  /** The letter's sender and signature are drawn from the profile, so they're changed there (jobauto fork). */
+  senderFromProfile?: boolean;
   /** "Update from profile" would change what the resume shows (#301). */
   canUpdate: boolean;
   /** The sections the profile has content for, and their names, for the Sections menu. */
@@ -311,8 +315,6 @@ export type ApplicationViewProps = {
   doubts?: readonly Doubt[];
   /** The people she knows at its employer (network.ts). */
   known?: readonly Person[];
-  /** The experiment's version this application gets, while the experiment runs (experiments.ts). */
-  version?: { experiment: string; label: string } | null;
 };
 
 /**
@@ -347,6 +349,7 @@ export function ApplicationView({
   sections,
   ownSections,
   sent,
+  senderFromProfile = false,
   canUpdate,
   baseSections,
   email,
@@ -378,7 +381,6 @@ export function ApplicationView({
   letterAsks = [],
   doubts = [],
   known = [],
-  version = null,
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -1192,6 +1194,7 @@ export function ApplicationView({
           // The chat only edits parts the letter stores.
           onAskAi={written && stored.has(id) ? () => askAbout(kind, unit) : undefined}
           onLeaveOut={kind === DocumentKind.RESUME ? () => leaveOut(unit) : undefined}
+          profileHref={kind === DocumentKind.COVER_LETTER && senderFromProfile && PROFILE_FRAME_UNITS.has(id) ? "/profile?section=basics" : undefined}
         >
           {children}
         </UnitFrame>
@@ -1278,6 +1281,11 @@ export function ApplicationView({
   // The one thing to do next, by status (E30-2), as cards and list rows say it.
   const next = application.archived ? null : rowAction({ status: application.status, waiting, docs: { resume: resume !== null, letter: letter !== null }, flag }, "header");
   const NextIcon = next ? NEXT_ICONS[next.label] ?? FileText : FileText;
+  // A written draft's one next step is the send guide's (send-step.ts, jobauto fork): by how this employer takes applications.
+  const sending =
+    next && application.status === "DRAFT" && !application.awaitingReview && !writingApp && (resume || letter)
+      ? sendStep(apply.plan, { hasEmail: Boolean(emailUnits), waitingInBrowser: apply.attempts[0]?.status === "WAITING", gmailSends: Boolean(gmail?.sender.from) })
+      : null;
 
   return (
     // Wide enough for the refine panel beside the documents, the page fills the
@@ -1326,30 +1334,32 @@ export function ApplicationView({
         status={application.status}
         flag={flag}
         tabs={
-          // On a phone, one row that scrolls sideways (jobauto fork).
-          <TabsList
-            variant="pills"
-            aria-label="Application"
-            className="max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[&>*]:shrink-0 max-sm:[&>*]:whitespace-nowrap"
-          >
-            <TabsTrigger value="resume">Resume{dot(null)}</TabsTrigger>
-            <TabsTrigger value="letter">Cover letter{dot(null)}</TabsTrigger>
-            <TabsTrigger value="email">Email{dot(application.status === "DRAFT" && email ? "ready" : null)}</TabsTrigger>
-            {/* The apply assistant and call prep (jobauto fork). */}
-            <TabsTrigger value="apply">
-              {apply.attempts[0]?.status === "WAITING" ? "Apply · waiting for you" : apply.attempts[0]?.status === "SUBMITTED" ? "Apply · sent" : "Apply"}
-              {dot(null)}
-            </TabsTrigger>
-            {gmail && (gmail.reading || gmail.emails.length > 0) && <TabsTrigger value="conversation">Conversation{dot(waiting > 0 ? `${waiting} new` : null)}</TabsTrigger>}
-            <TabsTrigger value="prep">Call prep{dot(null)}</TabsTrigger>
-            {/* "My first 90 days" for this job (jobauto fork). */}
-            <TabsTrigger value="sample">Work sample{dot(null)}</TabsTrigger>
-            <TabsTrigger value="posting">Job posting{dot(null)}</TabsTrigger>
-            {/* In the ⋯ menu on narrow windows (E30-3). */}
-            <TabsTrigger value="notes" className="max-[1500px]:hidden">
-              Notes{dot(null)}
-            </TabsTrigger>
-          </TabsList>
+          // On a phone, one row that scrolls sideways, faded at the edge with more (jobauto fork).
+          <ScrollEdges className="max-sm:w-full">
+            <TabsList
+              variant="pills"
+              aria-label="Application"
+              className="max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[&>*]:shrink-0 max-sm:[&>*]:whitespace-nowrap"
+            >
+              <TabsTrigger value="resume">Resume{dot(null)}</TabsTrigger>
+              <TabsTrigger value="letter">Cover letter{dot(null)}</TabsTrigger>
+              <TabsTrigger value="email">Email{dot(application.status === "DRAFT" && email ? "ready" : null)}</TabsTrigger>
+              {/* The apply assistant and call prep (jobauto fork). */}
+              <TabsTrigger value="apply">
+                {apply.attempts[0]?.status === "WAITING" ? "Apply · waiting for you" : apply.attempts[0]?.status === "SUBMITTED" ? "Apply · sent" : "Apply"}
+                {dot(null)}
+              </TabsTrigger>
+              {gmail && (gmail.reading || gmail.emails.length > 0) && <TabsTrigger value="conversation">Conversation{dot(waiting > 0 ? `${waiting} new` : null)}</TabsTrigger>}
+              <TabsTrigger value="prep">Call prep{dot(null)}</TabsTrigger>
+              {/* "My first 90 days" for this job (jobauto fork). */}
+              <TabsTrigger value="sample">Work sample{dot(null)}</TabsTrigger>
+              <TabsTrigger value="posting">Job posting{dot(null)}</TabsTrigger>
+              {/* In the ⋯ menu on narrow windows (E30-3). */}
+              <TabsTrigger value="notes" className="max-[1500px]:hidden">
+                Notes{dot(null)}
+              </TabsTrigger>
+            </TabsList>
+          </ScrollEdges>
         }
         actions={
           <>
@@ -1364,6 +1374,20 @@ export function ApplicationView({
               <Button variant="secondary" aria-disabled="true">
                 Writing…
               </Button>
+            ) : sending ? (
+              "href" in sending.target ? (
+                <a href={sending.target.href} target="_blank" rel="noopener noreferrer" className={buttonClassName("primary", "md", "hover:text-on-primary")}>
+                  <Send size={15} aria-hidden="true" />
+                  {sending.label}
+                  <span aria-hidden>↗</span>
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              ) : (
+                <Button onClick={() => "tab" in sending.target && selectTab(sending.target.tab)}>
+                  <Send size={15} aria-hidden="true" />
+                  {sending.label}
+                </Button>
+              )
             ) : next && (
               <Button
                 onClick={() =>
@@ -1385,23 +1409,8 @@ export function ApplicationView({
         }
       />
 
-      {/* An experiment's version, and how to send a draft (jobauto fork): above the Fit column and the canvas. */}
-      {version && application.status === "DRAFT" && (
-        <p role="note" className="flex-none border-b border-line bg-selected px-10 py-2.5 text-meta">
-          <span className="font-medium">Experiment “{version.experiment}”:</span> this one is version {version.label}. Write it that way before you send it.
-        </p>
-      )}
-      {application.status === "DRAFT" && !application.awaitingReview && !writingApp && (resume || letter) && (
-        <SendGuide
-          plan={apply.plan}
-          hasResume={Boolean(resume)}
-          hasLetter={Boolean(letter)}
-          hasEmail={Boolean(emailUnits)}
-          waitingInBrowser={apply.attempts[0]?.status === "WAITING"}
-          letterAsks={letterAsks}
-          onTab={selectTab}
-        />
-      )}
+      {/* How to send a draft (jobauto fork): above the Fit column and the canvas. */}
+      {sending && <SendGuide step={sending} letterAsks={letterAsks} onTab={selectTab} />}
 
       {/* On a phone the Fit column is a button above the document (jobauto fork). */}
       <div className="flex min-h-0 flex-1 max-sm:flex-col">
@@ -1428,6 +1437,7 @@ export function ApplicationView({
             onPrepare={prepare}
             fitLine={match && match.items.length > 0 ? `${matchScore(match).hit} of ${matchScore(match).total} requirements covered` : "No requirements checked yet"}
             onShowFit={() => setShowFit(true)}
+            onCallPrep={() => selectTab("prep")}
           />
         ) : (
         <>
@@ -1475,6 +1485,22 @@ export function ApplicationView({
           {resume && resumeTheme && resumeUnits ? (
             <DocumentPreview
               maxWidth={820}
+              reading={{
+                // On a phone, the same resume to read, in one column (jobauto fork).
+                title: "Tailored resume",
+                document: (
+                  <TailoredResume
+                    resume={{ ...resume, theme: resumeTheme, units: resumeUnits }}
+                    profile={profile}
+                    paper={paper}
+                    followThemeLayout={false}
+                    showPhoto={photoChoice}
+                    language={application.language}
+                    includeReferences={includeReferences}
+                    sections={sectionsChoice}
+                  />
+                ),
+              }}
               meta={
                 <span className="flex items-center gap-3">
                   {mappeButton}
@@ -1548,6 +1574,25 @@ export function ApplicationView({
           {letter && letterTheme && letterUnits ? (
             <DocumentPreview
               maxWidth={820}
+              reading={{
+                // On a phone, the same letter to read (jobauto fork).
+                title: "Cover letter",
+                document: (
+                  <TailoredLetter
+                    letter={{ ...letter, theme: letterTheme, units: letterUnits }}
+                    profile={profile}
+                    paper={paper}
+                    company={application.company}
+                    location={application.location}
+                    tone={application.tone}
+                    date={letterDate}
+                    dateFormat={dateFormat}
+                    language={application.language}
+                    role={application.role}
+                    anlagen={anlagen}
+                  />
+                ),
+              }}
               label={
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="text-[13.5px] font-medium text-ink">Cover letter</span>
@@ -1635,7 +1680,7 @@ export function ApplicationView({
         </TabsContent>
 
         <TabsContent value="apply" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
-          <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} />
+          <ApplyTab applicationId={application.id} data={apply} onGoToEmail={() => selectTab("email")} gmailSends={Boolean(gmail?.sender.from)} />
         </TabsContent>
 
         <TabsContent value="sample" className="flex min-h-0 min-w-0 flex-[999_1_480px]">

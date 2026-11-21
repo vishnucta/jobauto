@@ -29,6 +29,16 @@ export type CalendarData = {
 const interviewTitle = (application: { company: string; role: string; title: string }) =>
   `Interview · ${[application.role || application.title, application.company].filter(Boolean).join(" · ") || "application"}`;
 
+/**
+ * Whether the dashboard shows its calendar (jobauto fork): with a Google
+ * account connected, or an interview coming. Otherwise its month would be
+ * empty, so it's left out.
+ */
+export async function calendarWanted(now = new Date()): Promise<boolean> {
+  if ((await googleConnection()).status === "connected") return true;
+  return (await prisma.application.count({ where: { archivedAt: null, nextInterviewAt: { gte: now } } })) > 0;
+}
+
 export async function loadCalendar(days: readonly Day[]): Promise<CalendarData> {
   const [hours, connection, settings] = await Promise.all([workingHours(), googleConnection(), loadSettings()]);
   const { timeZone } = hours;

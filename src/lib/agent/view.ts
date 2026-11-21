@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/dates";
 import { loadJobSearchConfig } from "@/lib/job-search/config";
 import { postedAgo } from "@/lib/job-search/search";
 import { sourceInfo } from "@/lib/job-search/sources";
+import { breakdownOf } from "@/lib/fit";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
 import { lastKnownTimeZone } from "@/lib/time-zone";
@@ -50,6 +51,8 @@ export type AgentCandidateView = {
   description: string;
   /** Under Skipped (E32-5): why it was left out. */
   why?: string;
+  /** Scored before 1.15 (jobauto fork): scored at 0 of 0, and none of its posting's scores has a breakdown, so its reasons are the older model's. */
+  older: boolean;
 };
 
 export type AgentView = {
@@ -98,6 +101,22 @@ const posted = (ago: string) => (ago === "Today" || ago === "Yesterday" ? ago.to
 const sectionOf = (problem: string): AgentView["setupSection"] =>
   problem.includes("AI provider") ? "ai" : problem.includes("Scoring") ? "scoring" : problem.includes("Job search") ? "jobs" : "agent";
 
+/** Why an older score is under the cut-off (jobauto fork): it counted no requirements, so it can't pass one. */
+export const OLDER_SKIP = "Scored before 1.15: not scored with the new method yet";
+
+/**
+ * The candidates at 0 of 0 whose postings have a score with a breakdown
+ * (E25-6), as "source:externalId": they were scored with the new method and
+ * the posting lists no requirements. The others at 0 of 0 are older scores
+ * (jobauto fork). What fillCandidateCoverage reads, the other way round.
+ */
+async function scoredAnew(candidates: readonly { source: string; externalId: string; requirements: number }[]): Promise<Set<string>> {
+  const unscored = candidates.filter((candidate) => candidate.requirements === 0);
+  if (unscored.length === 0) return new Set();
+  const scores = await prisma.postingScore.findMany({ where: { externalId: { in: [...new Set(unscored.map((candidate) => candidate.externalId))] } }, select: { source: true, externalId: true, breakdown: true } });
+  return new Set(scores.filter((score) => breakdownOf(score.breakdown) !== null).map((score) => `${score.source}:${score.externalId}`));
+}
+
 export async function loadAgentView(now = new Date()): Promise<AgentView> {
   const withSearches = { searches: { orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }], select: { searchId: true, searchName: true } } };
   const [settings, timeZone, candidates, scored, skippedRows, draftJobs, runJobs, searches, config] = await Promise.all([
@@ -130,6 +149,7 @@ export async function loadAgentView(now = new Date()): Promise<AgentView> {
   const draftJob = new Map(draftJobs.map((job) => [job.key?.replace(/^agent-candidate:/, ""), job.id]));
 
   const setupProblem = await agentSetupProblem();
+  const anew = await scoredAnew([...candidates, ...scored]);
 
   const view = (candidate: (typeof candidates)[number]): AgentCandidateView => ({
     searches: candidate.searches,
@@ -152,6 +172,7 @@ export async function loadAgentView(now = new Date()): Promise<AgentView> {
     applicationId: candidate.applicationId,
     draftJobId: draftJob.get(candidate.id) ?? null,
     description: candidate.description,
+    older: candidate.skipReason === null && candidate.requirements === 0 && !anew.has(`${candidate.source}:${candidate.externalId}`),
   });
   const last = settings.agentRuns[0];
   const slots = planSlots(agentPlan(searches, config, settings.agentPortals));
@@ -162,10 +183,16 @@ export async function loadAgentView(now = new Date()): Promise<AgentView> {
   const finds = bestFirst(scored.filter((candidate) => passes(candidateCoverage(candidate), covers))).map(view);
   const under = scored
     .filter((candidate) => !passes(candidateCoverage(candidate), covers))
-    .map((candidate) => ({
-      at: candidate.createdAt.getTime(),
-      view: { ...view(candidate), why: candidate.requirements > 0 ? `Covers ${candidate.covered} of ${candidate.requirements}: under your cut-off (${COVERS_LABELS[covers].toLowerCase()})` : "Lists no requirements to check" },
-    }));
+    .map((candidate) => {
+      const shown = view(candidate);
+      const why =
+        candidate.requirements > 0
+          ? `Covers ${candidate.covered} of ${candidate.requirements}: under your cut-off (${COVERS_LABELS[covers].toLowerCase()})`
+          : shown.older
+            ? OLDER_SKIP
+            : "Lists no requirements to check";
+      return { at: candidate.createdAt.getTime(), view: { ...shown, why } };
+    });
   const skips = skippedRows.map((candidate) => ({ at: candidate.createdAt.getTime(), view: { ...view(candidate), why: SKIP_WORDS[candidate.skipReason as SkipReason] ?? "Not scored" } }));
   const skipped = [...under, ...skips].sort((a, b) => b.at - a.at).map((entry) => entry.view);
   const waiting = finds.length;

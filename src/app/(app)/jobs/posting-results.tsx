@@ -261,7 +261,8 @@ export function PostingResults(props: PostingResultsProps) {
 
   const ready = (key: string, title: string, applicationId: string) => {
     setPreparing((current) => without(current, key));
-    updateState(key, { applicationId });
+    // Prepare it for me makes a Draft, or answers with the one there is: "Draft ready" until the server says otherwise.
+    updateState(key, { applicationId, draft: true });
     toast(`Ready to read: ${title || "your application"}.`, { action: { label: "Open", onClick: () => router.push(`/applications/${applicationId}`) } });
   };
 
@@ -457,7 +458,12 @@ export function PostingResults(props: PostingResultsProps) {
               {preparing[postingKey(selected)] ? (preparing[postingKey(selected)].step ?? "Preparing…") : "Prepare it for me"}
             </Button>
           )}
-          {!selected.state.dismissed && (
+          {/* One application per posting (jobauto fork): the one there is opens, rather than starting a second. */}
+          {selected.state.applicationId ? (
+            <Link href={`/applications/${selected.state.applicationId}`} className={buttonClassName(offersPrepare(selected, props.canPrepare) ? "secondary" : "primary", "sm", "hover:text-on-primary")}>
+              {selected.state.draft ? "Open the draft" : "Open the application"}
+            </Link>
+          ) : !selected.state.dismissed && (
             <StartButton
               secondary={offersPrepare(selected, props.canPrepare)}
               starting={starting === postingKey(selected)}
@@ -493,9 +499,9 @@ function PrepareWatcher({ jobId, onChange }: { jobId: string; onChange: (job: Jo
 /**
  * "Prepare it for me" (jobauto fork) is offered on a posting with no
  * application yet, while Dossier's own AI model can write. Not on one the
- * job agent scored or drafted: its Prepare draft (E22-8) writes that
- * posting's draft for review on the Agent screen, and one posting gets one
- * draft.
+ * job agent scored or drafted: the agent's own Prepare it for me (E22-8)
+ * writes that posting's draft for review on the Agent screen, and one
+ * posting gets one draft.
  */
 function offersPrepare(posting: ShownPosting, canPrepare = false): boolean {
   const { dismissed, applicationId, agent } = posting.state;
@@ -624,7 +630,8 @@ function StateBadges({ state, now }: { state: PostingState; now: Date }) {
   const badges = [
     // In the Archive, nothing is new; one a search found again there is "Still listed" (E22-7).
     state.archived ? state.stillListedAt && `Still listed · ${postedAgo(state.stillListedAt, now)}` : state.new && "New",
-    state.applicationId && "Applied",
+    // Prepare it for me makes a Draft: nothing is sent until she sends it (jobauto fork).
+    state.applicationId && (state.draft ? "Draft ready" : "Applied"),
     state.saved && "Saved",
     state.dismissed && "Dismissed",
   ].filter(Boolean) as string[];
@@ -712,7 +719,7 @@ function PostingDetail({
   // Added by an AI client or from a careers page (jobauto fork): who added it, and no portal when none found it.
   const onlyAdded = isAddedSource(posting.source) && state.foundOn.length <= 1;
   const kicker = [
-    state.archived ? "In the Archive" : state.dismissed ? "Dismissed" : state.applicationId ? "Applied for" : state.saved ? "Saved" : state.new ? "New" : "",
+    state.archived ? "In the Archive" : state.dismissed ? "Dismissed" : state.applicationId ? (state.draft ? "Draft ready" : "Applied for") : state.saved ? "Saved" : state.new ? "New" : "",
     when ? `posted ${when}` : "",
     portals && !onlyAdded ? `on ${portals}` : "",
     addedBy(posting),
@@ -801,10 +808,8 @@ function PostingDetail({
 
       {state.applicationId && (
         <p role="note" className="rounded-card bg-track px-4 py-3 text-meta">
-          You have an application for this.{" "}
-          <Link href={`/applications/${state.applicationId}`} className="underline underline-offset-2">
-            Open the application
-          </Link>
+          {/* The way there is the button above (jobauto fork). */}
+          {state.draft ? "Your draft for this is ready. Nothing is sent until you send it." : "You have an application for this."}
         </p>
       )}
       {state.foundOn.length > 1 && (
@@ -844,7 +849,7 @@ function PostingDetail({
             // Every profile's (E25-5), each under its name when there are several.
             state.scores.map((fit) => (
               <section key={fit.profileId} aria-label={fit.profileName ? `Score for “${fit.profileName}”` : undefined}>
-                <FitDetails fit={fit} older={fit.older} note={fit.profileName ? `For ${fit.profileName}` : undefined} />
+                <FitDetails fit={fit} note={fit.profileName ? `For ${fit.profileName}` : undefined} />
               </section>
             ))
           ) : (

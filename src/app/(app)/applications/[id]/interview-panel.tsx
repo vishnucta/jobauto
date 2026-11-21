@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useOptimistic, useState, useTransition } from "react";
 
 import { toast, toastResult } from "@/components/toast";
@@ -42,6 +43,7 @@ export function InterviewPanel({
   onPrepare,
   fitLine,
   onShowFit,
+  onCallPrep,
 }: {
   applicationId: string;
   interviews: InterviewView[];
@@ -55,6 +57,8 @@ export function InterviewPanel({
   /** "5 of 7 requirements covered". */
   fitLine: string;
   onShowFit: () => void;
+  /** Opens this application's Call prep tab (jobauto fork); Getting ready links to it and to the general practice. */
+  onCallPrep?: () => void;
 }) {
   const rounds = interviews.map(asDate);
   const upcoming = upcomingRound(rounds);
@@ -83,7 +87,7 @@ export function InterviewPanel({
         </div>
       )}
 
-      <GettingReady applicationId={applicationId} round={current} preparing={preparing} aiReady={aiReady} onPrepare={onPrepare} />
+      <GettingReady applicationId={applicationId} round={current} preparing={preparing} aiReady={aiReady} onPrepare={onPrepare} onCallPrep={onCallPrep} />
 
       <section aria-labelledby="so-far" className="flex flex-col gap-1.5 border-t border-line pt-4">
         <h2 id="so-far" className="pb-1 text-[12.5px] text-muted">
@@ -188,12 +192,14 @@ function GettingReady({
   preparing,
   aiReady,
   onPrepare,
+  onCallPrep,
 }: {
   applicationId: string;
   round: InterviewView | ReturnType<typeof asDate<InterviewView>> | null;
   preparing: boolean;
   aiReady: boolean;
   onPrepare: () => void;
+  onCallPrep?: () => void;
 }) {
   const [items, setItem] = useOptimistic(round?.prep ?? null, (current, { index, done }: { index: number; done: boolean }) =>
     current ? current.map((item, at) => (at === index ? { ...item, done, doneAt: done ? new Date().toISOString() : null } : item)) : current,
@@ -237,6 +243,21 @@ function GettingReady({
           </Button>
         </>
       )}
+      {/* What to say is Call prep's (jobauto fork): this application's pack, or the general practice. */}
+      <p className="text-meta text-muted">
+        Practise what to say:{" "}
+        {onCallPrep && (
+          <>
+            <button type="button" onClick={onCallPrep} className="underline underline-offset-2 hover:text-ink">
+              Call prep
+            </button>
+            {" · "}
+          </>
+        )}
+        <Link href="/call-prep" className="underline underline-offset-2 hover:text-ink">
+          General practice
+        </Link>
+      </p>
     </section>
   );
 }

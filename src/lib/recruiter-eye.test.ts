@@ -31,7 +31,18 @@ describe("recruiterDoubts", () => {
 
   it("sees what her documents already say", () => {
     const documents = "Pinneberg. I may work in Germany without a visa or sponsorship. Deutsch: A2, B1-Kurs läuft. ZAB: equivalent to a German Bachelor. EMIR and MiFIR rules are the same across the EU.";
-    expect(recruiterDoubts({ profile, answers, posting: GERMAN_AD, documents }).every((doubt) => doubt.answered)).toBe(true);
+    const fluent = { ...profile, languages: [profile.languages[0], { id: "l2", name: "German", level: "B2" as const }] };
+    expect(recruiterDoubts({ profile: fluent, answers, posting: GERMAN_AD, documents }).every((doubt) => doubt.answered)).toBe(true);
+  });
+
+  it("doesn't count German as answered when the level stated is below what the job needs (germanDecision)", () => {
+    const documents = "Deutsch: A2, B1-Kurs läuft.";
+    const german = recruiterDoubts({ profile, answers, posting: `${ENGLISH_AD} Sehr gute Deutschkenntnisse sind erforderlich.`, documents }).find((doubt) => doubt.id === "german")!;
+    expect(german).toMatchObject({ answered: false, stated: true });
+    expect(german.fix).toMatch(/^The ad asks for more German \(C1\) than your A2/);
+    // Not stated at all: the usual advice, no "stated".
+    const silent = recruiterDoubts({ profile, answers, posting: GERMAN_AD, documents: "" }).find((doubt) => doubt.id === "german")!;
+    expect(silent.stated).toBeUndefined();
   });
 
   it("leaves out doubts that don't apply: German for an English job she meets, a German degree, German experience", () => {

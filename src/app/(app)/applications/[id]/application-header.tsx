@@ -76,7 +76,8 @@ export function ApplicationHeader({
         </div>
       </div>
       {tabs}
-      <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+      {/* On a phone the row may shrink, so its buttons wrap rather than run off the edge (jobauto fork). */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 max-sm:min-w-0 max-sm:shrink">{actions}</div>
     </PageBar>
   );
 }

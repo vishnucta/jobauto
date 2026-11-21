@@ -4,6 +4,7 @@ import { isAiConfigured, isAiUsable } from "@/lib/ai/config";
 import { handsOffToClaude } from "@/lib/connector/handoff";
 import { DEMO_POSTING } from "@/lib/demo-profile";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
+import { profileGerman } from "@/lib/german-need";
 import { updatedAgo } from "@/lib/applications-list";
 import { postingText } from "@/lib/job-search/search";
 import { startingPoints } from "@/lib/library";
@@ -38,6 +39,8 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
     // Each profile's roles, for "Where you used it" on a gap (E30-5).
     prisma.experience.findMany({ orderBy: [{ sort: "asc" }, { id: "asc" }], select: { id: true, profileId: true, company: true, role: true, startYear: true, endYear: true, current: true } }),
   ]);
+  // Her German, against what the posting asks for (german-need.ts, jobauto fork); languages are shared by every profile.
+  const german = profileGerman(await prisma.language.findMany({ select: { name: true, level: true } }));
   const roles: Record<string, { id: string; label: string }[]> = {};
   for (const entry of experience) (roles[entry.profileId] ??= []).push({ id: entry.id, label: roleLabel(entry) });
   // From Positions, the profile that scored it best starts chosen (M8); the user can change it.
@@ -66,6 +69,8 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
       roles={roles}
       docLanguage={settings.docLanguage}
       languages={[...DOCUMENT_LANGUAGES.map((language) => language.name), ...settings.customLanguages]}
+      german={german}
+      germanOnlyWhenFit={settings.germanOnlyWhenFit}
       startFrom={points.map(({ at, ...point }) => ({ ...point, when: `${point.from === "saved" ? "Saved" : "Agent"} · ${updatedAgo(at).toLowerCase()}` }))}
       // A first-run helper: only until the first application exists (E7-1).
       samplePosting={applications === 0 ? DEMO_POSTING : null}

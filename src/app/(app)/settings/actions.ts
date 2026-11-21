@@ -8,9 +8,6 @@ import { AiProvider, JobStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
 import { lockAgentSearches } from "@/lib/agent/searches";
 import { applyApiKeyChange } from "@/lib/ai/api-key";
-import { SendError } from "@/lib/notifications/send";
-import { ntfyTarget } from "@/lib/ntfy-address";
-import { sendDigest } from "@/lib/supporter-digest-data";
 import { deleteAllAttachments, removeAttachment as deleteAttachment, updateAttachment } from "@/lib/attachments";
 import { deleteAllApplyData } from "@/lib/apply/files";
 import { forgetRemovedProfileEntries } from "@/lib/connector/removed-entries";
@@ -444,25 +441,4 @@ export const removeAttachment = action(z.object({ id: z.string().min(1).max(64) 
   return null;
 });
 
-// The supporter digest (supporter-digest.ts): a weekly summary on the supporter's phone.
-
-/** Sends the weekly digest to this ntfy topic, or stops it with null. */
-export const saveSupporterAddress = action(z.object({ address: z.string().trim().max(500).nullable() }), async ({ address }) => {
-  if (address && !ntfyTarget(address)) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/your-topic.");
-  await saveSettings({ supporterAddress: address || null });
-  return { address: address || null };
-});
-
-/** "Send this week's now": the digest as it stands, to the saved topic. */
-export const sendDigestNow = action(z.object({}), async (_input, { toast }) => {
-  const { supporterAddress } = await loadSettings();
-  if (!supporterAddress) throw new ActionError("Save the supporter's topic address first.");
-  try {
-    await sendDigest(supporterAddress);
-  } catch (error) {
-    if (error instanceof SendError) throw new ActionError(error.message);
-    throw error;
-  }
-  toast("Sent. It should be on their phone in a few seconds.");
-  return null;
-});
+// The supporter digest is a Notifications event now (jobauto fork): its actions are in notifications-actions.ts.

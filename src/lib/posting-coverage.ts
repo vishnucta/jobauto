@@ -73,3 +73,14 @@ export function fitWords({ hit, total, mustMissing }: Coverage): string {
  * You show 5 of 6", and "Capped at 69: …" loses its number.
  */
 export const withoutPoints = (line: string): string => line.replace(/^Capped at \d+: /, "").replace(/^([^:]{1,40}?) \d+(?:\.\d+)?\/\d+: /, "$1: ");
+
+/**
+ * A stored factor line as a reason (jobauto fork): in its favour with half
+ * its points or more, so "Seniority 2/10: …" counts against; a line without
+ * points counts for it. For the job agent's candidates, which keep their
+ * breakdown only as lines (fitLines).
+ */
+export function factorReason(line: string): { text: string; good: boolean } {
+  const points = /^[^:]{1,40}? (\d+(?:\.\d+)?)\/(\d+): /.exec(line);
+  return { text: withoutPoints(line), good: !points || Number(points[1]) >= Number(points[2]) / 2 };
+}

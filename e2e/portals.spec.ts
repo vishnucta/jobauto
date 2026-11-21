@@ -67,7 +67,7 @@ test("adds a portal from a file, shows what it reaches first, searches it, and r
 
   // Searched with the built-ins switched on, its postings in Positions under its name.
   await page.goto("/jobs?q=designer&where=Rotterdam&country=nl");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   const list = page.getByRole("list", { name: "Postings" });
   await expect(list.getByRole("button", { name: /^Service Designer/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: /^Portal: / }).click();
@@ -134,7 +134,7 @@ test("searches each company's board in a list, matching on the server and naming
 
   // Matched on the server: the designer in Rotterdam, not the one for the US; the board it couldn't read is named.
   await page.goto("/jobs?q=designer&where=Rotterdam&country=nl");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   const list = page.getByRole("list", { name: "Postings" });
   await expect(list.getByRole("button", { name: /^Interaction Designer/ })).toHaveCount(1, { timeout: 30_000 });
   // Hovering the progress shows each portal.

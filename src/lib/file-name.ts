@@ -1,4 +1,5 @@
 import { DocumentKind } from "@/generated/prisma/enums";
+import { knownLanguage } from "@/lib/document-language";
 
 // File names for downloaded PDFs (SET-8), from the pattern in Settings.
 
@@ -8,7 +9,7 @@ export const FILE_NAME_TOKENS = [
   { token: "{first}", description: "First name" },
   { token: "{company}", description: "Company" },
   { token: "{role}", description: "Job title" },
-  { token: "{doc}", description: "Resume or Cover letter" },
+  { token: "{doc}", description: "Resume or Cover letter (Lebenslauf or Anschreiben in German)" },
   { token: "{date}", description: "Download date" },
 ] as const;
 
@@ -18,6 +19,18 @@ export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   // Never a file, but named like the others (the history, toasts).
   [DocumentKind.EMAIL]: "Email",
 };
+
+/** A German application's documents, named as German employers expect them (jobauto fork). */
+const GERMAN_DOCUMENT_LABELS: Record<DocumentKind, string> = {
+  [DocumentKind.RESUME]: "Lebenslauf",
+  [DocumentKind.COVER_LETTER]: "Anschreiben",
+  [DocumentKind.EMAIL]: "E-Mail",
+};
+
+/** What `{doc}` says for a document written in `language`: "Lebenslauf" for a German resume, "Resume" otherwise. */
+export function documentFileLabel(kind: DocumentKind, language?: string | null): string {
+  return knownLanguage(language)?.tag === "de" ? GERMAN_DOCUMENT_LABELS[kind] : DOCUMENT_LABELS[kind];
+}
 
 export type FileNameContext = {
   name: string;
@@ -29,6 +42,8 @@ export type FileNameContext = {
   label?: string;
   /** The download date; `{date}` is its calendar day on the server, YYYY-MM-DD. */
   date: Date;
+  /** The application's language (a name, "German"): German documents are a Lebenslauf and an Anschreiben (jobauto fork). */
+  language?: string | null;
 };
 
 /** Longer names are cut to this many characters, which leaves room for ".pdf" on any file system. */
@@ -58,7 +73,7 @@ export function resolveFileName(pattern: string, context: FileNameContext): stri
     "{first}": name.split(/\s+/)[0],
     "{company}": context.company?.trim() ?? "",
     "{role}": context.role?.trim() ?? "",
-    "{doc}": context.label ?? DOCUMENT_LABELS[context.doc],
+    "{doc}": context.label ?? documentFileLabel(context.doc, context.language),
     "{date}": `${context.date.getFullYear()}-${pad(context.date.getMonth() + 1)}-${pad(context.date.getDate())}`,
   };
 

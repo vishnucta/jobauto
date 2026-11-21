@@ -20,8 +20,9 @@ const VIEW_MARK_MS = 60 * 60 * 1000;
 
 /**
  * Startups that are hiring (#222): YC startups' job posts and Hacker News'
- * "Who is hiring?", ranked against the profile, with the addresses they
- * publish for applications.
+ * "Who is hiring?", and the fork's newly licensed firms, from the sources
+ * switched on, ranked against the profile, with the addresses they publish
+ * for applications.
  */
 export default async function StartupsPage({ searchParams }: PageProps<"/startups">) {
   const filter = startupFilterFromParams(await searchParams);
@@ -45,6 +46,7 @@ export default async function StartupsPage({ searchParams }: PageProps<"/startup
       aiReady={aiReady}
       today={now.toISOString()}
       profileNames={profiles.length > 1 ? Object.fromEntries(profiles.map((entry) => [entry.id, entry.name])) : {}}
+      sources={settings.startupSources}
     />
   );
 }

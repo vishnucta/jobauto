@@ -150,7 +150,7 @@ export async function postingStates(found: readonly (PostingRef & { url: string 
       },
     }),
     // An agent draft waiting for review isn't applied for yet (#195).
-    db.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true }, orderBy: { createdAt: "asc" } }),
+    db.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true, status: true }, orderBy: { createdAt: "asc" } }),
     db.postingScore.findMany({ where: { OR: refs }, include: { profile: { select: { name: true, sort: true, createdAt: true } } } }),
     // A posting the agent only skipped (E32-5) isn't one of its finds.
     db.agentCandidate.findMany({ where: { OR: refs, skipReason: null }, select: { id: true, source: true, externalId: true, status: true, applicationId: true } }),
@@ -172,6 +172,13 @@ export async function postingStates(found: readonly (PostingRef & { url: string 
     scoresOf.set(postingKey(row), [...(scoresOf.get(postingKey(row)) ?? []), fit]);
   }
   const byKey = new Map(stored.map((posting) => [postingKey(posting), posting]));
+  // Which applications are still Drafts (jobauto fork): Prepare it for me's "Draft ready" isn't "Applied".
+  const linked = stored.flatMap((posting) => (posting.applicationId ? [posting.applicationId] : []));
+  const drafts = new Set(applications.filter((application) => application.status === "DRAFT").map((application) => application.id));
+  const unlisted = linked.filter((id) => !applications.some((application) => application.id === id));
+  if (unlisted.length > 0) {
+    for (const application of await db.application.findMany({ where: { id: { in: unlisted }, status: "DRAFT" }, select: { id: true } })) drafts.add(application.id);
+  }
   const byLink = new Map<string, string>();
   for (const application of applications) {
     const key = linkKey(application.postingUrl);
@@ -189,6 +196,7 @@ export async function postingStates(found: readonly (PostingRef & { url: string 
           saved: Boolean(row?.savedAt),
           dismissed: Boolean(row?.dismissedAt),
           applicationId: row?.applicationId ?? ((link && byLink.get(link)) || null),
+          draft: drafts.has(row?.applicationId ?? ((link && byLink.get(link)) || "")),
           score: bestFit(scoresOf.get(postingKey(posting)) ?? []),
           scores: scoresOf.get(postingKey(posting)) ?? [],
           foundOn: [{ portal: posting.source, url: posting.url }, ...(row?.merged ?? []).map((other) => ({ portal: other.source, url: other.url }))].filter(

@@ -7,11 +7,9 @@ import { EMPTY_QUERY, foundPostingSchema, type SearchQuery } from "@/lib/job-sea
 //
 //   docker compose exec -e JOBS_LIVE=freehire app yarn vitest run src/lib/portals/live.test.ts
 //   docker compose exec -e JOBS_LIVE=jsearch,adzuna app yarn vitest run src/lib/portals/live.test.ts
-//   docker compose exec -e JOBS_LIVE=serpapi,jooble app yarn vitest run src/lib/portals/live.test.ts
+//   docker compose exec -e JOBS_LIVE=serpapi app yarn vitest run src/lib/portals/live.test.ts
 //
-// SerpApi and Jooble (jobauto fork) run on their own code, which builtInAdapter
-// gives too. A Jooble key is for one country: the search is for Germany, and
-// its free plan is 500 searches in all, of which this spends up to three.
+// SerpApi (jobauto fork) runs on its own code, which builtInAdapter gives too.
 //
 // Each uses what the app would: the fields and key saved in Settings → Job
 // search, or the built-ins' DOSSIER_* variables, read from the database and

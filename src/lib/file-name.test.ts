@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contentDisposition, resolveFileName, type FileNameContext } from "./file-name";
+import { contentDisposition, documentFileLabel, resolveFileName, type FileNameContext } from "./file-name";
 
 const DEFAULT = "{name} – {company} – {doc}";
 const ledgerly: FileNameContext = {
@@ -17,6 +17,16 @@ describe("resolveFileName", () => {
     expect(resolveFileName(DEFAULT, { ...ledgerly, doc: "COVER_LETTER" })).toBe(
       "Jane Doe – Ledgerly – Cover letter.pdf",
     );
+  });
+
+  it("names a German application's documents Lebenslauf and Anschreiben (jobauto fork)", () => {
+    expect(resolveFileName(DEFAULT, { ...ledgerly, language: "German" })).toBe("Jane Doe – Ledgerly – Lebenslauf.pdf");
+    expect(resolveFileName(DEFAULT, { ...ledgerly, doc: "COVER_LETTER", language: "German" })).toBe("Jane Doe – Ledgerly – Anschreiben.pdf");
+    expect(resolveFileName(DEFAULT, { ...ledgerly, language: "English" })).toBe("Jane Doe – Ledgerly – Resume.pdf");
+    // A file that isn't one document keeps its own name.
+    expect(resolveFileName(DEFAULT, { ...ledgerly, language: "German", label: "Bewerbungsmappe" })).toBe("Jane Doe – Ledgerly – Bewerbungsmappe.pdf");
+    expect(documentFileLabel("COVER_LETTER", "German")).toBe("Anschreiben");
+    expect(documentFileLabel("COVER_LETTER", null)).toBe("Cover letter");
   });
 
   it("knows every token", () => {

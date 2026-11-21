@@ -253,7 +253,7 @@ const KINDS: Record<string, Tell> = {
   [preparePracticeJob.type]: (task, linkTo) => ({
     task: "Preparing a practice call",
     result: resultOf(preparePracticeJob, task) ? { prepared: true } : undefined,
-    link: linkTo("/practice"),
+    link: linkTo("/call-prep"),
     next: "get_practice_prep reads the pack.",
   }),
   [writeWorkSampleJob.type]: (task, linkTo) => {

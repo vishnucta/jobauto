@@ -183,7 +183,7 @@ export function ConnectorSection({
               has the details.
             </p>
             <p className="text-muted">
-              Without an AI model of Dossier&apos;s own, New application and Score in Find jobs hand the work to a new Claude chat, which saves it here through the
+              Without an AI model of Dossier&apos;s own, New application and Score on Positions hand the work to a new Claude chat, which saves it here through the
               connector.
             </p>
             <div>

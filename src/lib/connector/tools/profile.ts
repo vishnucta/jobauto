@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
-import { JobStatus, LanguageLevel } from "@/generated/prisma/enums";
+import { JobStatus, LanguageLevel, type CustomSectionCountsAs, type CustomSectionFormat } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { isAiUsable, loadAiConfig } from "@/lib/ai/config";
 import { providerOption } from "@/lib/ai/provider-options";
@@ -28,6 +28,7 @@ import {
   deletePhoto,
   newCertification,
   newCustomItem,
+  newCustomSection,
   newEducation,
   newExperience,
   newProject,
@@ -47,6 +48,7 @@ import {
   restorePublicationEntry,
   restoreReferenceEntry,
   saveBasicsFields,
+  saveCustomSectionFields,
   sortSectionByDate,
   storePhoto,
 } from "@/lib/profile-edits";
@@ -232,6 +234,7 @@ function profileView(profile: ProfileData) {
       id: section.id,
       title: section.title,
       format: section.format.toLowerCase(),
+      counts_as: section.countsAs.toLowerCase(),
       items: section.items.map((item) => ({
         id: item.id,
         title: item.title,
@@ -486,6 +489,10 @@ const certificationInput = z.object({
   link: z.string().trim().max(500).optional().describe("Where to verify it"),
   on_resumes: z.boolean().optional().describe("Shown on resumes; on for a new one"),
 });
+/** A section of the user's own (#298, E24-5), as save_custom_section takes and get_profile shows it. */
+const SECTION_FORMATS = ["entries", "lines", "inline"] as const satisfies readonly Lowercase<CustomSectionFormat>[];
+const SECTION_COUNTS_AS = ["work_experience", "education", "extra_activities"] as const satisfies readonly Lowercase<CustomSectionCountsAs>[];
+
 const sectionItemInput = z.object({
   id: entryId,
   section_id: z.string().min(1).max(100).optional().describe("For a new item: its section, from get_profile's other_sections"),
@@ -927,7 +934,7 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
       if ("failure" in chosen) return chosen.failure;
       if (kind === "section_item" && id === undefined) {
         const inProfile = section_id ? await prisma.customSection.count({ where: { id: section_id, profileId: chosen.id } }) : 0;
-        if (!inProfile) return failure("Give the section_id of one of the profile's other_sections from get_profile. The user adds a section on the Profile screen.");
+        if (!inProfile) return failure("Give the section_id of one of the profile's other_sections from get_profile, or add the section first with save_custom_section.");
       }
       const saved = await saveEntry(chosen.id, kind, input);
       if (!saved) return noSuchEntry(kind);
@@ -997,6 +1004,51 @@ export function registerProfileTools({ server, linkTo }: ToolContext): void {
         title: found.title,
         undo: "remove_profile_entry with the same kind and id and restore: true puts it back within the hour.",
         link: sectionLink(chosen.id, removedSection(found)),
+      });
+    },
+  );
+
+  server.registerTool(
+    "save_custom_section",
+    {
+      title: "Add or rename a section of the user's own",
+      description:
+        "Adds a section of the user's own to a profile, such as Awards or Interests, as Add a section on the Profile screen does; with section_id, renames one of get_profile's other_sections or changes it. " +
+        "Its items go in with save_profile_entry's section_item. format: entries (each like a role: title, subtitle, dates, details and a link), lines (free text and a link, like a publication) or inline (one line, like skills). " +
+        "counts_as is how the profile is judged with it: an entries section that's work_experience adds its dates to the years of experience. A new format rewrites the section on drafts not sent yet. " +
+        "Add one only when the user asked for it.",
+      inputSchema: z.object({
+        profile: profileInput.describe("For a new section: the profile it goes into; the first when left out"),
+        section_id: z.string().min(1).max(100).optional().describe("A section from get_profile's other_sections, to rename or change; leave out for a new one"),
+        title: z.string().trim().min(1).max(100).optional().describe("Its name, the heading on the resume, e.g. 'Awards'"),
+        format: z.enum(SECTION_FORMATS).optional().describe("For a new section, entries when left out"),
+        counts_as: z.enum(SECTION_COUNTS_AS).optional().describe("For a new section, extra_activities when left out"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ profile: asked, section_id, title, format, counts_as }) => {
+      const fields = { format: format && (format.toUpperCase() as CustomSectionFormat), countsAs: counts_as && (counts_as.toUpperCase() as CustomSectionCountsAs) };
+      let sectionId = section_id;
+      if (!sectionId) {
+        if (!title) return failure("Give the new section a title, e.g. 'Awards'.");
+        const chosen = await chooseProfile(asked);
+        if ("failure" in chosen) return chosen.failure;
+        sectionId = await newCustomSection(chosen.id, { title, format: fields.format ?? "ENTRIES", countsAs: fields.countsAs });
+      } else {
+        if (title === undefined && !format && !counts_as) return failure("Say what to change: title, format or counts_as.");
+        const before = await prisma.customSection.findUnique({ where: { id: sectionId }, select: { title: true, format: true } });
+        if (!before || !(await saveCustomSectionFields(sectionId, { title: title ?? before.title, format: fields.format ?? before.format, countsAs: fields.countsAs }))) {
+          return failure("There's no such section. get_profile lists the profile's other_sections.");
+        }
+      }
+      const section = await prisma.customSection.findUniqueOrThrow({ where: { id: sectionId }, select: { id: true, title: true, format: true, countsAs: true, profileId: true, _count: { select: { items: true } } } });
+      const owner = await chooseProfile(section.profileId);
+      return text({
+        profile: "failure" in owner ? undefined : owner.name,
+        created: section_id === undefined,
+        section: { id: section.id, title: section.title, format: section.format.toLowerCase(), counts_as: section.countsAs.toLowerCase(), items: section._count.items },
+        next: section_id === undefined ? "Add its items with save_profile_entry's section_item and this section_id." : undefined,
+        link: sectionLink(section.profileId, `custom:${section.id}`),
       });
     },
   );

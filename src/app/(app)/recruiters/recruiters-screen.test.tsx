@@ -72,25 +72,35 @@ beforeEach(() => {
   vi.mocked(addSuggestedRecruiters).mockResolvedValue({ ok: true, data: { added: 4 }, toast: "Added 4 agencies." });
 });
 
-describe("the agency round (jobauto fork)", () => {
-  it("offers the Kurzprofil, and each agency not written to with its message, brief included", async () => {
+describe("the agency round, as the list's To contact view (jobauto fork)", () => {
+  it("offers the Kurzprofil, each one still to write to with I wrote to them, and its message, brief included", async () => {
     const briefed: OutreachFacts = { ...facts, brief: { targets: ["Financial Analyst"], mobility: "anywhere in Germany", start: "sofort", salary: "62.000 €" } };
     render(<RecruitersScreen recruiters={all} facts={briefed} counts={counts} today={TODAY} />);
-    const round = screen.getByRole("region", { name: "Your Kurzprofil, and the agencies to write to" });
-    expect(within(round).getByRole("button", { name: "Kurzprofil (PDF)" })).toBeInTheDocument();
-    expect(round).toHaveTextContent("One agency is still to write to");
-    await userEvent.click(within(round).getByRole("button", { name: "Write to it" }));
-    const gmail = new URL(within(round).getByRole("link", { name: "Open in Gmail for Hays" }).getAttribute("href")!);
-    expect(gmail.searchParams.get("body")).toContain("I am looking for roles as Financial Analyst (anywhere in Germany). Available sofort; salary expectation 62.000 €.");
-    expect(gmail.searchParams.get("body")).toContain("My resume and a one-page Kurzprofil are attached.");
-    await userEvent.click(within(round).getByRole("button", { name: "I wrote to them (Hays)" }));
+    // No second list of the same agencies above the list.
+    expect(screen.queryByRole("region", { name: /agencies to write to/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Kurzprofil (PDF)" })).not.toBeInTheDocument();
+
+    await userEvent.click(within(list()).getByRole("button", { name: /^To contact/ }));
+    expect(within(list()).getByRole("note")).toHaveTextContent("one-page Kurzprofil");
+    expect(within(list()).getByRole("button", { name: "Kurzprofil (PDF)" })).toHaveAttribute("data-href", "/api/pdf?doc=kurzprofil");
+    expect(rows()).toEqual([expect.stringContaining("Hays")]);
+    await userEvent.click(within(list()).getByRole("button", { name: "I wrote to them (Hays)" }));
     expect(moveRecruiter).toHaveBeenCalledWith({ id: "fresh", status: "CONTACTED" });
+    expect(router.refresh).toHaveBeenCalled();
+
+    // Its message, with the Kurzprofil beside the resume.
+    await userEvent.click(within(list()).getByRole("button", { name: /^Hays/ }));
+    const gmail = new URL(screen.getByRole("link", { name: "Open in Gmail" }).getAttribute("href")!);
+    expect(gmail.searchParams.get("body")).toContain("I am looking for roles as Financial Analyst (anywhere in Germany). Available sofort; salary expectation 62.000 €.");
+    expect(screen.getAllByRole("button", { name: "Kurzprofil (PDF)" })).toHaveLength(2);
   });
 
-  it("offers the Kurzprofil of the profile the messages are written from", () => {
+  it("offers the Kurzprofil of the profile the messages are written from, and none on the other views", async () => {
     renderScreen(all, "profile-2");
-    const round = screen.getByRole("region", { name: "Your Kurzprofil, and the agencies to write to" });
-    expect(within(round).getByRole("button", { name: "Kurzprofil (PDF)" })).toHaveAttribute("data-href", "/api/pdf?doc=kurzprofil&profile=profile-2");
+    await userEvent.click(within(list()).getByRole("button", { name: /^Waiting/ }));
+    expect(within(list()).queryByRole("button", { name: /I wrote to them/ })).not.toBeInTheDocument();
+    await userEvent.click(within(list()).getByRole("button", { name: /^To contact/ }));
+    expect(within(list()).getByRole("button", { name: "Kurzprofil (PDF)" })).toHaveAttribute("data-href", "/api/pdf?doc=kurzprofil&profile=profile-2");
   });
 });
 

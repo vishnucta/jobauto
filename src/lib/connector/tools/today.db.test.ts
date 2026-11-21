@@ -2,8 +2,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { needsYouHref } from "@/lib/dashboard";
 import { loadDashboard } from "@/lib/dashboard-data";
+import { loadWeeklyProgress } from "@/lib/insights-data";
 import { saveSettings, loadSettings } from "@/lib/settings-data";
+import { loadSetupSteps } from "@/lib/setup-checklist-data";
 import { lastKnownTimeZone } from "@/lib/time-zone";
+import { weekStatus } from "@/lib/weekly-target";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { seedBuiltIns } from "../../../../prisma/seed/built-ins";
@@ -13,7 +16,8 @@ import { challengeOf, exchangeCode, issueCode, registerClient } from "../oauth";
 
 // get_today (jobauto fork), called as Claude calls it, through /api/mcp,
 // against the test database with the demo data: the dashboard's Today's
-// three and Needs you, from the same functions the dashboard draws.
+// three, Needs you, the weekly target and Start here, from the same
+// functions the dashboard draws.
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
 vi.mock("@/lib/prisma", async () => {
@@ -99,6 +103,8 @@ describe("get_today", () => {
       ),
     );
     expect(json.due_this_week).toBe(expected.filter((item) => item.soon).length);
+    // The dashboard's line under the greeting, from Do today (jobauto fork).
+    expect(json.summary).toEqual(expect.stringMatching(/needs? you this week|waiting|Nothing needs you/));
     expect(json.link).toBe(`${APP}/`);
     // The demo profile's levels are chosen, so scoring is on.
     expect(json).not.toHaveProperty("scoring_off");
@@ -147,6 +153,26 @@ describe("get_today", () => {
         link: `${APP}/agent`,
       },
     ]);
+  });
+
+  it("tells the weekly target and how this week is going, as the This week card does", async () => {
+    await saveSettings({ weeklyTarget: 0 });
+    expect((await today()).json.weekly_target).toEqual({ target: 0, note: expect.stringContaining("sets one on the dashboard") });
+
+    await saveSettings({ weeklyTarget: 5 });
+    const week = await loadWeeklyProgress(await lastKnownTimeZone());
+    expect((await today()).json.weekly_target).toEqual({ target: 5, sent_this_week: week.sent, status: weekStatus(week), weeks_in_a_row: week.streak });
+  });
+
+  it("lists Start here's steps not done yet, each with where it's done, and nothing once they all are", async () => {
+    const steps = await loadSetupSteps();
+    const open = steps.filter((step) => !step.done);
+    expect(open.length).toBeGreaterThan(0);
+    const { json } = await today();
+    expect(json.start_here).toEqual({
+      done: `${steps.length - open.length} of ${steps.length}`,
+      steps: open.map((step) => ({ step: step.title, why: step.why, action: step.action, link: `${APP}${step.href.startsWith("#") ? `/${step.href}` : step.href}` })),
+    });
   });
 
   it("says when nothing is waiting, and when scoring is off", async () => {

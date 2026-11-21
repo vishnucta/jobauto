@@ -137,6 +137,7 @@ export async function loadSettingsStatus(now = new Date()): Promise<SettingsStat
     now,
     ai,
     documents: { paper: settings.paper === "LETTER" ? "Letter" : "A4", language: settings.docLanguage ?? "The posting's language", tone: TONES[settings.defaultTone].label },
+    answers: answersFilled(settings.applyAnswers),
     scoring: { name: SCORER_INFO[scoringConfig.scorer].name, problem: await scoringProblem(scoringConfig), scoredThisMonth, levelsOff: levelsOff && { reason: levelsOff.reason, href: levelsOff.href } },
     jobs,
     agent,
@@ -152,4 +153,10 @@ export async function loadSettingsStatus(now = new Date()): Promise<SettingsStat
     },
     about: { version: appVersion, update: update?.version ?? null, database: isSqliteUrl(env.DATABASE_URL) ? "SQLite" : "PostgreSQL", applications },
   });
+}
+
+/** How many of the standard answers' own fields are filled in (jobauto fork); the levels and the permit always hold a value. */
+function answersFilled(answers: SettingsData["applyAnswers"]): StatusInputs["answers"] {
+  const fields = [answers.salary, answers.startDate, answers.noticePeriod, answers.germanCourse, answers.mobility, answers.degreeRecognition];
+  return { filled: fields.filter((value) => value.trim()).length, of: fields.length, saved: answers.confirmed !== false };
 }

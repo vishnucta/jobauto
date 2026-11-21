@@ -126,6 +126,25 @@ describe("the Agent screen's data (E16-6)", () => {
     expect(await countAgentQueue()).toBe(1);
   });
 
+  it("says an older score's skip was scored before 1.15, and one scored anew lists no requirements (jobauto fork)", async () => {
+    const profile = await prisma().profile.findFirst() ?? (await prisma().profile.create({ data: { name: "Erika Mustermann" } }));
+    await candidate("older", 60, { reasons: ["German is only A2."], redFlags: [] });
+    await candidate("anew", 60);
+    await prisma().postingScore.create({ data: { source: "JSEARCH", externalId: "older", profileId: profile.id, score: 60, reasons: ["German is only A2."], redFlags: [], scoredWith: "score-posting@2" } });
+    await prisma().postingScore.create({
+      data: { source: "JSEARCH", externalId: "anew", profileId: profile.id, score: 60, reasons: [], redFlags: [], scoredWith: "score-engine@1", breakdown: { factors: [], cap: null, requirements: [] } },
+    });
+    await candidate("unscored", 0, { skipReason: "budget" });
+
+    const view = await loadAgentView(now);
+    const skipped = Object.fromEntries(view.skipped.map((entry) => [entry.title, [entry.why, entry.older]]));
+    expect(skipped).toEqual({
+      "Posting older": ["Scored before 1.15: not scored with the new method yet", true],
+      "Posting anew": ["Lists no requirements to check", false],
+      "Posting unscored": ["Past the run's scoring limit: it stays in Positions unscored", false],
+    });
+  });
+
   it("says what's missing, and when the day's runs are used up", async () => {
     await prisma().agentSearch.deleteMany();
     await saveSettings({

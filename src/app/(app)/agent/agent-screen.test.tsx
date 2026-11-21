@@ -14,7 +14,7 @@ vi.mock("@/hooks/use-job", () => ({ useJob: () => null }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { ok: boolean }) => result }));
 vi.mock("./actions", () => ({
   runAgentNow: vi.fn(async () => ({ ok: true, data: { jobId: "run-1", reused: false } })),
-  prepareAgentDraft: vi.fn(async () => ({ ok: true, data: { jobId: "draft-1", applicationId: null } })),
+  prepareAgentDraft: vi.fn(async () => ({ ok: true, data: { jobId: "draft-1", applicationId: null, started: true } })),
   approveAgentDraft: vi.fn(async () => ({ ok: true, data: { applicationId: "app-1" } })),
   dismissAgentCandidate: vi.fn(async () => ({ ok: true, data: { undo: null } })),
   restoreAgentCandidate: vi.fn(async () => ({ ok: true, data: null })),
@@ -36,6 +36,7 @@ const card = (id: string, score: number, extra: Partial<AgentCandidateView> = {}
   error: null,
   applicationId: null,
   draftJobId: null,
+  older: false,
   ...extra,
 });
 const view: AgentView = {
@@ -114,17 +115,48 @@ describe("AgentScreen (E16-6)", () => {
     expect(tabs[1]).toHaveAttribute("href", "/agent?tab=finds");
   });
 
-  it("offers Prepare draft on a best find, and says why one was skipped", async () => {
+  it("offers Prepare it for me on a best find, and says why one was skipped", async () => {
     const user = userEvent.setup();
     const { unmount } = open({}, "finds");
     const finds = within(screen.getByRole("list", { name: "Best finds" }));
     expect(finds.getAllByRole("button").map((row) => row.textContent)).toEqual([expect.stringContaining("Found by Design"), expect.stringContaining("Posting f2")]);
-    await user.click(screen.getByRole("button", { name: "Prepare draft" }));
+    await user.click(screen.getByRole("button", { name: "Prepare it for me" }));
     expect(prepareAgentDraft).toHaveBeenCalledWith({ candidateId: "f1" });
     unmount();
     open({}, "skipped");
     expect(within(screen.getByRole("list", { name: "Skipped" })).getByRole("button")).toHaveTextContent("Past the run's scoring limit: it stays in Positions unscored");
     expect(screen.getByRole("region", { name: "How it fits" })).toHaveTextContent("Not scored");
+  });
+
+  it("shows each factor for or against by its points, and an older score's reasons as a plain list (jobauto fork)", () => {
+    const { unmount } = open({ finds: [card("f1", 80, { reasons: ["Work experience 18/20: Payments tools at Northwind.", "Seniority 2/10: The job is a director's."], redFlags: ["Missing: Dutch"] })] }, "finds");
+    const fits = screen.getByRole("region", { name: "How it fits" });
+    expect(within(fits).getAllByRole("listitem").map((line) => line.textContent)).toEqual([
+      "✓In favour: Work experience: Payments tools at Northwind.",
+      "–Against: Seniority: The job is a director's.",
+      "–Against: Missing: Dutch",
+    ]);
+    unmount();
+    open(
+      {
+        skipped: [
+          card("s1", 0, {
+            coverage: { hit: 0, total: 0, mustMissing: 0 },
+            older: true,
+            why: "Scored before 1.15: not scored with the new method yet",
+            reasons: ["German language proficiency is only elementary (A2)."],
+            redFlags: ["Capped at 40: Very good German is required."],
+          }),
+        ],
+      },
+      "skipped",
+    );
+    const older = screen.getByRole("region", { name: "How it fits" });
+    expect(older).toHaveTextContent("Not scored with the new method yet");
+    expect(older).toHaveTextContent("Score it again in Positions");
+    expect(within(older).getAllByRole("listitem").map((line) => line.textContent)).toEqual(["German language proficiency is only elementary (A2).", "Very good German is required."]);
+    expect(older).not.toHaveTextContent(/In favour|Against/);
+    expect(within(screen.getByRole("list", { name: "Skipped" })).getByRole("button")).toHaveTextContent("Scored before 1.15");
   });
 
   it("lists drafts to review, resume and letter ready, with Review draft, Approve and Dismiss", async () => {

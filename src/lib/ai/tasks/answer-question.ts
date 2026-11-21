@@ -14,7 +14,7 @@ import {
   type Task,
 } from "./prompt-parts";
 
-export const ANSWER_QUESTION_VERSION = "answer-question@1";
+export const ANSWER_QUESTION_VERSION = "answer-question@2";
 
 // Ask in an application's composer (E30-10, AP5, public issue 132): a
 // question about the job and how the candidate fits it, answered from the
@@ -41,10 +41,21 @@ export type QuestionInput = {
   facts: string[];
   /** The posting as pasted. */
   posting: string;
+  /**
+   * How much German the job needs against hers, as every screen reads it
+   * (germanDecision, jobauto fork): "" when the posting says nothing about
+   * German. The model repeats it rather than judging the level itself.
+   */
+  german?: string;
 };
 
+/** The German reading, as a fact the answer keeps to. */
+const germanFact = (german: string) =>
+  `How much German this job needs, as Dossier reads the posting against the candidate's German: ${german}
+When the question is about German, answer from this reading. Don't name another level, and don't mention courses or exams the profile and facts don't show.`;
+
 /** E30-10: an answer in plain text, with no edits. */
-export const answerQuestion: Task<QuestionInput, string> = async (provider, { question, history, profile, extracted, facts, posting }, options) => {
+export const answerQuestion: Task<QuestionInput, string> = async (provider, { question, history, profile, extracted, facts, posting, german = "" }, options) => {
   const answer = await provider.complete({
     task: "answer-question",
     system: system(INSTRUCTIONS, languageRule(options.language), UNTRUSTED_POSTING, NO_EM_DASHES),
@@ -56,6 +67,7 @@ export const answerQuestion: Task<QuestionInput, string> = async (provider, { qu
           `The job:\n${jobForPrompt(extracted, null)}`,
           posting.trim() && `The posting as pasted:\n${posting.slice(0, MAX_POSTING_CHARACTERS)}`,
           applicationFacts(facts),
+          german.trim() && germanFact(german.trim()),
         ]
           .filter(Boolean)
           .join("\n\n"),

@@ -45,7 +45,7 @@ test("the base resume with its themes", async ({ page }) => {
 
 test("Find jobs with a posting open", async ({ page }) => {
   await page.goto("/jobs");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Senior Product Designer, Payments" })).toBeVisible();
   await shot(page, "find-jobs");
 });

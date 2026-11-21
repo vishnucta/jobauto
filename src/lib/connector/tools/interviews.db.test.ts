@@ -105,6 +105,9 @@ describe("after applying (1.15)", () => {
     expect(hints.update_offer).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     // Drafted only: nothing is sent.
     expect(hints.draft_follow_up).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+    // A tick on Getting ready; letting a draft go (Discard deletes it for good).
+    expect(hints.tick_getting_ready).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    expect(hints.settle_message_draft).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
     expect(hints.get_work_sample).toEqual({ readOnlyHint: true, openWorldHint: false });
     expect(hints.write_work_sample).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
   });
@@ -207,6 +210,48 @@ describe("after applying (1.15)", () => {
     expect(again.json.replaced).toEqual({ subject: "Edited", body: "Edited by hand" });
 
     expect(await tool("draft_follow_up", { id: meridian.id, subject: "Only a subject" })).toMatchObject({ isError: true });
+  });
+
+  it("ticks and unticks a round's Getting ready items, numbered as get_application lists them", async () => {
+    const northstar = await application("Northstar Health");
+    const round = await prisma().interview.create({
+      data: { applicationId: northstar.id, round: 9, prep: [{ text: "Read the annual report" }, { text: "Two questions to ask", why: "They ask for them" }] },
+    });
+    const ticked = await tool("tick_getting_ready", { id: northstar.id, round_id: round.id, item: 2 });
+    expect(ticked.json).toMatchObject({
+      round: 9,
+      getting_ready: [
+        { number: 1, item: "Read the annual report", done: false },
+        { number: 2, item: "Two questions to ask", done: true },
+      ],
+      link: `https://dossier.example/applications/${northstar.id}`,
+    });
+    // With when, as the page's checkbox keeps it.
+    expect((await prisma().interview.findUniqueOrThrow({ where: { id: round.id } })).prep).toMatchObject([{ done: false }, { done: true, doneAt: expect.any(String) }]);
+    await tool("tick_getting_ready", { id: northstar.id, round_id: round.id, item: 2, done: false });
+    expect((await prisma().interview.findUniqueOrThrow({ where: { id: round.id } })).prep).toMatchObject([{ done: false }, { done: false, doneAt: null }]);
+
+    expect(await tool("tick_getting_ready", { id: northstar.id, round_id: round.id, item: 3 })).toMatchObject({ isError: true });
+    expect(await tool("tick_getting_ready", { id: (await application("Meridian Bank")).id, round_id: round.id, item: 1 })).toMatchObject({ isError: true });
+    expect(await tool("tick_getting_ready", { id: "gone", round_id: round.id, item: 1 })).toMatchObject({ isError: true, text: "That application no longer exists." });
+  });
+
+  it("lets a drafted message go on the user's word: I sent it starts Quiet for again, Discard deletes it", async () => {
+    const meridian = await application("Meridian Bank");
+    expect(await tool("settle_message_draft", { id: meridian.id, sent: true })).toMatchObject({ isError: true, text: expect.stringContaining("no drafted message") });
+
+    await tool("draft_follow_up", { id: meridian.id, subject: "Following up", body: "Dear Ms Mustermann, ..." });
+    const before = Date.now();
+    expect((await tool("settle_message_draft", { id: meridian.id, sent: true })).json).toMatchObject({ id: meridian.id, done: expect.stringContaining("Quiet for starts again") });
+    const sent = await prisma().application.findUniqueOrThrow({ where: { id: meridian.id } });
+    expect(sent.messageDraft).toBeNull();
+    expect(sent.contactedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+
+    await tool("draft_follow_up", { id: meridian.id, subject: "Again", body: "Hello again" });
+    const contacted = sent.contactedAt;
+    expect((await tool("settle_message_draft", { id: meridian.id, sent: false })).json).toMatchObject({ done: "Discarded “Again”." });
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: meridian.id } })).toMatchObject({ messageDraft: null, contactedAt: contacted });
+    expect(await tool("settle_message_draft", { id: "gone", sent: false })).toMatchObject({ isError: true, text: "That application no longer exists." });
   });
 
   it("has Dossier's AI draft it on request, and answers an offer only in Offer", async () => {

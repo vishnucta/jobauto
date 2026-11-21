@@ -2,6 +2,8 @@
 export const SETTINGS_SECTIONS = [
   { id: "ai", label: "AI provider" },
   { id: "documents", label: "Documents" },
+  // The answers every application uses (jobauto fork), edited here only.
+  { id: "answers", label: "Standard answers" },
   { id: "scoring", label: "Scoring" },
   { id: "jobs", label: "Job search" },
   { id: "agent", label: "Job agent" },
@@ -19,7 +21,7 @@ export type SettingsPage = SettingsSectionId | "overview";
 
 /** The overview's groups, and the section list's (E34-2, E34-3). */
 export const SETTINGS_GROUPS: readonly { label: string; sections: readonly SettingsSectionId[] }[] = [
-  { label: "Writing", sections: ["ai", "documents", "scoring"] },
+  { label: "Writing", sections: ["ai", "documents", "answers", "scoring"] },
   { label: "Finding work", sections: ["jobs", "agent"] },
   { label: "Connected", sections: ["google", "notifications", "connector"] },
   { label: "Your data · About", sections: ["data", "about"] },

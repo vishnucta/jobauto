@@ -77,7 +77,7 @@ const NOTES = {
   noLaptop: (address: string) =>
     `Your laptop's Chrome at ${address} didn't answer, so nothing was opened. Start Chrome with the Apply shortcut, check that Tailscale is on on the laptop, then try again.`,
   noBrowser:
-    "No browser window could be opened on the computer the app runs on, so nothing was opened. If the app runs on a server, such as a NAS, connect your laptop's Chrome under Browser window below first.",
+    "No browser window could be opened on the computer the app runs on, so nothing was opened. If the app runs on a server, such as a NAS, connect your laptop's Chrome first, in Settings → Standard answers → The apply assistant's browser window.",
   cancelled: "Cancelled.",
 } as const;
 
@@ -192,7 +192,7 @@ function adviserFor(
 }
 
 /** Prints the application's resume and letter into the attempt's folder; null for a document it doesn't have. */
-async function printDocuments(attemptId: string, application: { id: string; company: string; role: string; documents: { kind: DocumentKind }[] }, profileName: string, pattern: string): Promise<Record<FileKind, string | null>> {
+async function printDocuments(attemptId: string, application: { id: string; company: string; role: string; language: string; documents: { kind: DocumentKind }[] }, profileName: string, pattern: string): Promise<Record<FileKind, string | null>> {
   const files: Record<FileKind, string | null> = { cv: null, coverLetter: null };
   await mkdir(applyDir(attemptId), { recursive: true });
   for (const [kind, doc, route] of [
@@ -201,7 +201,7 @@ async function printDocuments(attemptId: string, application: { id: string; comp
   ] as const) {
     if (!application.documents.some((document) => document.kind === doc)) continue;
     const pdf = await renderPdf(`/print/${route}/${application.id}`);
-    const name = resolveFileName(pattern, { name: profileName, company: application.company, role: application.role, doc, date: new Date() }).replace(/[\\/:*?"<>|]/g, " ");
+    const name = resolveFileName(pattern, { name: profileName, company: application.company, role: application.role, doc, date: new Date(), language: application.language }).replace(/[\\/:*?"<>|]/g, " ");
     const file = path.join(applyDir(attemptId), name);
     await writeFile(file, pdf);
     files[kind] = file;

@@ -89,7 +89,7 @@ export const zipPdfsJob = defineJob({
       prisma.application.findMany({
         where: { documents: { some: { kind: { in: PRINTED } } } },
         orderBy: { createdAt: "asc" },
-        select: { id: true, company: true, role: true, documents: { where: { kind: { in: PRINTED } }, select: { kind: true }, orderBy: { kind: "asc" } } },
+        select: { id: true, company: true, role: true, language: true, documents: { where: { kind: { in: PRINTED } }, select: { kind: true }, orderBy: { kind: "asc" } } },
       }),
       loadProfileName(),
       loadSettings(),
@@ -116,7 +116,7 @@ export const zipPdfsJob = defineJob({
       const names = taken.get(folder.toLocaleLowerCase()) ?? new Set<string>();
       taken.set(folder.toLocaleLowerCase(), names);
       const fileName = unique(
-        resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: now }),
+        resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: now, language: application.language }),
         names,
       );
       // PDFs are compressed already: store them as they are.

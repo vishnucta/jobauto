@@ -48,9 +48,6 @@ function best<T>(entries: readonly T[], text: (entry: T) => string, query: strin
 const SCREENS: JumpResult[] = [
   ...NAV.flatMap((group) => group.items).map(({ href, label }) => ({ id: `screen:${href}`, label, href })),
   { id: "screen:/new", label: "New application", href: "/new?fresh=1" },
-  // The fork's screens beside Positions (jobauto), which aren't in the sidebar of their own.
-  { id: "screen:/recruiters", label: "Recruiters", href: "/recruiters" },
-  { id: "screen:/careers", label: "Careers pages", href: "/careers" },
 ];
 
 const applicationLabel = ({ role, company }: { role: string; company: string }) =>

@@ -1,5 +1,5 @@
 import { permitClaimed, type ApplyAnswers } from "@/lib/apply/answers";
-import { germanFit, profileGerman } from "@/lib/german-need";
+import { germanDecision, profileGerman } from "@/lib/german-need";
 import type { ProfileData } from "@/lib/profile";
 
 // The recruiter's eye (jobauto fork): the doubts a German recruiter has in
@@ -19,6 +19,8 @@ export type Doubt = {
   answered: boolean;
   /** What would answer it, when they don't. */
   fix: string;
+  /** Her documents state it, but it falls short of what the posting asks (German below the level it needs). */
+  stated?: boolean;
 };
 
 const PERMIT = /arbeitserlaubnis|arbeitsberechtigung|aufenthalts(?:titel|erlaubnis)|niederlassungserlaubnis|blaue karte|blue card|work permit|right to work|permission to work|allowed to work|eu citizen|eu-bürger|without (?:a )?(?:visa|sponsorship)|ohne visum|no visa|keine sponsor/i;
@@ -60,15 +62,19 @@ export function recruiterDoubts({ profile, answers, posting, documents }: EyeInp
     fix: inGermany ? "Show your city on the resume: it's in your profile's basics." : "Say where you live and when you can be in Germany.",
   });
 
-  const german = germanFit(posting, profileGerman(profile.languages));
-  if (german.verdict !== "fits" || german.need.adLanguage === "German") {
+  // The one German reading (germanDecision), as New application and Ask read it: stating A2 doesn't answer a job that needs C1.
+  const german = germanDecision({ text: posting, adLanguage: null, german: profileGerman(profile.languages) });
+  if (german.below || german.need.adLanguage === "German") {
+    const stated = GERMAN_STATED.test(documents);
+    const plan = answers.germanCourse.trim()
+      ? "Say your level and the course you're in. New letters do, from your standard answers."
+      : "Add your German course (and exam date) to your standard answers: an honest level with a plan reads far better than silence.";
     doubts.push({
       id: "german",
       question: "Is her German enough for the job?",
-      answered: GERMAN_STATED.test(documents),
-      fix: answers.germanCourse.trim()
-        ? "Say your level and the course you're in. New letters do, from your standard answers."
-        : "Add your German course (and exam date) to your standard answers: an honest level with a plan reads far better than silence.",
+      answered: stated && !german.below,
+      fix: stated && german.below ? `${german.reason} Say how you're closing the gap: your course and exam date, and that you work in English meanwhile.` : plan,
+      ...(stated && german.below ? { stated: true } : {}),
     });
   }
 

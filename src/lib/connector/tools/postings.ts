@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { isAiUsable } from "@/lib/ai/config";
 import { moveBack, removeArchived } from "@/lib/archive";
+import type { ProfileGerman } from "@/lib/german-need";
 import { countryName } from "@/lib/job-search/countries";
 import {
   DEFAULT_FILTERS,
@@ -35,7 +36,7 @@ import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig } from "@/lib/scoring/config";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
-import { chooseProfile, failure, hasMore, portalProblems, postingLine, profileInput, started, text, type ToolContext } from "../kit";
+import { chooseProfile, failure, hasMore, herGerman, portalProblems, postingLine, profileInput, started, text, type ToolContext } from "../kit";
 
 // Positions (E22-5): the library of postings every search keeps, its tabs
 // and filters, the searches that found them, and Dossier's own scoring
@@ -68,8 +69,8 @@ const CHANGE: Record<Exclude<(typeof CHANGES)[number], RowChange>, (posting: Fou
 const SEARCH_GONE = "That search is no longer kept. Search again.";
 
 /** A posting from a list as Claude sees it: by its posting_id, with the application made from it. */
-function keptLine(posting: ShownPosting) {
-  const { number, applied, ...line } = postingLine(posting, 0);
+function keptLine(posting: ShownPosting, german: ProfileGerman) {
+  const { number, applied, ...line } = postingLine(posting, 0, german);
   void number;
   void applied;
   return {
@@ -185,7 +186,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         portal: sourceIdSchema
           .optional()
           .describe(
-            "Only postings found on this portal, as Positions' Portal filter, by its id: e.g. JSEARCH, SERPAPI, ADZUNA, JOOBLE, FREEHIRE, ARBEITSAGENTUR, CLIENT for what AI clients added, or CAREERS for new jobs on the careers pages followed",
+            "Only postings found on this portal, as Positions' Portal filter, by its id: e.g. JSEARCH, SERPAPI, ADZUNA, FREEHIRE, ARBEITSAGENTUR, CLIENT for what AI clients added, or CAREERS for new jobs on the careers pages followed",
           ),
         covers: z.enum(COVERS).optional().describe("Only postings whose requirements the profile covers this much: any, half, two-thirds or all"),
         sort: z.enum(["fit", "new"]).optional().describe("fit: Best fit, the most requirements covered first (the default); new: the newest found first"),
@@ -215,9 +216,9 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
           ran: search.ranAt,
           found: search.postings.length,
           more_available: hasMore(search.portals),
-          postings: search.postings
-            .slice(start, start + take)
-            .map((posting, index) => ({ ...postingLine(posting, start + index + 1), dismissed: posting.state.dismissed || undefined })),
+          postings: await herGerman().then((german) =>
+            search.postings.slice(start, start + take).map((posting, index) => ({ ...postingLine(posting, start + index + 1, german), dismissed: posting.state.dismissed || undefined })),
+          ),
           link: linkTo(libraryHref({ found: search.id })),
         });
       }
@@ -249,7 +250,8 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
             sort: sort ?? "fit",
           };
           const { postings, total } = await libraryPage(filters, start, take);
-          answer[list] = { total, postings: postings.map(keptLine), link: linkTo(libraryHref(filters)) };
+          const german = await herGerman();
+          answer[list] = { total, postings: postings.map((posting) => keptLine(posting, german)), link: linkTo(libraryHref(filters)) };
         }
       }
       return text(answer);
@@ -308,7 +310,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
         searched: describeSearch(search.query, countryName(search.query.country), search.source),
         source: searchSourcesName([CLIENT_SOURCE], search.addedBy),
         added: search.postings.length,
-        postings: search.postings.map((posting, index) => ({ ...postingLine(posting, index + 1), dismissed: posting.state.dismissed || undefined })),
+        postings: await herGerman().then((german) => search.postings.map((posting, index) => ({ ...postingLine(posting, index + 1, german), dismissed: posting.state.dismissed || undefined }))),
         skipped: leftOut.length > 0 ? leftOut : undefined,
         message: leftOut.length > 0 ? `${kept} ${leftOut.length === 1 ? "One job" : `${leftOut.length} jobs`} Dossier already had ${leftOut.length === 1 ? "was" : "were"} left out: see skipped for where each one is.` : kept,
         link: linkTo(libraryHref({ found: search.id })),

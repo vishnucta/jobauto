@@ -21,7 +21,7 @@ beforeEach(() => resetDatabase(prisma()));
 afterAll(() => prisma().$disconnect());
 
 /** A built-in with its key saved, on or off. */
-function keyed(id: "JSEARCH" | "SERPAPI" | "JOOBLE", on = false): PortalView {
+function keyed(id: "JSEARCH" | "SERPAPI" | "ADZUNA", on = false): PortalView {
   const { name, description, tag, keyUrl, quotaPeriod, countries, kinds } = SOURCE_INFO[id];
   return {
     id,
@@ -63,6 +63,6 @@ describe("portalsOffNote (jobauto fork)", () => {
     expect(await portalsOffNote([])).toBeNull();
     expect((await loadSettings()).portalsOffNoteDone).toBe(false);
     await saveSettings({ portalsOffNoteDone: false });
-    expect(await portalsOffNote([keyed("JOOBLE")])).toEqual(["Jooble"]);
+    expect(await portalsOffNote([keyed("ADZUNA")])).toEqual(["Adzuna"]);
   });
 });

@@ -367,20 +367,42 @@ describe("the inbox's tools", () => {
     expect(await tool("send_email_reply", { email_id: "e1", text: "Hi Anna, my notice period is […]." })).toMatchObject({ isError: true, text: "Fill in the parts marked […] first." });
     expect(sent).toEqual([]);
 
-    expect((await tool("send_email_reply", { email_id: "e1", text: "Hi Anna,\n\nWednesday works.\n\nJane" })).json).toMatchObject({ sent: true, to: "Anna Keller", subject: "Re: Application" });
+    // First what would go out, with a token; nothing is sent (round 2 of the audit).
+    const answer = "Hi Anna,\n\nWednesday works.\n\nJane";
+    expect(await tool("send_email_reply", { email_id: "e1", text: answer, confirm: true })).toMatchObject({ isError: true, text: expect.stringContaining("call send_email_reply without confirm") });
+    const shown = await tool("send_email_reply", { email_id: "e1", text: answer });
+    expect(shown.json).toMatchObject({ sent: false, to: "Anna Keller", subject: "Re: Application", message: answer, confirm_token: expect.any(String) });
+    expect(sent).toEqual([]);
+    // Another text than the one shown isn't sent with its token.
+    expect(await tool("send_email_reply", { email_id: "e1", text: `${answer} Thanks!`, confirm: true, confirm_token: shown.json.confirm_token })).toMatchObject({
+      isError: true,
+      text: "The answer changed or one already went out in that thread. Show the user the preview again.",
+    });
+    expect(sent).toEqual([]);
+
+    expect((await tool("send_email_reply", { email_id: "e1", text: answer, confirm: true, confirm_token: shown.json.confirm_token })).json).toMatchObject({
+      sent: true,
+      to: "Anna Keller",
+      subject: "Re: Application",
+    });
     expect(sent).toHaveLength(1);
     expect(sent[0].threadId).toBe("t1");
     const raw = Buffer.from(sent[0].raw, "base64url").toString("utf8");
     expect(raw).toContain("To: Anna Keller <anna@northwind.example>");
     expect(raw).toContain("In-Reply-To: <g1@northwind.example>");
     expect(await email("e1")).toMatchObject({ handledAt: expect.any(Date), replyDraft: "" });
-    // Asked again after a lost answer, the same text in the same thread isn't sent twice; another answer is.
-    expect(await tool("send_email_reply", { email_id: "e1", text: "Hi Anna,\n\nWednesday works.\n\nJane" })).toMatchObject({
+    // The same confirm again, e.g. after a lost answer, doesn't send it twice; nor does a new preview of the same text.
+    expect(await tool("send_email_reply", { email_id: "e1", text: answer, confirm: true, confirm_token: shown.json.confirm_token })).toMatchObject({ isError: true });
+    const again = await tool("send_email_reply", { email_id: "e1", text: answer });
+    expect(await tool("send_email_reply", { email_id: "e1", text: answer, confirm: true, confirm_token: again.json.confirm_token })).toMatchObject({
       isError: true,
       text: "That exact answer went out a few minutes ago, so it isn't sent again. Check read_email.",
     });
     expect(sent).toHaveLength(1);
-    expect((await tool("send_email_reply", { email_id: "e1", text: "Hi Anna,\n\nOne more thing: I can start in March.\n\nJane" })).json).toMatchObject({ sent: true });
+    // Another answer goes out once it's shown and confirmed.
+    const more = "Hi Anna,\n\nOne more thing: I can start in March.\n\nJane";
+    const moreShown = await tool("send_email_reply", { email_id: "e1", text: more });
+    expect((await tool("send_email_reply", { email_id: "e1", text: more, confirm: true, confirm_token: moreShown.json.confirm_token })).json).toMatchObject({ sent: true });
     expect(sent).toHaveLength(2);
 
     expect(await tool("send_email_reply", { email_id: "e0", text: "Hello" })).toMatchObject({ isError: true });

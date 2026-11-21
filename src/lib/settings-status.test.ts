@@ -12,6 +12,7 @@ const healthy: StatusInputs = {
   now,
   ai: { configured: true, name: "Anthropic", model: "claude-sonnet-5-5", local: false, keyProblem: null, test: { at: daysAgo(1), ok: true, seconds: 1.4, error: null } },
   documents: { paper: "A4", language: "English", tone: "Warm" },
+  answers: { filled: 6, of: 6, saved: true },
   scoring: { name: "Your AI model", problem: null, scoredThisMonth: 412 },
   jobs: { portals: [{ id: "JSEARCH", name: "JSearch", on: true, setupProblem: null }, { id: "ADZUNA", name: "Adzuna", on: true, setupProblem: null }, { id: "FREEHIRE", name: "FreeHire", on: false, setupProblem: null }], runs: [] },
   agent: { enabled: true, searches: 3, hour: 7, maxDrafts: 2, nextRun: "tomorrow, 07:00", lastRun: { at: daysAgo(1), failed: false, message: "Found 4." }, setupProblem: null },
@@ -43,10 +44,15 @@ describe("portalTrouble (E34-1)", () => {
 });
 
 describe("settingsStatus (E34-1)", () => {
+  it("says the standard answers aren't saved yet, then how many are filled in (jobauto fork)", () => {
+    expect(settingsStatus({ ...healthy, answers: { filled: 2, of: 6, saved: false } }).answers).toMatchObject({ tone: "off", state: "Not saved yet", meta: "Used for every application", note: "Not saved yet" });
+    expect(settingsStatus({ ...healthy, answers: { filled: 4, of: 6, saved: true } }).answers).toMatchObject({ tone: "on", state: "4 of 6 filled in", note: "4 of 6 filled in" });
+  });
+
   it("is all on when everything works, with a state, a meta and a note for each", () => {
     const status = settingsStatus(healthy);
     expect(Object.fromEntries(Object.entries(status).map(([id, section]) => [id, section.tone]))).toEqual({
-      ai: "on", documents: "on", scoring: "on", jobs: "on", agent: "on", google: "on", notifications: "on", connector: "off", data: "on", about: "on",
+      ai: "on", documents: "on", answers: "on", scoring: "on", jobs: "on", agent: "on", google: "on", notifications: "on", connector: "off", data: "on", about: "on",
     });
     expect(status.ai).toMatchObject({ state: "Anthropic · claude-sonnet-5-5 · tested 1.4 s", meta: "Your profile leaves the server when it writes", note: "Anthropic · claude-sonnet-5-5" });
     expect(status.documents.state).toBe("A4 · English · warm tone");

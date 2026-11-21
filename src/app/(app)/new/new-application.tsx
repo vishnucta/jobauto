@@ -12,6 +12,7 @@ import type { DocumentsToWrite } from "@/lib/settings";
 import { withSkillAdded, type Extracted } from "@/lib/application-data";
 import { DOCUMENT_LANGUAGES } from "@/lib/document-language";
 import type { PostingFit } from "@/lib/fit";
+import { germanDecision, type ProfileGerman } from "@/lib/german-need";
 import { cancel, retry } from "@/lib/jobs/actions";
 import { READ_POSTING_STEPS } from "@/lib/jobs/application-steps";
 import type { ReadPostingResult } from "@/lib/jobs/read-posting";
@@ -166,6 +167,10 @@ export type NewApplicationProps = {
   docLanguage?: string | null;
   /** The languages documents can be written in: the built-in ones and those added in Settings (jobauto fork). */
   languages?: string[];
+  /** The profile's German, for the German the posting needs (german-need.ts, jobauto fork); NONE when it lists none. */
+  german?: ProfileGerman;
+  /** Settings → Documents' "German only when the job needs German you have". */
+  germanOnlyWhenFit?: boolean;
 };
 
 /** The two steps with a URL of their own (E31-1, public 111): `/new?step=paste|review`. */
@@ -191,6 +196,8 @@ export function NewApplication({
   roles = {},
   docLanguage = null,
   languages = BUILT_IN_LANGUAGES,
+  german = "NONE",
+  germanOnlyWhenFit = false,
 }: NewApplicationProps) {
   const [initial] = useState<Draft>(() => ({
     step: "paste",
@@ -509,6 +516,9 @@ export function NewApplication({
   }
 
   const read = draft.read;
+  // The German the job needs against hers, as the documents' language follows it (german-need.ts, jobauto fork).
+  const decision = read ? germanDecision({ text: draft.posting, adLanguage: read.extracted.language, german, onlyWhenFit: germanOnlyWhenFit }) : null;
+  const postingLabel = decision?.toEnglish ? `English: ${decision.because}` : read?.extracted.language ? `${read.extracted.language}, like the posting` : "The posting's language";
   return (
     <div ref={stepArea} className="contents">
       <ReviewStep
@@ -542,16 +552,12 @@ export function NewApplication({
         language={draft.language === undefined ? "" : draft.language}
         onLanguage={(language) => update({ language })}
         languages={{
-          fallback: docLanguage ? `${docLanguage}, from Settings` : `${read?.extracted.language || "English"}, like the posting`,
+          fallback: docLanguage ? `${docLanguage}, from Settings` : decision?.toEnglish ? postingLabel : `${read?.extracted.language || "English"}, like the posting`,
           names: languages,
           // The posting's own language over Settings' (jobauto fork).
-          posting:
-            docLanguage && (read?.extracted.language ?? "").toLowerCase() !== docLanguage.toLowerCase()
-              ? read?.extracted.language
-                ? `${read.extracted.language}, like the posting`
-                : "The posting's language"
-              : null,
+          posting: docLanguage && (decision?.writeLanguage ?? read?.extracted.language ?? "").toLowerCase() !== docLanguage.toLowerCase() ? postingLabel : null,
         }}
+        german={decision}
         note={draft.note}
         onNote={(note) => update({ note })}
         starting={starting}

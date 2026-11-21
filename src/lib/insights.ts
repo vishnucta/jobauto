@@ -46,6 +46,9 @@ export type Insights = {
 /** About this many sent applications before the differences mean much. */
 export const ENOUGH_SENT = 20;
 
+/** The dashboard shows What's working from this many sent (jobauto fork): before that it can't say anything yet. */
+export const SHOW_WORKING_FROM = 10;
+
 /** The stages that mean an answer that moved it on. */
 export const MOVED_ON: ReadonlySet<FunnelStage> = new Set<FunnelStage>(["SCREENING", "INTERVIEW", "OFFER", "ACCEPTED"]);
 const replied = (application: SentApplication) => application.furthestStage !== null && MOVED_ON.has(application.furthestStage);

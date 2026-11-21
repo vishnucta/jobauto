@@ -3,9 +3,10 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
-import { trimmedSchema, type Trimmed } from "@/lib/application-data";
+import { SIGN_OFF_UNIT, trimmedSchema, type Trimmed } from "@/lib/application-data";
 import { updateDocuments } from "@/lib/document-units";
-import { isFrameUnit, withFrame } from "@/lib/letter-frame";
+import { readFrozenCopy, senderFromProfile } from "@/lib/frozen-copy";
+import { isFrameUnit, PROFILE_FRAME_UNITS, withFrame, withoutClosingComma } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
 import { cleanUnitText } from "@/lib/unit-text";
 
@@ -45,6 +46,13 @@ export async function saveUnitText({
   if (!clean && !(document === DocumentKind.EMAIL && unitId === "to")) {
     throw new ActionError("Write something first, or cancel to keep it as it was.");
   }
+  // The letter's sender and signature are drawn from the profile (jobauto fork): an edit here would never show.
+  if (document === DocumentKind.COVER_LETTER && PROFILE_FRAME_UNITS.has(unitId)) {
+    const application = await prisma.application.findUnique({ where: { id: applicationId }, select: { frozen: true } });
+    if (application && senderFromProfile(readFrozenCopy(application.frozen))) {
+      throw new ActionError("The sender and the name under the letter come from your profile. Change them there, and every draft follows.");
+    }
+  }
 
   await updateDocuments(applicationId, async (documents) => {
     const units = documents[document];
@@ -55,7 +63,9 @@ export async function saveUnitText({
       return;
     }
     if (!unit) throw new ActionError(PART_GONE);
-    if (unit.text !== expected) {
+    // A German draft's sign-off is shown without the comma it may have stored (draftLetterUnits, jobauto fork).
+    const asShown = document === DocumentKind.COVER_LETTER && unitId === SIGN_OFF_UNIT && withoutClosingComma(unit.text) === withoutClosingComma(expected);
+    if (unit.text !== expected && !asShown) {
       throw new ActionError("This part changed while you were editing it. Copy your text, cancel, and edit the new version.");
     }
     unit.text = clean;

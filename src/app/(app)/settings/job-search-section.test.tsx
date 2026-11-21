@@ -38,8 +38,8 @@ function portalView(id: JobSource, change: Change = {}): PortalView {
       ? [key("API key", "DOSSIER_JSEARCH_KEY"), { name: "host", label: "Key from", type: "choice", value: change.host ?? "openwebninja", options: [{ value: "openwebninja", label: "OpenWeb Ninja" }, { value: "rapidapi", label: "RapidAPI" }] }]
       : id === "ADZUNA"
         ? [{ name: "appId", label: "App ID", type: "text", value: change.appId ?? "" }, key("App key", "DOSSIER_ADZUNA_KEY")]
-        : // SerpApi and Jooble (jobauto fork): a key each.
-          id === "SERPAPI" || id === "JOOBLE"
+        : // SerpApi (jobauto fork): a key.
+          id === "SERPAPI"
           ? [key("API key", `DOSSIER_${id}_KEY`)]
           : [];
   const { name, description, tag, keyUrl, quotaPeriod, countries, kinds } = SOURCE_INFO[id];
@@ -47,8 +47,8 @@ function portalView(id: JobSource, change: Change = {}): PortalView {
 }
 
 const viewOf = (changes: Partial<Record<JobSource, Change>> = {}, { withBa = true, freehire = "freehire.me" } = {}): JobSearchSettingsView => ({
-  // The built-ins in Settings' order, the fork's SerpApi and Jooble among them.
-  portals: (["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE", "FREEHIRE", "ARBEITSAGENTUR"] as const).filter((id) => withBa || id !== "ARBEITSAGENTUR").map((id) => portalView(id, changes[id])),
+  // The built-ins in Settings' order, the fork's SerpApi among them.
+  portals: (["JSEARCH", "SERPAPI", "ADZUNA", "FREEHIRE", "ARBEITSAGENTUR"] as const).filter((id) => withBa || id !== "ARBEITSAGENTUR").map((id) => portalView(id, changes[id])),
   freehire: { host: freehire },
 });
 
@@ -63,8 +63,8 @@ describe("JobSearchSection", () => {
   it("lists every portal with its own switch, all off by default", () => {
     render(<JobSearchSection initial={viewOf()} />);
     expect(screen.getByRole("heading", { name: "Job search" })).toBeInTheDocument();
-    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "false", "false", "false"]);
-    for (const name of ["JSearch", "SerpApi", "Adzuna", "Jooble", "FreeHire", "Bundesagentur für Arbeit"]) expect(screen.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeInTheDocument();
+    expect(screen.getAllByRole("switch").map((toggle) => toggle.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "false", "false"]);
+    for (const name of ["JSearch", "SerpApi", "Adzuna", "FreeHire", "Bundesagentur für Arbeit"]) expect(screen.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeInTheDocument();
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Test connection/ })).not.toBeInTheDocument();
   });
@@ -124,18 +124,6 @@ describe("JobSearchSection", () => {
     expect(savePortalKey).toHaveBeenCalledWith({ portal: "SERPAPI", field: "key", change: { action: "set", value: "serp_secret" } });
   });
 
-  it("asks Jooble for its key, says a key is for one country and a test spends a search (jobauto fork)", async () => {
-    render(<JobSearchSection initial={viewOf({ JOOBLE: { on: true } })} />);
-    expect(screen.getByRole("note")).toHaveTextContent("Your searches (keywords, place and filters) go to Jooble.");
-    expect(screen.getByRole("link", { name: "Jooble's site" })).toHaveAttribute("href", "https://jooble.org/api/about");
-    expect(screen.getByText(/A Jooble key is for one country/)).toHaveTextContent("de.jooble.org for Germany");
-    expect(screen.getByText(/The free plan has 500 searches in all/)).toBeInTheDocument();
-    expect(screen.getByText(/a test uses one search from your plan/)).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("API key"), "jooble_secret");
-    await userEvent.tab();
-    expect(savePortalKey).toHaveBeenCalledWith({ portal: "JOOBLE", field: "key", change: { action: "set", value: "jooble_secret" } });
-  });
-
   it("says on each card, even while it's off, when its key is kept or its note accepted (jobauto fork)", () => {
     render(
       <JobSearchSection
@@ -143,7 +131,6 @@ describe("JobSearchSection", () => {
           JSEARCH: { on: true, keyState: "set" },
           SERPAPI: { keyState: "env" },
           ADZUNA: { appId: "app-1", keyState: "none" },
-          JOOBLE: { keyState: "set" },
           ARBEITSAGENTUR: { acceptedAt: ACCEPTED },
         })}
       />,
@@ -151,7 +138,6 @@ describe("JobSearchSection", () => {
     expect(screen.getByRole("switch", { name: /^JSearch/ })).toHaveAccessibleDescription(/Key saved/);
     expect(screen.getByRole("switch", { name: /^SerpApi/ })).toHaveAccessibleDescription(/Key from the server/);
     expect(screen.getByRole("switch", { name: /^Adzuna/ })).not.toHaveAccessibleDescription(/Key saved|Key from the server/);
-    expect(screen.getByRole("switch", { name: /^Jooble/ })).toHaveAccessibleDescription(/Key saved/);
     expect(screen.getByRole("switch", { name: /^Bundesagentur/ })).toHaveAccessibleDescription(/Note accepted/);
     expect(screen.getByRole("switch", { name: /^FreeHire/ })).not.toHaveAccessibleDescription(/Key saved|Key from the server|Note accepted/);
   });
@@ -307,8 +293,8 @@ describe("the catalog (E23-4, E23-5)", () => {
   });
 
   it("lists reviewed portals, filtered by country, and adds one after showing what it reaches", async () => {
-    vi.mocked(browsePortals).mockResolvedValue({ ok: true, data: { readAt: "2026-11-16T10:00:00.000Z", portals: [catalogEntry("JSEARCH", "built-in"), catalogEntry("CANAL", "available")] } });
-    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: viewOf(), catalog: { readAt: "2026-11-16T10:00:00.000Z", portals: [catalogEntry("JSEARCH", "built-in"), catalogEntry("CANAL", "added")] } } });
+    vi.mocked(browsePortals).mockResolvedValue({ ok: true, data: { readAt: "2026-11-16T10:00:00.000Z", off: false, portals: [catalogEntry("JSEARCH", "built-in"), catalogEntry("CANAL", "available")] } });
+    vi.mocked(installFromCatalog).mockResolvedValue({ ok: true, data: { view: viewOf(), catalog: { readAt: "2026-11-16T10:00:00.000Z", off: false, portals: [catalogEntry("JSEARCH", "built-in"), catalogEntry("CANAL", "added")] } } });
     // The catalog opens in the column beside the section (#522).
     const { unmount } = render(
       <>
@@ -341,7 +327,7 @@ describe("the catalog (E23-4, E23-5)", () => {
   });
 
   it("says when the catalog can't be reached", async () => {
-    vi.mocked(browsePortals).mockResolvedValue({ ok: true, data: { readAt: null, portals: [] } });
+    vi.mocked(browsePortals).mockResolvedValue({ ok: true, data: { readAt: null, off: false, portals: [] } });
     render(
       <>
         <JobSearchSection initial={viewOf()} />
@@ -369,7 +355,7 @@ describe("the catalog (E23-4, E23-5)", () => {
 
   it("says a withdrawn portal is paused, and why, until it's kept", async () => {
     const withdrawn = viewOf({ FREEHIRE: { on: true } });
-    // By id: the fork's SerpApi and Jooble sit among the built-ins.
+    // By id: the fork's SerpApi sits among the built-ins.
     const freehire = withdrawn.portals.findIndex((portal) => portal.id === "FREEHIRE");
     withdrawn.portals[freehire] = { ...withdrawn.portals[freehire], withdrawal: { reason: "Its terms changed.", withdrawnAt: "2026-11-16T09:00:00Z", paused: true } };
     vi.mocked(keepWithdrawnPortal).mockResolvedValue({ ok: true, data: viewOf({ FREEHIRE: { on: true } }) });
@@ -382,14 +368,14 @@ describe("the catalog (E23-4, E23-5)", () => {
 });
 
 describe("JobSearchSection's note about portals with a key that are off (jobauto fork)", () => {
-  const upgraded = () => viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" }, JOOBLE: { keyState: "set" } }, { withBa: false });
+  const upgraded = () => viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" } }, { withBa: false });
 
   it("names them above the cards until one is switched on, without switching any on itself", async () => {
     render(<JobSearchSection initial={upgraded()} portalsOffNote />);
-    expect(screen.getByRole("note")).toHaveTextContent("You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble. Switch them on below.");
+    expect(screen.getByRole("note")).toHaveTextContent("You have keys for 3 portals that are off: JSearch, SerpApi, Adzuna. Switch them on below.");
     expect(setPortalOn).not.toHaveBeenCalled();
 
-    vi.mocked(setPortalOn).mockResolvedValueOnce({ ok: true, data: viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { on: true, keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" }, JOOBLE: { keyState: "set" } }, { withBa: false }) });
+    vi.mocked(setPortalOn).mockResolvedValueOnce({ ok: true, data: viewOf({ JSEARCH: { keyState: "set" }, SERPAPI: { on: true, keyState: "set" }, ADZUNA: { keyState: "set", appId: "1234" } }, { withBa: false }) });
     await userEvent.click(screen.getByRole("switch", { name: /^SerpApi/ }));
     expect(screen.queryByText(/portals that are off/)).not.toBeInTheDocument();
   });

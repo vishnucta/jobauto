@@ -95,6 +95,8 @@ export function WorkSampleTab({
   return (
     <DocumentPreview
       maxWidth={820}
+      // On a phone, the same page to read (jobauto fork).
+      reading={{ title: "Work sample", document: <WorkSampleDocument sample={data.sample} name={name} theme={theme} paper={paper} language={language} /> }}
       label={
         <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="text-[13.5px] font-medium text-ink">Work sample</span>

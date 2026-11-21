@@ -16,8 +16,9 @@ import { failure, started, text, type ToolContext } from "../kit";
 
 // Call prep, an application's tab (jobauto fork): the phone-screen prep pack
 // with her answers in German at her level and in English. Claude can read it
-// to rehearse with her, or have Dossier prepare it. Interview practice is the
-// same pack before there's a call, from the profile alone; the salary guide
+// to rehearse with her, or have Dossier prepare it. Call prep's general
+// practice (/call-prep, once Interview practice) is the same pack before
+// there's a call, from the profile alone; the salary guide
 // is what fills the pack's salary line.
 
 const id = z.string().min(1).max(100);
@@ -64,16 +65,16 @@ export function registerPrepTools({ server, linkTo }: ToolContext): void {
   server.registerTool(
     "get_practice_prep",
     {
-      title: "Get the interview practice pack",
+      title: "Get the general practice pack",
       description:
-        "The pack on Interview practice: the call prep pack before there's a call, from the profile alone, for the kind of job the user is after, " +
+        "Call prep's general practice pack: the call prep pack before there's a call, from the profile alone, for the kind of job the user is after, " +
         "with the same questions, answers in German and English, salary line, stories and questions to ask as get_call_prep. Use it to rehearse before any application has a call.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () => {
       const [settings, [preparing]] = await Promise.all([loadSettings(), findUnfinishedJobs(PRACTICE_JOB_KEY)]);
-      const link = linkTo("/practice");
+      const link = linkTo("/call-prep");
       // One being prepared again: its task, with the pack from before while there is one.
       const task = preparing ? { task_id: preparing.id, note: "A new pack is being prepared: check_task follows it." } : {};
       if (!settings.practicePrep) return text({ prepared: false, ...task, message: preparing ? undefined : "There's no practice pack yet. prepare_practice prepares one.", link });
@@ -84,9 +85,9 @@ export function registerPrepTools({ server, linkTo }: ToolContext): void {
   server.registerTool(
     "prepare_practice",
     {
-      title: "Prepare interview practice",
+      title: "Prepare general practice",
       description:
-        "Has Dossier's AI prepare, or prepare again, the Interview practice pack from the profile, as Prepare my practice call does; the new pack replaces the one before. " +
+        "Has Dossier's AI prepare, or prepare again, Call prep's general practice pack from the profile, as Prepare my practice call does; the new pack replaces the one before. " +
         "Answers with a task_id: follow it with check_task, then read the pack with get_practice_prep.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: false, openWorldHint: false },

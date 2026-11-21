@@ -140,9 +140,9 @@ describe("postingStates", () => {
     await prisma().posting.update({ where: { source_externalId: ref }, data: { applicationId: application.id } });
 
     const states = await postingStates([found, other, third]);
-    expect(states.get("JSEARCH:job-1")).toEqual({ postingId: expect.any(String), new: false, saved: true, dismissed: false, applicationId: application.id, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
-    expect(states.get("JSEARCH:job-2")).toEqual({ postingId: expect.any(String), new: false, saved: false, dismissed: true, applicationId: null, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
-    expect(states.get("JSEARCH:job-3")).toEqual({ postingId: null, new: false, saved: false, dismissed: false, applicationId: null, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
+    expect(states.get("JSEARCH:job-1")).toEqual({ postingId: expect.any(String), new: false, saved: true, dismissed: false, applicationId: application.id, draft: true, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
+    expect(states.get("JSEARCH:job-2")).toEqual({ postingId: expect.any(String), new: false, saved: false, dismissed: true, applicationId: null, draft: false, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
+    expect(states.get("JSEARCH:job-3")).toEqual({ postingId: null, new: false, saved: false, dismissed: false, applicationId: null, draft: false, score: null, scores: [], foundOn: [{ portal: "JSEARCH", url: expect.any(String) }], archived: false, stillListedAt: null, agentSearches: [], addedBy: [], agent: null });
   });
 
   it("names the AI clients or careers pages that added a posting, apart from the job agent's searches (jobauto fork)", async () => {

@@ -14,6 +14,7 @@ import { logServerError } from "@/lib/log";
 import { dismissPosting, storePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { emit } from "@/lib/notifications/notify";
+import { keptApplication, keptPostingId, prepareJobKey } from "@/lib/posting-application";
 import { profileIdOr } from "@/lib/profiles";
 
 import { DISMISSED_TRIM, stringsOf } from "./candidates";
@@ -46,14 +47,40 @@ function foundFromCandidate(candidate: AgentCandidate): FoundPosting {
 }
 
 /**
+ * A posting that has an application already (Prepare it for me on
+ * Positions, New application from the same link): the candidate takes it as
+ * approved, so the agent never writes a second one (jobauto fork, audit
+ * round 2). It leaves the agent's queue; the application is in Applications.
+ */
+async function adoptApplication(candidateId: string, applicationId: string): Promise<string> {
+  // Another candidate holding it (the same job from another portal) keeps it; this one is settled all the same.
+  const holder = await prisma.agentCandidate.findUnique({ where: { applicationId }, select: { id: true } });
+  await prisma.agentCandidate.updateMany({
+    where: { id: candidateId, status: { in: [AgentCandidateStatus.SCORED, AgentCandidateStatus.DRAFTING] } },
+    data: { status: AgentCandidateStatus.APPROVED, error: null, ...(holder ? {} : { applicationId }) },
+  });
+  return applicationId;
+}
+
+/**
  * Prepares a candidate's draft. It's claimed first (SCORED → DRAFTING), so a
  * retry, a second click and auto-draft can't make two applications; a failure
- * sends it back to SCORED with the error to show. Returns the application.
+ * sends it back to SCORED with the error to show. A posting with an
+ * application already gets no second one: the candidate takes that one.
+ * Returns the application.
  */
 export async function draftCandidate(candidateId: string, context: JobContext): Promise<string> {
   const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId } });
   if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
   if (candidate.status === AgentCandidateStatus.DRAFTED && candidate.applicationId) return candidate.applicationId;
+  if (candidate.status === AgentCandidateStatus.SCORED) {
+    const kept = await keptApplication(candidate);
+    if (kept) return adoptApplication(candidateId, kept);
+    const postingId = await keptPostingId(candidate);
+    if (postingId && (await findUnfinishedJobs(prepareJobKey(postingId))).length > 0) {
+      throw new ActionError("Prepare it for me is writing this posting's application on Positions already.");
+    }
+  }
   const { count } = await prisma.agentCandidate.updateMany({
     where: { id: candidateId, status: AgentCandidateStatus.SCORED },
     data: { status: AgentCandidateStatus.DRAFTING, error: null },
@@ -103,20 +130,21 @@ export async function draftCandidate(candidateId: string, context: JobContext): 
   }
 }
 
-/** Prepares one candidate's draft in the background (E16-5): from Prepare draft, or a run with auto-draft on. */
+/** Prepares one candidate's draft in the background (E16-5): from Prepare it for me, or a run with auto-draft on. */
 export const agentDraftJob = defineJob({
   type: "agent-draft",
   input: z.object({
     candidateId: z.string().min(1),
-    /** Prepared by the agent on its own (auto-draft), which sends "A draft is ready" (E26-6); Prepare draft never does. */
+    /** Prepared by the agent on its own (auto-draft), which sends "A draft is ready" (E26-6); Prepare it for me never does. */
     auto: z.boolean().default(false),
   }),
   result: z.object({ applicationId: z.string().min(1) }),
   run: async ({ candidateId, auto }, context) => {
     const applicationId = await draftCandidate(candidateId, context);
     if (auto) {
-      const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { title: true, company: true, covered: true, requirements: true } });
-      if (candidate) {
+      const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, title: true, company: true, covered: true, requirements: true } });
+      // A draft it wrote, not an application she had already (adoptApplication).
+      if (candidate?.status === AgentCandidateStatus.DRAFTED) {
         await emit("draft.ready", { applicationId, title: candidate.title, company: candidate.company, coverage: candidate.requirements > 0 ? { hit: candidate.covered, total: candidate.requirements } : null });
       }
     }
@@ -125,17 +153,23 @@ export const agentDraftJob = defineJob({
 });
 
 /**
- * Prepare draft (E16-5), from the Agent screen or from Claude: starts a
+ * Prepare it for me (E16-5), from the Agent screen or from Claude: starts a
  * candidate's draft in the background. A draft under way is reused, and one
  * already made is answered with; `started` says whether a job began.
  */
 export async function startCandidateDraft(candidateId: string): Promise<{ jobId: string | null; applicationId: string | null; started: boolean }> {
-  const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, applicationId: true } });
+  const candidate = await prisma.agentCandidate.findUnique({ where: { id: candidateId }, select: { status: true, applicationId: true, source: true, externalId: true, url: true } });
   if (!candidate) throw new ActionError("That posting is no longer in the agent's queue.");
   if (candidate.status === AgentCandidateStatus.DRAFTED && candidate.applicationId) return { jobId: null, applicationId: candidate.applicationId, started: false };
   const [unfinished] = await findUnfinishedJobs(draftJobKey(candidateId));
   if (unfinished) return { jobId: unfinished.id, applicationId: null, started: false };
   if (candidate.status !== AgentCandidateStatus.SCORED) throw new ActionError("That posting is no longer waiting for a draft.");
+  // One application per posting (jobauto fork): one made already is answered with, one being prepared on Positions is followed.
+  const kept = await keptApplication(candidate);
+  if (kept) return { jobId: null, applicationId: await adoptApplication(candidateId, kept), started: false };
+  const postingId = await keptPostingId(candidate);
+  const [preparing] = postingId ? await findUnfinishedJobs(prepareJobKey(postingId)) : [];
+  if (preparing) return { jobId: preparing.id, applicationId: null, started: false };
   // Asked for, so no "A draft is ready" message (E26-6).
   const jobId = await startJob(agentDraftJob, { candidateId, auto: false }, { key: draftJobKey(candidateId) });
   return { jobId, applicationId: null, started: true };

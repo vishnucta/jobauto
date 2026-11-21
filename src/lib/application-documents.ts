@@ -9,7 +9,10 @@ import type { z } from "zod";
 
 import { DocumentKind } from "@/generated/prisma/enums";
 import { extractedSchema, trimmedSchema, unitsSchema, type Trimmed, type Unit } from "@/lib/application-data";
-import { frozenProfile, readFrozenCopy } from "@/lib/frozen-copy";
+import { frozenProfile, readFrozenCopy, senderFromProfile } from "@/lib/frozen-copy";
+import { documentLabels } from "@/lib/document-labels";
+import { documentLanguage } from "@/lib/document-language";
+import { defaultFrame, draftLetterUnits, isParagraph } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
 import { sectionLayoutSchema } from "@/lib/resume-sections";
@@ -78,6 +81,23 @@ export async function loadDocuments(id: string) {
     const frozenTheme = kind === DocumentKind.EMAIL ? null : copy?.themes[kind];
     return document && units ? { units, theme: frozenTheme ?? document.theme ?? baseTheme, ...(trimmed?.length ? { trimmed } : {}) } : null;
   };
+  /** Dated the day it was sent; until then, today. */
+  const letterDate = calendarDay(application.sentAt ?? undefined);
+  // The letter's sender and signature are the profile's as it is now, until it's sent (jobauto fork); so is the German sign-off's form.
+  const fromProfile = senderFromProfile(copy);
+  const stored = documentData(DocumentKind.COVER_LETTER);
+  const letter =
+    stored && fromProfile
+      ? {
+          ...stored,
+          units: draftLetterUnits(
+            stored.units,
+            defaultFrame({ basics: profile.basics, company: application.company, location: application.location, date: letterDate, dateFormat: settings.dateFormat, labels: documentLabels(application.language) }),
+            // German as the letter's layout decides it (cover-letter-document.tsx): DIN 5008's sign-off has no comma.
+            { german: /^de\b/i.test(documentLanguage(application.language, stored.units.filter(isParagraph).map((unit) => unit.text).join(" ")).lang ?? "") },
+          ),
+        }
+      : stored;
   const extracted = readJson(extractedSchema, application.extracted);
   const ownSections = readJson(sectionLayoutSchema, application.sections);
   const sections = ownSections ?? own.resumeSections;
@@ -93,7 +113,9 @@ export async function loadDocuments(id: string) {
     baseThemeId: own.baseThemeId,
     extracted,
     resume: documentData(DocumentKind.RESUME),
-    letter: documentData(DocumentKind.COVER_LETTER),
+    letter,
+    /** The letter's sender and signature are drawn from `profile`, not as it stored them: not edited in the letter. */
+    senderFromProfile: fromProfile,
     /** The email's units, once it's been written (Email tab). */
     email: documentData(DocumentKind.EMAIL)?.units ?? null,
     /** Settings → "Include references", when the posting asks for them (SET-9). */
@@ -101,7 +123,6 @@ export async function loadDocuments(id: string) {
     /** Its sections' order and which are off: its own, or the base resume's (#297). */
     sections,
     ownSections: ownSections !== null,
-    /** Dated the day it was sent; until then, today. */
-    letterDate: calendarDay(application.sentAt ?? undefined),
+    letterDate,
   };
 }

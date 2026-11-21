@@ -7,6 +7,7 @@ import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { answerQuestion, refineChat, type ChatTurn } from "@/lib/ai/tasks";
 import { extractedOf, matchSchema, servesAfterEdit, unitsSchema, type Unit, type UnitEdit } from "@/lib/application-data";
+import { germanDecision, profileGerman } from "@/lib/german-need";
 import { updateDocuments } from "@/lib/document-units";
 import { withoutPrivateParts } from "@/lib/letter-frame";
 import { prisma } from "@/lib/prisma";
@@ -83,9 +84,12 @@ export const refineJob = defineJob({
 
     if (mode === "ask") {
       // An answer changes nothing and makes no version; the notes never go along.
+      const extracted = extractedOf(application);
+      // The German the job needs against hers, read as New application and the recruiter's eyes read it (jobauto fork).
+      const german = germanDecision({ text: application.postingText, adLanguage: extracted.language, german: profileGerman(profile.languages) }).reason;
       const { data, promptVersion } = await answerQuestion(
         provider,
-        { question: request, history, profile, extracted: extractedOf(application), facts, posting: application.postingText },
+        { question: request, history, profile, extracted, facts, posting: application.postingText, german },
         { ...options, language: application.language || options.language, signal },
       );
       const reply = await prisma.chatMessage.create({ data: { applicationId, role: ChatRole.AI, text: data, writtenWith: promptVersion }, select: { id: true } });

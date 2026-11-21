@@ -55,7 +55,6 @@ describe("resolveJobSearchConfig", () => {
       ["JSEARCH", false],
       ["SERPAPI", false],
       ["ADZUNA", false],
-      ["JOOBLE", false],
       ["FREEHIRE", false],
       ["ARBEITSAGENTUR", false],
     ]);
@@ -104,23 +103,22 @@ describe("resolveJobSearchConfig", () => {
     expect(problem(() => credentialsFor(config, "JSEARCH"))).toEqual(["no-key", "Add your JSearch key in Settings → Job search first."]);
     expect(problem(() => credentialsFor(config, "ADZUNA"))).toEqual(["no-key", "Add your Adzuna app ID and key in Settings → Job search first."]);
     expect(problem(() => credentialsFor(config, "SERPAPI"))).toEqual(["no-key", "Add your SerpApi key in Settings → Job search first."]);
-    expect(problem(() => credentialsFor(config, "JOOBLE"))).toEqual(["no-key", "Add your Jooble key in Settings → Job search first."]);
   });
 
-  it("gives SerpApi and Jooble (jobauto fork) their keys from the environment or Settings, each its own", () => {
-    const fromEnv = resolveJobSearchConfig(nothingSaved, { DOSSIER_JOBS_SOURCE: "serpapi", DOSSIER_SERPAPI_KEY: "serp-env", DOSSIER_JOOBLE_KEY: "jooble-env" });
+  it("gives SerpApi (jobauto fork) its key from the environment or Settings", () => {
+    const fromEnv = resolveJobSearchConfig(nothingSaved, { DOSSIER_JOBS_SOURCE: "serpapi", DOSSIER_SERPAPI_KEY: "serp-env" });
     expect(enabledPortals(fromEnv)).toEqual(["SERPAPI"]);
     expect(credentialsFor(fromEnv, "SERPAPI")).toEqual({ key: "serp-env" });
-    expect(credentialsFor(fromEnv, "JOOBLE")).toEqual({ key: "jooble-env" });
-    expect(jobSearchView(fromEnv).portals.find((portal) => portal.id === "JOOBLE")!.fields).toEqual([{ name: "key", label: "API key", type: "secret", keyState: "env", envName: "DOSSIER_JOOBLE_KEY" }]);
-    expect(enabledPortals(resolveJobSearchConfig(nothingSaved, { DOSSIER_JOBS_SOURCE: "jooble" }))).toEqual(["JOOBLE"]);
-    const inSettings = resolveJobSearchConfig(
-      saved({ SERPAPI: { on: true }, JOOBLE: { on: true } }, { SERPAPI: { key: encryptSecret(JOB_SOURCE_KEY, "serp-saved") }, JOOBLE: { key: encryptSecret(JOB_SOURCE_KEY, "jooble-saved") } }),
-      { DOSSIER_SERPAPI_KEY: "serp-env" },
-    );
-    expect(enabledPortals(inSettings)).toEqual(["SERPAPI", "JOOBLE"]);
+    const inSettings = resolveJobSearchConfig(saved({ SERPAPI: { on: true } }, { SERPAPI: { key: encryptSecret(JOB_SOURCE_KEY, "serp-saved") } }), { DOSSIER_SERPAPI_KEY: "serp-env" });
+    expect(enabledPortals(inSettings)).toEqual(["SERPAPI"]);
     expect(credentialsFor(inSettings, "SERPAPI")).toEqual({ key: "serp-saved" });
-    expect(credentialsFor(inSettings, "JOOBLE")).toEqual({ key: "jooble-saved" });
+  });
+
+  it("leaves out Jooble, which the fork removed, though it was switched on with its key saved (jobauto fork)", () => {
+    const config = resolveJobSearchConfig(saved({ JOOBLE: { on: true }, ADZUNA: { on: true, fields: { appId: "a" } } }, { JOOBLE: { key: encryptSecret(JOB_SOURCE_KEY, "jooble-saved") } }), noEnv);
+    expect(config.portals.map((portal) => portal.id)).not.toContain("JOOBLE");
+    expect(enabledPortals(config)).toEqual(["ADZUNA"]);
+    expect(problem(() => credentialsFor(config, "JOOBLE"))).toEqual(["off", expect.any(String)]);
   });
 });
 
@@ -143,7 +141,7 @@ describe("the settings from before E22-3", () => {
     expect(portalsFromLegacy({ ...nothingSaved, jobSource: "OFF" })!.portals.JSEARCH.on).toBe(false);
   });
 
-  it("move the fork's SerpApi and Jooble choice and keys too", () => {
+  it("move the fork's SerpApi choice and keys too, and Jooble's key, kept though nothing searches it", () => {
     const forkSaved = { ...nothingSaved, jobSource: "SERPAPI" as const, serpapiKeyEnc: encryptSecret(JOB_SOURCE_KEY, "serp-key"), joobleKeyEnc: encryptSecret(JOB_SOURCE_KEY, "jooble-key") };
     const moved = portalsFromLegacy(forkSaved)!;
     expect(moved.portals.SERPAPI.on).toBe(true);
@@ -152,7 +150,6 @@ describe("the settings from before E22-3", () => {
     expect(portalsFromLegacy({ ...nothingSaved, joobleKeyEnc: forkSaved.joobleKeyEnc })).not.toBeNull();
     const config = resolveJobSearchConfig(forkSaved, noEnv);
     expect(enabledPortals(config)).toEqual(["SERPAPI"]);
-    expect(credentialsFor(config, "JOOBLE")).toEqual({ key: "jooble-key" });
   });
 });
 
@@ -187,7 +184,6 @@ describe("requestContext", () => {
   it("leaves sources at their own address, unless the end-to-end tests point them at a fake", () => {
     expect(requestContext("JSEARCH", undefined, undefined)).toEqual({});
     expect(requestContext("ADZUNA", "http://localhost:3101/", undefined)).toEqual({ baseUrl: "http://localhost:3101/adzuna" });
-    expect(requestContext("JOOBLE", "http://localhost:3101/", undefined)).toEqual({ baseUrl: "http://localhost:3101/jooble" });
     expect(requestContext("FREEHIRE", undefined, "https://jobs.example.org")).toEqual({ baseUrl: "https://jobs.example.org" });
   });
 });

@@ -95,7 +95,7 @@ export async function agentSlots(): Promise<JobSource[]> {
 
 /** What the agent can't search without, when only the Bundesagentur is switched on (source.ts). */
 const NO_AGENT_PORTAL =
-  "The job agent has no portal it may search: the Bundesagentur can't be searched automatically, and no other portal has a key yet. Add a JSearch, SerpApi, Adzuna or Jooble key in Settings → Job search, or choose FreeHire for it in Settings → Job agent.";
+  "The job agent has no portal it may search: the Bundesagentur can't be searched automatically, and no other portal has a key yet. Add a JSearch, SerpApi or Adzuna key in Settings → Job search, or choose FreeHire for it in Settings → Job agent.";
 
 async function setupProblemFor(searches: readonly SavedAgentSearch[], config: JobSearchConfig, chosen: readonly string[] | null): Promise<string | null> {
   const searchProblem = agentSearchSetupProblem(searches);

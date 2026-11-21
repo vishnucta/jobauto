@@ -21,13 +21,13 @@ import { putBackEmail, writeApplicationEmail } from "@/lib/email-writing";
 import { DOCUMENT_LABELS } from "@/lib/file-name";
 import { frozenCopySchema, frozenProfile, readFrozenCopy, withSectionFromProfile } from "@/lib/frozen-copy";
 import { followInCalendar, saveInterviewDate } from "@/lib/interview-date";
-import { addNextRound, prepSchema, saveRoundDetails, upcomingRound } from "@/lib/interviews";
+import { addNextRound, saveRoundDetails, tickPrepItem, upcomingRound } from "@/lib/interviews";
 import { checkRequirementsJob, checkRequirementsJobKey } from "@/lib/jobs/check-requirements";
 import { prepareInterviewJob, prepareJobKey } from "@/lib/jobs/prepare-interview";
 import { cancelJob, findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { writeApplicationJobKey } from "@/lib/jobs/write-application";
 import { writeDocumentJob, writeDocumentJobKey } from "@/lib/jobs/write-document";
-import { startMessageDraft } from "@/lib/jobs/write-message";
+import { letMessageDraftGo, startMessageDraft } from "@/lib/jobs/write-message";
 import { addMissingSkill } from "@/lib/match-skills";
 import { MESSAGE_KINDS, messageDraftSchema } from "@/lib/message-draft";
 import { saveOfferDetails } from "@/lib/offers";
@@ -390,11 +390,7 @@ export const startPreparing = action(z.object({ id: z.string().min(1) }), async 
 export const tickPrep = action(
   z.object({ id: z.string().min(1), interviewId: z.string().min(1), index: z.number().int().min(0), done: z.boolean() }),
   async ({ id, interviewId, index, done }) => {
-    const interview = await prisma.interview.findFirst({ where: { id: interviewId, applicationId: id }, select: { prep: true } });
-    const prep = prepSchema.safeParse(interview?.prep);
-    if (!interview || !prep.success || !prep.data[index]) throw new ActionError(ROUND_GONE);
-    prep.data[index] = { ...prep.data[index], done, doneAt: done ? new Date().toISOString() : null };
-    await prisma.interview.update({ where: { id: interviewId }, data: { prep: prep.data } });
+    if (!(await tickPrepItem(id, interviewId, index, done))) throw new ActionError(ROUND_GONE);
     refresh(id);
     return null;
   },
@@ -475,8 +471,7 @@ export const saveMessageDraft = action(
 
 /** "I sent it": sent some other way, so it's let go and "Quiet for" starts again (decided 17 November). */
 export const markMessageSent = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
-  const { count } = await prisma.application.updateMany({ where: { id }, data: { messageDraft: Prisma.DbNull, contactedAt: new Date() } });
-  if (count === 0) throw new ActionError(GONE);
+  if (!(await letMessageDraftGo(id, { sent: true }))) throw new ActionError(GONE);
   refresh(id);
   revalidatePath("/applications");
   revalidatePath("/");
@@ -485,7 +480,7 @@ export const markMessageSent = action(z.object({ id: z.string().min(1) }), async
 
 /** Lets a drafted message go, unsent. */
 export const discardMessageDraft = action(z.object({ id: z.string().min(1) }), async ({ id }) => {
-  await prisma.application.updateMany({ where: { id }, data: { messageDraft: Prisma.DbNull } });
+  await letMessageDraftGo(id, { sent: false });
   refresh(id);
   return null;
 });

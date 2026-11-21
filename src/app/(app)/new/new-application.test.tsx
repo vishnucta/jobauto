@@ -431,10 +431,10 @@ describe("the application's language (jobauto fork)", () => {
   };
   const languages = ["English", "German", "Persian"];
 
-  async function toReview(extra: Partial<Parameters<typeof NewApplication>[0]> = {}) {
+  async function toReview(extra: Partial<Parameters<typeof NewApplication>[0]> = {}, posting = "Ledgerly is hiring.") {
     vi.mocked(startWritingApplication).mockResolvedValue({ ok: true, data: "app-1" });
     render(<NewApplication {...props} languages={languages} {...extra} />);
-    await userEvent.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
+    await userEvent.type(screen.getByLabelText("Job posting"), posting);
     await userEvent.click(screen.getByRole("button", { name: "Read the posting" }));
     emit({ status: "DONE", result: read });
     return screen.getByLabelText("Language");
@@ -461,6 +461,26 @@ describe("the application's language (jobauto fork)", () => {
     await userEvent.selectOptions(await toReview(), "Persian");
     await userEvent.click(screen.getAllByRole("button", { name: "Write resume and letter" })[0]);
     expect(startWritingApplication).toHaveBeenCalledWith(expect.objectContaining({ language: "Persian" }));
+  });
+
+  it("names the real outcome when the ad needs more German than hers, with German one click away (germanDecision)", async () => {
+    const select = await toReview({ german: "A2", germanOnlyWhenFit: true }, "Ledgerly sucht. Sehr gute Deutschkenntnisse sind erforderlich.");
+    expect(select).toHaveDisplayValue("English: the ad asks for more German than your A2");
+    const note = screen.getByRole("note", { name: "" });
+    expect(note).toHaveTextContent("German C1");
+    expect(note).toHaveTextContent("The ad asks for more German (C1) than your A2: “Sehr gute Deutschkenntnisse sind erforderlich.”");
+    await userEvent.click(screen.getByRole("button", { name: "Write it in German anyway" }));
+    expect(select).toHaveDisplayValue("German");
+    expect(screen.getByRole("button", { name: "Back to English" })).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Write resume and letter" })[0]);
+    expect(startWritingApplication).toHaveBeenCalledWith(expect.objectContaining({ language: "German" }));
+  });
+
+  it("keeps German, and says why, when she has the German the ad asks for", async () => {
+    const select = await toReview({ german: "B2", germanOnlyWhenFit: true }, "Ledgerly sucht. Gute Deutschkenntnisse sind erforderlich.");
+    expect(select).toHaveDisplayValue("German, like the posting");
+    expect(screen.getByText(/The ad asks for German you have/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write it in German anyway" })).not.toBeInTheDocument();
   });
 
   it("sends null when the posting's language is chosen over Settings' language", async () => {

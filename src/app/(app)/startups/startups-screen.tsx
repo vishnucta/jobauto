@@ -13,25 +13,30 @@ import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Toggle } from "@/components/ui/toggle";
 import { useJob } from "@/hooks/use-job";
 import type { Person } from "@/lib/network";
 import { formatDateTime } from "@/lib/dates";
 import { postedAgo } from "@/lib/job-search/search";
 import {
+  DEFAULT_STARTUP_SOURCES,
+  sourcesOn,
   STARTUP_SOURCE_INFO,
+  STARTUP_SOURCE_LABELS,
   STARTUP_SOURCES,
   STARTUP_VIEW_LABELS,
   STARTUP_VIEWS,
   startupFilterHref,
   type StartupEmail,
   type StartupFilter,
+  type StartupSources,
   type StartupsRefresh,
   type StartupStatusName,
   type StartupView,
   type StartupViewName,
 } from "@/lib/startups/types";
 
-import { lookUpStartupAddresses, refreshStartupsNow, removeStartupForGood, saveStartupNotes, setStartupStatus, startScoringStartup } from "./actions";
+import { lookUpStartupAddresses, refreshStartupsNow, removeStartupForGood, saveStartupNotes, setStartupSource, setStartupStatus, startScoringStartup } from "./actions";
 
 export type StartupsScreenProps = {
   filter: StartupFilter;
@@ -50,6 +55,8 @@ export type StartupsScreenProps = {
   profileNames?: Record<string, string>;
   /** The people she knows at each startup or firm, by its name (network.ts); missing in older callers. */
   network?: Record<string, Person[]>;
+  /** Which sources a refresh asks (jobauto fork); missing in older callers. */
+  sources?: StartupSources;
 };
 
 /**
@@ -61,11 +68,27 @@ export type StartupsScreenProps = {
  * the startup's own score only sorts them (U1). Dossier sends nothing: the
  * user writes to each one.
  */
-export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, country, headline, aiReady, today, profileNames = {}, network = {} }: StartupsScreenProps) {
+export function StartupsScreen({
+  filter,
+  list,
+  lastRefresh,
+  refreshJobId,
+  city,
+  country,
+  headline,
+  aiReady,
+  today,
+  profileNames = {},
+  network = {},
+  sources: savedSources = DEFAULT_STARTUP_SOURCES,
+}: StartupsScreenProps) {
   const router = useRouter();
   const [jobId, setJobId] = useState(refreshJobId);
   const [starting, startTransition] = useTransition();
   const [selectedId, setSelectedId] = useState(list.startups[0]?.id ?? null);
+  const [sources, setSources] = useState(savedSources);
+  const [editingSources, setEditingSources] = useState(false);
+  const asked = sourcesOn(sources);
   const selected = list.startups.find((startup) => startup.id === selectedId) ?? list.startups[0] ?? null;
 
   const job = useJob<StartupsRefresh>(jobId, 0, (update) => {
@@ -91,13 +114,13 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
     <div className={listingScreen}>
       <PageHeader
         title="Startups"
-        description={`Startups that are hiring ${country ? `in ${country}, or remotely from there` : "where you live, or remotely"}: from YC startups' job posts and Hacker News' “Who is hiring?”, and firms newly licensed in Germany, from ESMA's registers, which have their reporting to set up before they advertise. You write to each one yourself.`}
+        description={`Startups that are hiring ${country ? `in ${country}, or remotely from there` : "where you live, or remotely"}, from the sources you switch on: YC startups' job posts, Hacker News' “Who is hiring?”, and firms newly licensed in Germany, from ESMA's registers, which have their reporting to set up before they advertise. You write to each one yourself.`}
       />
       <div className="flex flex-col gap-3 px-10 pb-4">
         <SourceBar
           label="Sources"
           icon={<Rocket size={16} />}
-          chips={["YC job posts", "HN “Who is hiring?”", "ESMA new licences", city || country ? `${city || country} or remote` : "Anywhere"]}
+          chips={[...(asked.length > 0 ? asked.map((source) => STARTUP_SOURCE_LABELS[source].chip) : ["No source on"]), city || country ? `${city || country} or remote` : "Anywhere"]}
           note={
             refreshing ? (
               <span role="status">{job?.step ?? "Starting…"} This takes a minute or two.</span>
@@ -108,10 +131,16 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
             )
           }
           actions={
-            <Button size="sm" aria-disabled={refreshing || starting || undefined} onClick={() => !refreshing && !starting && refresh()}>
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </Button>
+            <>
+              <Button variant="secondary" size="sm" aria-expanded={editingSources} onClick={() => setEditingSources(!editingSources)}>
+                {editingSources ? "Done" : "Sources"}
+              </Button>
+              <Button size="sm" aria-disabled={refreshing || starting || asked.length === 0 || undefined} onClick={() => !refreshing && !starting && asked.length > 0 && refresh()}>
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </Button>
+            </>
           }
+          editor={editingSources && <SourcesEditor sources={sources} onChange={setSources} />}
         />
         {failed.length > 0 && !refreshing && (
           <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
@@ -121,10 +150,11 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
         {!lastRefresh && !refreshing && (
           <div role="note" className="flex max-w-[760px] flex-col gap-2 text-sm text-pretty text-muted">
             <p>
-              Press <strong className="text-ink">Refresh</strong> to look for startups. Dossier reads YC startups&apos; job posts and this month&apos;s “Who is hiring?”
-              thread on Hacker News, keeps the ones that hire where you live or remotely, and adds the investment firms and crypto-asset providers licensed in
-              Germany in the past year, from ESMA&apos;s public registers. Then it looks on the best matches&apos; own sites for the address they publish for
-              applications, following their robots.txt.
+              Press <strong className="text-ink">Refresh</strong> to look for startups. Dossier asks the sources switched on under{" "}
+              <strong className="text-ink">Sources</strong>: YC startups&apos; job posts and this month&apos;s “Who is hiring?” thread on Hacker News, keeping the
+              ones that hire where you live or remotely, and the investment firms and crypto-asset providers licensed in Germany in the past year, from
+              ESMA&apos;s public registers. Then it looks on the best matches&apos; own sites for the address they publish for applications, following their
+              robots.txt.
             </p>
             <p>After that it refreshes once a day while you use this screen. Nothing is sent to anyone: you decide whom to write to.</p>
           </div>
@@ -228,6 +258,34 @@ export function StartupsScreen({ filter, list, lastRefresh, refreshJobId, city, 
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Sources (jobauto fork): a switch for each, saved at once. A source switched
+ * off isn't asked by the next refreshes; what it found stays on the list.
+ */
+function SourcesEditor({ sources, onChange }: { sources: StartupSources; onChange: (sources: StartupSources) => void }) {
+  const [saving, startSaving] = useTransition();
+  const set = (source: (typeof STARTUP_SOURCES)[number], on: boolean) =>
+    startSaving(async () => {
+      const result = toastResult(await setStartupSource({ source, on }));
+      if (result.ok) onChange(result.data);
+    });
+  return (
+    <div role="group" aria-label="Sources to ask" className="flex max-w-[640px] flex-col gap-4">
+      {STARTUP_SOURCES.map((source) => (
+        <Toggle
+          key={source}
+          label={STARTUP_SOURCE_INFO[source].name}
+          description={STARTUP_SOURCE_LABELS[source].about}
+          checked={sources[source]}
+          disabled={saving}
+          onCheckedChange={(on) => set(source, on)}
+        />
+      ))}
+      <p className="text-meta text-muted">A source you switch off isn&apos;t asked from the next refresh on. What it found stays here.</p>
     </div>
   );
 }

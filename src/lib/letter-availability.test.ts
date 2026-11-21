@@ -10,6 +10,9 @@ describe("postingAsks", () => {
     expect(postingAsks("Ihre Bewerbung mit Angabe Ihrer Verfügbarkeit")).toEqual({ salary: false, start: true });
     expect(postingAsks("Please include your salary expectations and notice period.")).toEqual({ salary: true, start: true });
     expect(postingAsks("Wir freuen uns auf Ihre Bewerbung!")).toEqual({ salary: false, start: false });
+    // The audit's posting: "Wunsch-Starttermin" (jobauto fork).
+    expect(postingAsks("Bitte nennen Sie Ihren Wunsch-Starttermin und Ihre Gehaltsvorstellung.")).toEqual({ salary: true, start: true });
+    expect(postingAsks("Ihren möglichen Eintritt und Ihr Startdatum")).toEqual({ salary: false, start: true });
   });
 });
 

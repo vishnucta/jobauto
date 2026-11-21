@@ -13,12 +13,12 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn() }));
 
 beforeEach(() => vi.clearAllMocks());
 
-const names = ["JSearch", "SerpApi", "Adzuna", "Jooble"];
+const names = ["JSearch", "SerpApi", "Adzuna"];
 
 describe("PortalsOffNote (jobauto fork)", () => {
   it("names the portals with a key that are off, and where to switch them on", () => {
     render(<PortalsOffNote names={names} />);
-    expect(screen.getByRole("note")).toHaveTextContent("You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble. Switch them on in Settings → Job search.");
+    expect(screen.getByRole("note")).toHaveTextContent("You have keys for 3 portals that are off: JSearch, SerpApi, Adzuna. Switch them on in Settings → Job search.");
     expect(screen.getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
   });
 

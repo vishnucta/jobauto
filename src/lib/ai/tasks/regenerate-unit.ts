@@ -3,7 +3,8 @@ import { z } from "zod";
 import { DocumentKind, type Tone } from "@/generated/prisma/enums";
 import { SIGN_OFF_UNIT, type Extracted, type Unit } from "@/lib/application-data";
 import { emailParts } from "@/lib/application-email";
-import { isFrameUnit } from "@/lib/letter-frame";
+import { knownLanguage } from "@/lib/document-language";
+import { GERMAN_SIGN_OFF, isFrameUnit } from "@/lib/letter-frame";
 import type { ProfileData } from "@/lib/profile";
 import { TONES } from "@/lib/tones";
 import { bulletLines, isBulletUnit, plainText } from "@/lib/unit-text";
@@ -114,9 +115,11 @@ export const regenerateUnit: Task<RegenerateInput, Unit> = async (provider, inpu
     signal: options.signal,
   });
   const text = bullets ? bulletLines(answer.text) : plainText(answer.text).trim();
-  // An English sign-off stays the tone's.
+  // An English sign-off stays the tone's; a German one is "Mit freundlichen Grüßen", without a comma (jobauto fork).
   const english = /^english$/i.test(options.language ?? extracted.language ?? "English");
-  const updated = { ...unit, text: unit.id === SIGN_OFF_UNIT && english ? TONES[tone].signOff : text || unit.text };
+  const german = knownLanguage(options.language ?? extracted.language)?.tag === "de";
+  const fixedSignOff = english ? TONES[tone].signOff : german ? GERMAN_SIGN_OFF : null;
+  const updated = { ...unit, text: unit.id === SIGN_OFF_UNIT && fixedSignOff ? fixedSignOff : text || unit.text };
   return {
     // The letter's recipient and greeting aren't claims about the candidate.
     data:

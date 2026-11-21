@@ -422,15 +422,31 @@ describe("saveUnit (E8-3)", () => {
     await prisma().document.create({ data: { applicationId: "app-1", kind: "COVER_LETTER", units: letter } });
     const greeting = { id: "app-1", document: "COVER_LETTER" as const, unitId: "greeting", expected: "Dear Ledgerly team,", text: " Sehr geehrtes Ledgerly-Team, " };
     expect(await saveUnit(greeting)).toEqual({ ok: true, data: { text: "Sehr geehrtes Ledgerly-Team," } });
-    expect(await saveUnit({ ...greeting, unitId: "signature", expected: "Your name", text: "Jane Doe" })).toMatchObject({ ok: true });
     const stored = await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: "app-1", kind: "COVER_LETTER" } } });
-    expect(stored.units).toEqual([
-      { id: "greeting", label: "Greeting", text: "Sehr geehrtes Ledgerly-Team," },
-      ...letter,
-      { id: "signature", label: "Signature", text: "Jane Doe" },
-    ]);
+    expect(stored.units).toEqual([{ id: "greeting", label: "Greeting", text: "Sehr geehrtes Ledgerly-Team," }, ...letter]);
     // Only the letter's frame: anything else that's missing is gone.
     expect(await saveUnit({ ...greeting, unitId: "paragraph:9" })).toMatchObject({ ok: false, error: expect.stringMatching(/no longer exists/) });
+  });
+
+  it("leaves a draft letter's sender and signature to the profile (jobauto fork)", async () => {
+    await prisma().document.create({ data: { applicationId: "app-1", kind: "COVER_LETTER", units: [{ id: "paragraph:1", label: "Opening", text: "Ich bewerbe mich." }] } });
+    const signature = { id: "app-1", document: "COVER_LETTER" as const, unitId: "signature", expected: "Your name", text: "Jane Doe" };
+    const refused = { ok: false, error: "The sender and the name under the letter come from your profile. Change them there, and every draft follows." };
+    expect(await saveUnit(signature)).toEqual(refused);
+    expect(await saveUnit({ ...signature, unitId: "sender" })).toEqual(refused);
+    // A letter sent before its sender came from the profile keeps its own, and it can still be edited.
+    const copy = { profile: { basics: { name: "As sent" } }, themes: { RESUME: null, COVER_LETTER: null }, paper: "A4", dateFormat: "NUMERIC", includeReferences: false, followedBase: false };
+    await prisma().application.update({ where: { id: "app-1" }, data: { frozen: copy } });
+    expect(await saveUnit(signature)).toMatchObject({ ok: true });
+    await prisma().application.update({ where: { id: "app-1" }, data: { frozen: { ...copy, senderFromProfile: true } } });
+    expect(await saveUnit({ ...signature, expected: "Jane Doe", text: "J. Doe" })).toEqual(refused);
+  });
+
+  it("edits a German sign-off shown without the comma it stored (jobauto fork)", async () => {
+    await prisma().document.create({ data: { applicationId: "app-1", kind: "COVER_LETTER", units: [{ id: "sign-off", label: "Sign-off", text: "Mit freundlichen Grüßen," }] } });
+    const edit = { id: "app-1", document: "COVER_LETTER" as const, unitId: "sign-off", expected: "Mit freundlichen Grüßen", text: "Viele Grüße" };
+    expect(await saveUnit(edit)).toEqual({ ok: true, data: { text: "Viele Grüße" } });
+    expect(await saveUnit({ ...edit, expected: "Beste Grüße" })).toMatchObject({ ok: false, error: expect.stringMatching(/^This part changed while you were editing it/) });
   });
 });
 

@@ -1,7 +1,10 @@
 "use client";
 
+import { BookOpenText, X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { PAGE_WIDTH } from "@/lib/themes";
 
@@ -49,19 +52,62 @@ export function countPages(page: HTMLElement, { paged = false } = {}): number {
   return Math.max(1, Math.ceil((content + between - 2) / (perPage + between)));
 }
 
+/** The document to read on a phone, and what to call it. */
+export type Reading = {
+  /** Its name in the reading view's bar, e.g. "Tailored resume". */
+  title: string;
+  /** The same document drawn plainly: no editing in place, a single column. */
+  document: ReactNode;
+};
+
+/**
+ * The reading view (jobauto fork): on a phone the page shrinks to the
+ * screen's width, too small to read without zooming, so "Read as text"
+ * opens the same document over the whole screen, reflowed at a size to read
+ * (document.module.css, "Reading view"). The PDF and the preview stay as
+ * they are; this only changes how it's shown.
+ */
+export function ReadingView({ title, document: drawn, className }: Reading & { className?: string }) {
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <Button variant="secondary" size="sm" className={className}>
+          <BookOpenText size={14} aria-hidden="true" />
+          Read as text
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Content aria-describedby={undefined} className="fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-surface focus:outline-none">
+          <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface py-2 pr-2 pl-4">
+            <Dialog.Title className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{title}</Dialog.Title>
+            <Dialog.Close aria-label="Close" className="grid size-10 flex-none place-items-center rounded-control text-ink hover:bg-hover">
+              <X size={20} aria-hidden="true" />
+            </Dialog.Close>
+          </div>
+          <div className={styles.reading} data-reading>
+            {drawn}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /**
  * A document on the grey canvas, scaled to fit the column (up to its real
  * size) with container units, and a label row above it. Where the browser
  * can, the document is laid out on the sheets it prints on and breaks where
  * the PDF does (document.module.css, "Paged preview"); elsewhere it's one long
  * page with a line where each page ends. `meta` can depend on the number of
- * pages the document fills.
+ * pages the document fills. With `reading`, a phone gets "Read as text" above
+ * the page (jobauto fork).
  */
 export function DocumentPreview({
   label,
   meta,
   notice,
   panel,
+  reading,
   onPages,
   className,
   maxWidth = PAGE_WIDTH,
@@ -73,6 +119,8 @@ export function DocumentPreview({
   notice?: ReactNode | ((pages: number) => ReactNode);
   /** A panel under the notice, before the page, as wide as the page: the ATS check's report. */
   panel?: ReactNode;
+  /** The document to read on a phone, reflowed (jobauto fork). */
+  reading?: Reading;
   /** Told the number of pages after each measurement, for "Fit to one page" (public issue 69). */
   onPages?: (pages: number) => void;
   className?: string;
@@ -126,6 +174,11 @@ export function DocumentPreview({
         </div>
         {notice && <div className="w-[calc(var(--u)*640)]">{typeof notice === "function" ? notice(pages) : notice}</div>}
         {panel && <div className="w-[calc(var(--u)*640)]">{panel}</div>}
+        {reading && (
+          <div className="w-[calc(var(--u)*640)] sm:hidden">
+            <ReadingView {...reading} />
+          </div>
+        )}
         <div
           ref={pageRef}
           className={cn("relative isolate w-fit", paged ? styles.paged : "shadow-page")}

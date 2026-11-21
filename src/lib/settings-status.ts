@@ -43,6 +43,8 @@ export type StatusInputs = {
     test: { at: Date; ok: boolean; seconds: number | null; error: string | null } | null;
   };
   documents: { paper: string; language: string; tone: string };
+  /** The standard answers (jobauto fork): how many of them are filled in, of how many, and whether they were ever saved. */
+  answers: { filled: number; of: number; saved: boolean };
   scoring: {
     name: string;
     problem: string | null;
@@ -187,12 +189,20 @@ function aboutStatus({ about }: StatusInputs): SectionStatus {
   return on(`You have ${about.version}, the latest`, meta, about.version);
 }
 
+/** Settings → Standard answers (jobauto fork): off until they're saved, then how many are filled in. */
+function answersStatus({ answers }: StatusInputs): SectionStatus {
+  const meta = "Used for every application";
+  if (!answers.saved) return off("Not saved yet", meta, "Not saved yet");
+  return on(`${answers.filled} of ${answers.of} filled in`, meta);
+}
+
 /** Every section's status. */
 export function settingsStatus(inputs: StatusInputs) {
   const { now } = inputs;
   return {
     ai: aiStatus(inputs, now),
     documents: on(`${inputs.documents.paper} · ${inputs.documents.language} · ${inputs.documents.tone.toLowerCase()} tone`, "Resume and letter, as you set them", `${inputs.documents.paper} · ${inputs.documents.language}`),
+    answers: answersStatus(inputs),
     scoring: scoringStatus(inputs),
     jobs: jobsStatus(inputs, now),
     agent: agentStatus(inputs, now),

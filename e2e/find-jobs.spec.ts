@@ -15,7 +15,7 @@ test("searches, keeps postings, and starts an application from one", async ({ pa
   await expect(form.getByLabel("What")).toHaveValue("Senior Product Designer");
   await expect(form.getByLabel("Where")).toHaveValue("Rotterdam");
   await expect(form.getByLabel("Country")).toHaveValue("nl");
-  await form.getByRole("button", { name: "Search" }).click();
+  await form.getByRole("button", { name: "Search", exact: true }).click();
 
   // A search lands on Positions, filtered to what it found (E22-5).
   await expect(page).toHaveURL(/\/jobs\?found=c/);
@@ -69,18 +69,18 @@ test("searches, keeps postings, and starts an application from one", async ({ pa
   await page.waitForURL(/\/applications\/c/, { timeout: 30_000 });
   const applicationId = new URL(page.url()).pathname.split("/").pop()!;
 
-  // The posting now knows its application, and says so.
+  // The posting now knows its application, and says so: a draft until it's sent (jobauto fork).
   const [posting] = await sql<{ applicationId: string | null }>(`SELECT "applicationId" FROM "Posting" WHERE "externalId" = 'e2e-ledgerly'`);
   expect(posting.applicationId).toBe(applicationId);
   await page.goto("/jobs?view=saved");
-  await expect(page.getByRole("list", { name: "Postings" }).getByRole("button", { name: /^Senior Product Designer, Payments/ })).toContainText("Applied");
-  await expect(page.getByRole("link", { name: "Open the application" })).toHaveAttribute("href", `/applications/${applicationId}`);
+  await expect(page.getByRole("list", { name: "Postings" }).getByRole("button", { name: /^Senior Product Designer, Payments/ })).toContainText("Draft ready");
+  await expect(page.getByRole("link", { name: "Open the draft" })).toHaveAttribute("href", `/applications/${applicationId}`);
 });
 
 test("says when nothing was found", async ({ page }) => {
   // A search written in the URL only fills in the form.
   await page.goto("/jobs?q=nothing&where=Rotterdam&country=nl");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText("No postings for “nothing” within 25 km of Rotterdam. Try a bigger radius or fewer words.")).toBeVisible();
 });
 
@@ -96,7 +96,7 @@ test("scores a posting against the profile, and keeps the score (#208)", async (
   // Before the test above, nothing was saved, dismissed or applied for.
   await resetData();
   await page.goto("/jobs");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Senior Product Designer, Payments" })).toBeVisible();
   await page.getByRole("button", { name: "Score", exact: true }).click();
   // Coverage, never a number out of 100 (E32-2), then each part of the fit as a reason (E25-6).
@@ -133,7 +133,7 @@ test("scores with Jev once it's chosen in Settings → Scoring (#274)", async ({
   await expect(page.getByText(/^Connected · jev-1\.14\.0 answered in/)).toBeVisible();
 
   await page.goto("/jobs");
-  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search" }).click();
+  await page.getByRole("search", { name: "Search postings" }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Senior Product Designer, Payments" })).toBeVisible();
   await page.getByRole("button", { name: "Score", exact: true }).click();
   // Jev answers the same questions (E25): every factor at the top but the past work, a level below.
@@ -162,7 +162,7 @@ test("searches FreeHire, which needs no key and has no radius", async ({ page })
   const form = page.getByRole("search", { name: "Search postings" });
   await expect(form.getByLabel("Within")).toBeDisabled();
   await expect(form.getByText("FreeHire has no distance filter")).toBeVisible();
-  await form.getByRole("button", { name: "Search" }).click();
+  await form.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Senior Product Designer, Payments" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Search" }).getByText(/^Searched today at \d\d:\d\d · 1 found$/)).toBeVisible();
   // The same job JSearch found before: one posting, found on both, with each one's credit (E22-6).

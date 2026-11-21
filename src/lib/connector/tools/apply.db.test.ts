@@ -28,6 +28,12 @@ vi.mock("@/lib/jobs/runner", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/jobs/runner")>()),
   startJob: vi.fn(async () => "apply-job"),
 }));
+// A computer with a screen, unless a test takes it away (a NAS has none).
+const screen = vi.hoisted(() => ({ on: true }));
+vi.mock("@/lib/apply/display", async (importOriginal) => {
+  const display = await importOriginal<typeof import("@/lib/apply/display")>();
+  return { ...display, noWindowReason: (address: string | null) => display.noWindowReason(address, { platform: "linux", env: screen.on ? { DISPLAY: ":0" } : {} }) };
+});
 // The other groups of tools are left out: these tests are about the Apply tab's.
 vi.mock("@/lib/connector/tools/agent", () => ({ registerAgentTools: () => {} }));
 vi.mock("@/lib/connector/tools/applications", () => ({ registerApplicationTools: () => {} }));
@@ -53,6 +59,7 @@ beforeEach(async () => {
   await seedDemo(prisma(), { now: new Date("2026-10-23T09:00:00Z") });
   await saveSettings({ connectorEnabledAt: "2026-10-23T09:00:00.000Z", strict: false });
   vi.mocked(startJob).mockClear();
+  screen.on = true;
   const clientId = await registerClient({ name: "Claude", redirectUris: [CLAUDE] });
   const verifier = "v".repeat(50);
   const code = await issueCode({ clientId, redirectUri: CLAUDE, codeChallenge: challengeOf(verifier), resource: "" });
@@ -229,6 +236,27 @@ describe("the Apply tab's tools in the Claude connector", () => {
     expect(await prisma().applyAttempt.count()).toBe(0);
   });
 
+  it("says they reach the employer's site, and opens nothing on a server without a screen unless the laptop's Chrome is set up (round 2 of the audit)", async () => {
+    const { tools } = (await rpc("tools/list")) as { tools: { name: string; description: string; annotations?: Record<string, boolean> }[] };
+    for (const name of ["start_apply", "fill_apply_page"]) {
+      const entry = tools.find((listed) => listed.name === name)!;
+      expect(entry.annotations, name).toMatchObject({ readOnlyHint: false, destructiveHint: true, openWorldHint: true });
+      expect(entry.description, name).toContain("the computer Dossier runs on");
+    }
+
+    await onPersonio();
+    screen.on = false;
+    const refused = await tool("start_apply", { id: ledgerly });
+    expect(refused).toMatchObject({ isError: true, text: expect.stringMatching(/^Dossier runs on a computer without a screen, such as a NAS/) });
+    expect(await tool("fill_apply_page", { id: ledgerly })).toMatchObject({ isError: true, text: refused.text });
+    expect(startJob).not.toHaveBeenCalled();
+    expect(await prisma().applyAttempt.count()).toBe(0);
+
+    // The laptop's Chrome is a window all the same.
+    await saveSettings({ applyBrowserAddress: "http://100.101.102.103:9222" });
+    expect((await tool("start_apply", { id: ledgerly })).json).toMatchObject({ task_id: "apply-job", status: "started" });
+  });
+
   it("settles a run by the user's word, moving a draft to Sent", async () => {
     await onPersonio();
     const waiting = await run({ status: "WAITING" });
@@ -353,9 +381,9 @@ describe("the Apply tab's tools in the Claude connector", () => {
     const { tools } = (await rpc("tools/list")) as { tools: { name: string; description: string; annotations: Record<string, boolean> }[] };
     const listed = (name: string) => tools.find((entry) => entry.name === name);
     expect(listed("get_apply_status")?.annotations).toEqual({ readOnlyHint: true });
-    expect(listed("start_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+    expect(listed("start_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true });
     expect(listed("start_apply")?.description).toContain("leaves Send to the user");
-    expect(listed("fill_apply_page")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+    expect(listed("fill_apply_page")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: true });
     expect(listed("fill_apply_page")?.description).toContain("never presses Send");
     expect(listed("settle_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(listed("save_apply_answers")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });

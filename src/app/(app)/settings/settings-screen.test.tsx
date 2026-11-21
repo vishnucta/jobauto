@@ -12,6 +12,7 @@ const on = (note: string, state = note, meta = ""): SectionStatus => ({ tone: "o
 const status: SettingsStatus = {
   ai: on("Anthropic · claude-sonnet-5-5", "Anthropic · claude-sonnet-5-5 · tested 1.4 s", "Your profile leaves the server when it writes"),
   documents: on("A4 · English"),
+  answers: on("6 of 6 filled in"),
   scoring: on("Your AI model"),
   jobs: { tone: "look", state: "1 of 2 portals working. Adzuna has failed since 12 Nov.", meta: "JSearch", note: "Adzuna stopped working", problem: { summary: "Adzuna has failed since 12 Nov", fix: "Fix Adzuna" } },
   agent: on("On · daily at 07:00"),
@@ -34,7 +35,7 @@ describe("SettingsScreen (E34-3)", () => {
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/settings");
     expect(within(nav).getAllByRole("group").map((group) => group.getAttribute("aria-label"))).toEqual(["Writing", "Finding work", "Connected", "Your data · About"]);
-    expect(within(within(nav).getByRole("group", { name: "Writing" })).getAllByRole("link").map((link) => link.querySelector("span span")?.textContent)).toEqual(["AI provider", "Documents", "Scoring"]);
+    expect(within(within(nav).getByRole("group", { name: "Writing" })).getAllByRole("link").map((link) => link.querySelector("span span")?.textContent)).toEqual(["AI provider", "Documents", "Standard answers", "Scoring"]);
     const data = within(nav).getByRole("link", { name: "Data and backups On: Backed up today at 02:00" });
     expect(data).toHaveAttribute("aria-current", "page");
     expect(data).toHaveAttribute("href", "/settings?section=data");
@@ -65,6 +66,7 @@ describe("SettingsOverview (E34-2)", () => {
     expect(within(writing).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "AI provider On Anthropic · claude-sonnet-5-5 · tested 1.4 s Your profile leaves the server when it writes",
       "Documents On A4 · English ",
+      "Standard answers On 6 of 6 filled in ",
       "Scoring On Your AI model ",
     ]);
     expect(within(writing).getByRole("link", { name: /^AI provider/ })).toHaveAttribute("href", "/settings?section=ai");

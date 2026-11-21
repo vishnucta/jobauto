@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { Tone } from "@/generated/prisma/enums";
 import { SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
 import type { ProfileData } from "@/lib/profile";
-import { FRAME_LABELS, isFrameUnit } from "@/lib/letter-frame";
+import { knownLanguage } from "@/lib/document-language";
+import { contactInPosting, germanGreeting, germanRecipient, readContact } from "@/lib/german-letter";
+import { FRAME_LABELS, GERMAN_SIGN_OFF, isFrameUnit } from "@/lib/letter-frame";
 import { availabilityLines, type LetterAvailability } from "@/lib/letter-availability";
 import { lineText } from "@/lib/changed-lines";
 import { TONES } from "@/lib/tones";
@@ -31,11 +33,14 @@ import {
 
 // Both sides moved on from @6 to an @7 of their own (the fork's salary and start date, upstream's serves); the merged prompt is @8.
 // The readiness lines (jobauto fork) came before any @8 letter was written for real, so they share it.
-const WRITE_COVER_LETTER_VERSION = "write-cover-letter@8";
+// @9 (jobauto fork): the contact person the posting names, for a German letter's frame written in code, and no made-up availability.
+const WRITE_COVER_LETTER_VERSION = "write-cover-letter@9";
 
 const answerSchema = z.object({
   recipient: z.string(),
   greeting: z.string(),
+  /** The person the posting names for applications, as it writes them; null for none (jobauto fork). */
+  contactName: z.string().nullable().optional(),
   /** With which requirements each paragraph serves (E30-4). */
   paragraphs: z.array(z.object({ label: z.string(), text: z.string(), serves: z.array(z.number().int()).nullable().optional() })),
   signOff: z.string(),
@@ -45,12 +50,14 @@ const INSTRUCTIONS = `You write a candidate's cover letter for one job, as JSON.
 
 - recipient: the address block, one line per line: who it's for (the company's hiring team, or the contact person the posting names, at the company), then the place if the job has one. Usual for a letter in its language, e.g. "Ledgerly · Hiring team\\nAmsterdam".
 - greeting: the salutation before the first paragraph, usual for a letter in its language, with its punctuation: the contact person by name when the posting names one, else the hiring team, e.g. "Dear Ledgerly team,".
+- contactName: the person the posting names to send the application to or to ask, exactly as the posting writes them, with "Herr" or "Frau" when it says so, e.g. "Herr Max Mustermann": only the name, without an email address or job title; null when it names no one. Never guess a name.
 - paragraphs: 3–4 paragraphs, about 200–300 words together. Open with why this role and this company, then the problem the job is there to solve and where the candidate has solved it before, and close by inviting a conversation, with where the candidate is based if it matters for the job. No greeting, sign-off or name in them: those are separate.
 - label: a short English name for each paragraph's purpose, e.g. "Why this role", "The challenge", "Where I've solved it", "Closing".
 - Where the job asks for something the profile doesn't have ("gap"), don't claim it. If it matters, say so honestly in a sentence and show how the candidate would close the gap.
 - signOff: the closing line before the name, matching the tone, with its punctuation (e.g. "Warm regards,").
 - Each paragraph has its serves.
-- The sender's name, contact details and the date are added from the profile; don't write them.`;
+- The sender's name, contact details and the date are added from the profile; don't write them.
+- Never state a salary expectation, a start date, a notice period or a work permit unless it's given to you below; don't make one up.`;
 
 export type CoverLetterInput = {
   profile: ProfileData;
@@ -115,10 +122,22 @@ export const writeCoverLetter: Task<CoverLetterInput, Unit[]> = async (provider,
   // English letters get the tone's own sign-off; other languages keep the model's. Everything the model wrote goes through the character normaliser.
   const language = options.language ?? extracted.language ?? "English";
   const closing = plainText(answer.signOff).trim();
-  const signOff = /^english$/i.test(language) || !closing ? TONES[tone].signOff : closing;
+  // A German letter's frame is written in code, as DIN 5008 has it (german-letter.ts, jobauto fork).
+  const german = knownLanguage(language)?.tag === "de";
+  const signOff = german ? GERMAN_SIGN_OFF : /^english$/i.test(language) || !closing ? TONES[tone].signOff : closing;
   // Left out when it's empty once normalised; its place only from the job (#371).
-  const recipient = tidyLines(answer.recipient) ? recipientFromJob(answer.recipient, extracted, posting) : "";
-  const greeting = plainText(answer.greeting).trim();
+  const written = tidyLines(answer.recipient) ? recipientFromJob(answer.recipient, extracted, posting) : "";
+  // The contact the model read, else the one the posting names with Herr or Frau.
+  const contact = german ? (readContact(answer.contactName && plainText(answer.contactName), posting) ?? contactInPosting(posting)) : null;
+  const recipient = german
+    ? germanRecipient({
+        // The company as the posting was read, else who the model addressed, without its "· Hiring team".
+        company: extracted.company?.trim() || (written.split("\n")[0] ?? "").split(" · ")[0],
+        contact,
+        place: written.split("\n").slice(1),
+      })
+    : written;
+  const greeting = german ? germanGreeting(contact) : plainText(answer.greeting).trim();
   const requirements = requirementTexts(extracted, match);
   const units = unitsSchema.parse([
     // Left out when empty: the English ones fill in (src/lib/letter-frame.ts).

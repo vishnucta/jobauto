@@ -664,6 +664,35 @@ describe("certifications, volunteering and sections the user made (#293, #294, #
     expect(await tool("save_profile_entry", { section_item: { section_id: theirs.id, title: "A talk" } })).toMatchObject({ isError: true });
     expect((await tool("save_profile_entry", { profile: "Backend", section_item: { section_id: theirs.id, title: "A talk" } })).json).toMatchObject({ profile: "Backend", created: true });
   });
+
+  it("adds a section of the user's own and renames it, as Add a section and its heading do (round 2 of the audit)", async () => {
+    expect(await tool("save_custom_section", {})).toMatchObject({ isError: true, text: "Give the new section a title, e.g. 'Awards'." });
+    const added = await tool("save_custom_section", { title: "Awards", format: "lines" });
+    expect(added.json).toMatchObject({
+      profile: DEMO_PROFILE,
+      created: true,
+      section: { title: "Awards", format: "lines", counts_as: "extra_activities", items: 0 },
+      next: expect.stringContaining("section_item"),
+    });
+    const { id } = added.json.section as Entry;
+    expect(added.json.link).toBe(`${PROFILE_PAGE}&section=custom:${id}`);
+    expect(await prisma().customSection.findUniqueOrThrow({ where: { id } })).toMatchObject({ profileId: TEST_PROFILE_ID, title: "Awards", format: "LINES", countsAs: "EXTRA_ACTIVITIES" });
+    expect((await tool("get_profile")).json.other_sections).toEqual([expect.objectContaining({ id, title: "Awards", format: "lines", counts_as: "extra_activities" })]);
+
+    // Items go in with save_profile_entry, then the section is renamed and counted as work.
+    await tool("save_profile_entry", { section_item: { section_id: id, title: "Best thesis" } });
+    const renamed = await tool("save_custom_section", { section_id: id, title: "Prizes", counts_as: "work_experience" });
+    expect(renamed.json).toMatchObject({ created: false, section: { id, title: "Prizes", format: "lines", counts_as: "work_experience", items: 1 } });
+    // A blank title isn't saved, nor is a section that isn't there.
+    expect(await tool("save_custom_section", { section_id: id })).toMatchObject({ isError: true, text: "Say what to change: title, format or counts_as." });
+    expect(await tool("save_custom_section", { section_id: "gone", title: "Talks" })).toMatchObject({ isError: true });
+
+    // Into the profile asked for; a section is renamed in whichever profile has it.
+    await copyProfile(TEST_PROFILE_ID, "Backend");
+    const theirs = await tool("save_custom_section", { profile: "Backend", title: "Talks", format: "inline", counts_as: "education" });
+    expect(theirs.json).toMatchObject({ profile: "Backend", section: { title: "Talks", format: "inline", counts_as: "education" } });
+    expect((await tool("save_custom_section", { section_id: (theirs.json.section as Entry).id, title: "Conference talks" })).json).toMatchObject({ profile: "Backend", section: { title: "Conference talks" } });
+  });
 });
 
 describe("the jobs a profile is for (E24-3, E24-4)", () => {

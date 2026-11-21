@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 import { applyAnswersSchema, LANGUAGE_LEVEL_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
+import { noWindowReason } from "@/lib/apply/display";
 import { resolveAttempt } from "@/lib/apply/run";
 import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyPlanView } from "@/lib/apply/view";
@@ -18,7 +19,8 @@ import { lastKnownTimeZone } from "@/lib/time-zone";
 
 import { failure, started, text, type ToolContext } from "../kit";
 
-// The Apply tab: filling the employer's form in a browser window (jobauto fork).
+// The Apply tab: filling the employer's form in a browser window on the
+// computer Dossier runs on, or the laptop's Chrome set up for it (jobauto fork).
 // Claude reads where the form is and how the runs went, starts a run, settles
 // one by the user's word and saves the standard answers. A run Claude starts
 // leaves Send to the user: she checks the window and presses it herself.
@@ -138,12 +140,18 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
     {
       title: "Fill in the employer's form",
       description:
-        "Opens the employer's application form in a browser window on the computer running Dossier, fills it in from the profile and the standard answers, and attaches the PDFs. " +
-        "It leaves Send to the user, who checks the window, finishes the form and presses Send there. Follow it with check_task, then get_apply_status.",
+        "Opens the employer's application form in a browser window on the computer Dossier runs on, or in the laptop's Chrome set up for it, fills it in from the profile and the standard answers, and attaches the PDFs. " +
+        "It types the user's details into the employer's site, which can't be taken back: use it only when the user asked for exactly that. " +
+        "It leaves Send to the user, who checks the window, finishes the form and presses Send there. On a server without a screen and no laptop Chrome set up, it says so and opens nothing. " +
+        "Follow it with check_task, then get_apply_status.",
       inputSchema: z.object({ id: z.string().min(1).max(100).describe("The application's id") }),
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      // Her details go to a third party's site (round 2 of the audit).
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async ({ id }) => {
+      // Refused plainly rather than promising a window she never sees.
+      const noWindow = noWindowReason((await loadSettings()).applyBrowserAddress);
+      if (noWindow) return failure(noWindow);
       // Whatever the standard answers say, a run Claude starts leaves Send to the user.
       const run = await startApplyRun(id, { mayPressSend: false });
       if (!run.ok) {
@@ -173,11 +181,14 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
       description:
         "Fills in the form on the page the user is looking at, in the browser window of an apply run that is waiting for them, from the profile and the standard answers, and attaches the PDFs, as Fill this page on the Apply tab does. " +
         "Use it after the user got past a login, a bot check or a step of the form themselves: Dossier never does those. It types only into encrypted (https) pages, never presses Send, and says so when the page has no form. " +
+        "The window is on the computer Dossier runs on, or the laptop's Chrome set up for it; it types the user's details into the employer's site, so use it only when the user asked. " +
         "Follow it with check_task, then get_apply_status.",
       inputSchema: z.object({ id: z.string().min(1).max(100).describe("The application's id") }),
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async ({ id }) => {
+      const noWindow = noWindowReason((await loadSettings()).applyBrowserAddress);
+      if (noWindow) return failure(noWindow);
       const fill = await startFillPage(id);
       if (!fill.ok) return failure(fill.message);
       return started(fill.jobId, {

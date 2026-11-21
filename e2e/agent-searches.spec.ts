@@ -25,12 +25,11 @@ async function accessible(page: Page) {
 }
 
 async function mobile(page: Page) {
-  // The app's sidebar is manually collapsible, not an automatic mobile drawer.
-  // Exercise its real control so the 390px view leaves room for the content.
-  const collapse = page.getByRole("button", { name: "Collapse sidebar", exact: true });
-  if (await collapse.isVisible()) await collapse.click();
+  // On a phone the sidebar is a drawer behind the menu button (jobauto fork),
+  // so the 390px view leaves the content its full width.
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open menu", exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeHidden();
 }
 
 async function capture(page: Page, name: string) {

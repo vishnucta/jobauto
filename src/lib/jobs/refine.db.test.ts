@@ -167,7 +167,7 @@ describe("Ask (E30-10, AP5)", () => {
     const result = await refineJob.run({ applicationId: "app-1", messageId: message.id, request: "What matters most to them?", target: null, viewing: "RESUME", mode: "ask" }, context);
     const saved = await lastMessage();
     expect(result).toEqual({ messageId: saved.id, edited: [] });
-    expect(saved).toMatchObject({ role: "AI", text: "They care most about design systems.", writtenWith: "answer-question@1", edits: null });
+    expect(saved).toMatchObject({ role: "AI", text: "They care most about design systems.", writtenWith: "answer-question@2", edits: null });
     expect(await units("RESUME")).toEqual(resume);
     expect(await prisma().documentVersion.count()).toBe(0);
     // From the profile, the posting and the facts: the documents don't go along.

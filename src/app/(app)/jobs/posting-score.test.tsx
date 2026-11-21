@@ -78,8 +78,8 @@ describe("Score in Find jobs (#208)", () => {
     expect(await screen.findByText("Scoring it against your profile")).toHaveAttribute("role", "status");
     finish({ status: "DONE", result: scored(fit) });
 
-    // No breakdown: no requirements to count, and its reasons as they came (E32-2).
-    expect(await screen.findByText("No requirements to check")).toBeInTheDocument();
+    // No breakdown: not scored with the new method, and its reasons as they came, as a plain list (E32-2, jobauto fork).
+    expect(await screen.findByText("Not scored with the new method yet")).toBeInTheDocument();
     expect(screen.getByText("Built a design system at Northwind.")).toBeInTheDocument();
     expect(screen.getByText("Dutch is required.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Score again" })).toBeInTheDocument();

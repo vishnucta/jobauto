@@ -68,6 +68,17 @@ describe("SidebarProfiles (E27-5)", () => {
     expect(screen.getByRole("link", { name: /Product design/ })).not.toHaveTextContent("Default");
   });
 
+  it("cuts a long name short in the sidebar and shows it whole on hover (jobauto fork)", () => {
+    const long = "Senior Product Designer — Design Systems, Accessibility & Research Operations (Remote)";
+    render(<SidebarProfiles {...nav({ profiles: [{ id: "p1", name: long, strength: 92 }, { id: "p2", name: "Service design", strength: 40 }] })} />);
+    const link = screen.getByRole("link", { name: /Senior Product Designer/ });
+    expect(link).toHaveAttribute("title", long);
+    // The row may shrink below its text; the name takes "…" and Default keeps its place.
+    expect(link).toHaveClass("min-w-0");
+    expect(within(link).getByText(long)).toHaveClass("truncate");
+    expect(within(link).getByText("Default")).toHaveClass("shrink-0");
+  });
+
   it("opens the New profile dialog from +", async () => {
     render(<SidebarProfiles {...nav()} />);
     await userEvent.click(screen.getByRole("button", { name: "New profile" }));

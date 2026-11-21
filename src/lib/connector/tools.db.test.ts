@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FoundPosting } from "@/lib/job-search/search";
+import { prepareApplicationJob } from "@/lib/jobs/prepare-application";
 import { startJob } from "@/lib/jobs/runner";
 import { keepFound } from "@/lib/library";
 import { copyProfile } from "@/lib/profiles";
@@ -10,6 +11,7 @@ import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
 import { seedDemo } from "../../../prisma/seed/demo";
 
+import { connectorDraftJob } from "./draft";
 import { handOffPastedPosting } from "./handoff";
 import { challengeOf, exchangeCode, issueCode, registerClient } from "./oauth";
 
@@ -146,6 +148,18 @@ describe("the Claude connector's tools (#221)", () => {
     expect(await tool("set_application_status", { id: "gone", status: "SENT" })).toMatchObject({ isError: true });
   });
 
+  it("reads each posting's German against hers, as the screens do (germanDecision, jobauto fork)", async () => {
+    await prisma().language.deleteMany();
+    await prisma().language.create({ data: { name: "German", level: "A2" } });
+    const asks = { ...found("g1", "Analyst"), description: "Analyst: regulatory reporting. Sehr gute Deutschkenntnisse sind erforderlich." };
+    await storeSearch([asks, found("g2", "Designer")]);
+    const listed = (await tool("list_postings", { view: "open" })).json as unknown as { open: { postings: { title: string; german?: string }[] } };
+    const german = listed.open.postings.find((posting) => posting.title === "Analyst")!.german;
+    expect(german).toBe("needs more German than she has. The ad asks for more German (C1) than your A2: “Sehr gute Deutschkenntnisse sind erforderlich.”");
+    // A posting that says nothing about German has no line.
+    expect(listed.open.postings.find((posting) => posting.title === "Designer")!.german).toBeUndefined();
+  });
+
   it("reads a posting from wherever Claude got it", async () => {
     const search = await storeSearch([found("p1", "Product Designer"), found("p2", "Brand Designer", false)]);
     expect((await tool("get_posting", { search_id: search.id, number: 1 })).json).toMatchObject({ title: "Product Designer", url: "https://jobs.example/p1" });
@@ -224,20 +238,32 @@ describe("the Claude connector's tools (#221)", () => {
     expect((await tool("update_application", { application_id: id, change: "Too late", match: [] })).text).toContain("Only a Draft");
   });
 
-  it("has Dossier's own model draft one only when there is one, and says how it's coming along", async () => {
+  it("has Dossier's own model draft one only when there is one, as Prepare it for me does for a posting Positions keeps (round 2 of the audit)", async () => {
     expect((await tool("draft_application", { posting_text: "Designer at Acme" })).text).toContain("save_application");
     fake.aiUsable = true;
-    expect((await tool("draft_application", { posting_text: "Designer at Acme", note: "Stress Figma" })).json).toMatchObject({ draft_id: "draft-job", status: "started" });
+    expect((await tool("draft_application", { posting_text: "Designer at Acme", note: "Stress Figma" })).json).toMatchObject({
+      task_id: "draft-job",
+      status: "started",
+      next: expect.stringContaining("check_task"),
+    });
+    expect(vi.mocked(startJob)).toHaveBeenLastCalledWith(connectorDraftJob, expect.objectContaining({ posting: "Designer at Acme", note: "Stress Figma", postingId: null }));
     expect(await tool("draft_application", {})).toMatchObject({ isError: true });
 
-    expect(await tool("check_draft", { draft_id: "nope" })).toMatchObject({ isError: true, text: "There's no such draft." });
-    const job = await prisma().job.create({ data: { type: "connector-draft", status: "RUNNING", step: "Writing the cover letter", input: {} } });
-    expect((await tool("check_draft", { draft_id: job.id })).json).toMatchObject({ status: "working", step: "Writing the cover letter" });
-    await prisma().job.update({ where: { id: job.id }, data: { status: "FAILED", error: "The model didn't answer." } });
-    expect(await tool("check_draft", { draft_id: job.id })).toMatchObject({ isError: true, text: "The model didn't answer." });
-    const ledgerly = await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } });
-    await prisma().job.update({ where: { id: job.id }, data: { status: "DONE", error: null, result: { applicationId: ledgerly.id } } });
-    expect((await tool("check_draft", { draft_id: job.id })).json).toMatchObject({ status: "done", application_id: ledgerly.id });
+    // A posting Positions keeps goes through Prepare it for me, with the note, and the profile only when one is named.
+    const row = await prisma().posting.create({ data: { source: "JSEARCH", externalId: "p9", title: "Designer", company: "Acme", description: "Figma, design systems.", complete: true } });
+    expect((await tool("draft_application", { posting_id: row.id, note: "Stress Figma" })).json).toMatchObject({ task_id: "draft-job", status: "started", posting_id: row.id });
+    expect(vi.mocked(startJob)).toHaveBeenLastCalledWith(prepareApplicationJob, { postingId: row.id, profileId: null, note: "Stress Figma" }, { key: `prepare:${row.id}` });
+    expect(await tool("draft_application", { posting_id: "gone" })).toMatchObject({ isError: true, text: expect.stringContaining("no longer kept") });
+    // One under way is followed rather than started again.
+    const running = await prisma().job.create({ data: { type: "prepare-application", status: "RUNNING", key: `prepare:${row.id}`, input: { postingId: row.id } } });
+    const calls = vi.mocked(startJob).mock.calls.length;
+    expect((await tool("draft_application", { posting_id: row.id })).json).toMatchObject({ task_id: running.id, status: "started" });
+    expect(vi.mocked(startJob).mock.calls.length).toBe(calls);
+    // A posting with an application answers with it: no second one.
+    const made = await prisma().application.create({ data: { title: "Designer", company: "Acme" } });
+    await prisma().posting.update({ where: { id: row.id }, data: { applicationId: made.id } });
+    expect((await tool("draft_application", { posting_id: row.id })).json).toMatchObject({ application_id: made.id, status: "exists", link: `https://dossier.example/applications/${made.id}` });
+    expect(vi.mocked(startJob).mock.calls.length).toBe(calls);
   });
 
   it("reads and writes from the profile asked for by name, or the first (E24-6)", async () => {

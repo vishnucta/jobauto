@@ -352,15 +352,16 @@ export async function removeStartup(id: string): Promise<boolean> {
  * The daily tidy-up: removes startups nobody saved or contacted once no
  * refresh found them for STALE_DAYS, and job seekers' posts nobody touched,
  * and drops people's addresses looked up over PEOPLE_DAYS ago from startups
- * nobody wrote to.
+ * nobody wrote to. Only from the sources the refresh asked (jobauto fork):
+ * one switched off finds nothing again, and what it found stays.
  */
-export async function sweepStartups(now = new Date()): Promise<{ removed: number; addressesDropped: number }> {
+export async function sweepStartups(now = new Date(), asked: readonly StartupSource[] = STARTUP_SOURCES): Promise<{ removed: number; addressesDropped: number }> {
   const { count: stale } = await prisma.startup.deleteMany({
-    where: { status: { in: [StartupStatus.NEW, StartupStatus.DISMISSED] }, applicationId: null, seenAt: { lt: new Date(now.getTime() - STALE_DAYS * DAY_MS) } },
+    where: { source: { in: [...asked] }, status: { in: [StartupStatus.NEW, StartupStatus.DISMISSED] }, applicationId: null, seenAt: { lt: new Date(now.getTime() - STALE_DAYS * DAY_MS) } },
   });
   // Posts by people looking for work, read from the hiring thread before
   // public #144: untouched ones go at once rather than after STALE_DAYS.
-  const untouched = await prisma.startup.findMany({ where: { source: "HN", status: StartupStatus.NEW, applicationId: null }, select: { id: true, details: true } });
+  const untouched = asked.includes("HN") ? await prisma.startup.findMany({ where: { source: "HN", status: StartupStatus.NEW, applicationId: null }, select: { id: true, details: true } }) : [];
   const seekers = untouched.filter((row) => isJobSeeker(headerParts(row.details).join(" | "), row.details)).map((row) => row.id);
   const { count: seekersRemoved } = seekers.length > 0 ? await prisma.startup.deleteMany({ where: { id: { in: seekers } } }) : { count: 0 };
   const removed = stale + seekersRemoved;

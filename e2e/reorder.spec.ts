@@ -13,7 +13,8 @@ const roles = (page: Page) =>
 
 test("moves roles by keyboard and by dragging, and the resume follows", async ({ page }) => {
   await page.goto("/profile?section=experience");
-  expect(await roles(page)).toEqual(["Senior Product Designer", "Product Designer", "UX Designer"]);
+  // The page streams in behind "Loading your profile…", so this waits for the cards.
+  await expect.poll(() => roles(page)).toEqual(["Senior Product Designer", "Product Designer", "UX Designer"]);
   await expect(page.getByText(/^Newest first/)).toBeVisible();
 
   // Keyboard: the arrows.
@@ -28,7 +29,8 @@ test("moves roles by keyboard and by dragging, and the resume follows", async ({
   const card = page.locator("div.rounded-panel", { has: page.getByRole("button", { name: /^Product Designer/, expanded: false }) });
   const handle = card.getByTitle("Drag to reorder");
   const from = (await handle.boundingBox())!;
-  const top = (await page.locator("button[aria-expanded]").first().boundingBox())!;
+  // The first one shown: the phone's menu button comes first but is hidden here (jobauto fork).
+  const top = (await page.locator("button[aria-expanded]:visible").first().boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2, from.y - 20, { steps: 5 });
@@ -39,7 +41,7 @@ test("moves roles by keyboard and by dragging, and the resume follows", async ({
   // The new order shows at once; reload only once it's saved.
   await page.waitForLoadState("networkidle");
   await page.reload();
-  expect(await roles(page)).toEqual(["Product Designer", "UX Designer", "Senior Product Designer"]);
+  await expect.poll(() => roles(page)).toEqual(["Product Designer", "UX Designer", "Senior Product Designer"]);
 
   await page.goto("/resume");
   const resume = await page.getByRole("article", { name: "Resume" }).textContent();

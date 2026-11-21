@@ -24,39 +24,49 @@ export function coreTitle(title: string): string {
     .trim();
 }
 
+/** Engineering titles (jobauto fork): a data or analytics engineer asks for her tools, but isn't her job. */
+const ENGINEERING = /\b(engineer(?:ing)?|developer|entwickler(?:in)?|ingenieur(?:in)?|programmer|programmierer(?:in)?|devops)\b/i;
+
 /** Whether `text` holds `term` as words: "EMIR" in "EMIR-Meldungen", not in "Emirates". */
 function holds(text: string, term: string): boolean {
   return ` ${text} `.includes(` ${term} `);
 }
 
-export type HiddenTitle = { title: string; postings: number };
+export type HiddenTitle = { title: string; employers: number };
 
 /**
- * The titles, most frequent first, of postings that ask for at least two of
- * `terms` (her skills and her field's words), seen in at least two postings,
- * that none of `searched` covers. Each job counts once.
+ * The titles, used by the most employers first, of postings that ask for at
+ * least two of `terms` (her skills and her field's words), used by at least
+ * two employers, that none of `searched` covers. Each employer counts once,
+ * so one employer's own title posted five times isn't a title employers
+ * use; postings without an employer count as one. Engineering titles are
+ * left out (jobauto fork).
  */
 export function hiddenTitles(
-  postings: readonly { title: string; description: string }[],
+  postings: readonly { title: string; description: string; company: string }[],
   terms: readonly string[],
   searched: readonly string[],
   { limit = 8, min = 2 }: { limit?: number; min?: number } = {},
 ): HiddenTitle[] {
   const wanted = [...new Set(terms.map(normalText).filter((term) => term.length > 2))];
   const covered = searched.map(normalText).filter(Boolean);
-  const counts = new Map<string, { title: string; postings: number }>();
+  const counts = new Map<string, { title: string; employers: Set<string> }>();
   for (const posting of postings) {
     const text = normalText(`${posting.title} ${posting.description}`);
     if (wanted.filter((term) => holds(text, term)).length < 2) continue;
     const title = coreTitle(posting.title);
     const key = normalText(title);
-    if (key.length < 4 || key.split(" ").length > 5) continue;
+    if (key.length < 4 || key.split(" ").length > 5 || ENGINEERING.test(title)) continue;
     if (covered.some((phrase) => ` ${key} `.includes(` ${phrase} `) || ` ${phrase} `.includes(` ${key} `))) continue;
-    const entry = counts.get(key) ?? { title, postings: 0 };
-    entry.postings += 1;
+    const entry = counts.get(key) ?? { title, employers: new Set<string>() };
+    entry.employers.add(normalText(posting.company));
     counts.set(key, entry);
   }
-  return [...counts.values()].filter((entry) => entry.postings >= min).sort((a, b) => b.postings - a.postings || a.title.localeCompare(b.title)).slice(0, limit);
+  return [...counts.values()]
+    .map(({ title, employers }) => ({ title, employers: employers.size }))
+    .filter((entry) => entry.employers >= min)
+    .sort((a, b) => b.employers - a.employers || a.title.localeCompare(b.title))
+    .slice(0, limit);
 }
 
 /** Her field's own words, added to her skills when the profile is in regulatory reporting. */

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
 import { DocumentKind } from "@/generated/prisma/enums";
-import { loadDocuments } from "@/lib/application-documents";
+import { loadApplication, loadDocuments } from "@/lib/application-documents";
 import { listAttachments } from "@/lib/attachments";
 import { verifyPrintAccess } from "@/lib/pdf/print-access";
 import { printMetadata } from "@/lib/pdf/print-title";
@@ -13,7 +13,7 @@ export async function generateMetadata({ params }: PageProps<"/print/[doc]/[id]"
   const { doc, id } = await params;
   if (doc !== "resume" && doc !== "letter") notFound();
   await verifyPrintAccess(`/print/${doc}/${id}`);
-  return printMetadata(doc === "resume" ? DocumentKind.RESUME : DocumentKind.COVER_LETTER);
+  return printMetadata(doc === "resume" ? DocumentKind.RESUME : DocumentKind.COVER_LETTER, (await loadApplication(id)).language);
 }
 
 /**

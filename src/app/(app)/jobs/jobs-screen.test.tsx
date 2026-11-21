@@ -399,6 +399,15 @@ describe("the results", () => {
     renderScreen({ ...found([posting("a", { state: { ...state, applicationId: "app-1" } })]) });
     expect(within(screen.getByRole("list", { name: "Postings" })).getByText("Applied")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the application" })).toHaveAttribute("href", "/applications/app-1");
+    // One application per posting: no second one started step by step.
+    expect(screen.queryByRole("button", { name: "Start application →" })).not.toBeInTheDocument();
+  });
+
+  it("says Draft ready, not Applied, while the application is a Draft (jobauto fork)", () => {
+    renderScreen({ ...found([posting("a", { state: { ...state, applicationId: "app-1", draft: true } })]) });
+    expect(within(screen.getByRole("list", { name: "Postings" })).getByText("Draft ready")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Postings" })).queryByText("Applied")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the draft" })).toHaveAttribute("href", "/applications/app-1");
   });
 
   it("says when nothing was found", () => {
@@ -609,19 +618,37 @@ describe("search words from the profile, in the form (jobauto fork)", () => {
     expect(screen.queryByRole("group", { name: "Titles employers use for your skills" })).not.toBeInTheDocument();
   });
 
-  it("offers the titles employers use for her skills as one-click search words", async () => {
-    renderScreen({ alsoAdvertised: [{ title: "Middle Office Specialist", postings: 3 }] });
+  it("shows all the profile's search words, by group, one click each: their one place, which Profile links to", async () => {
+    renderScreen({
+      suggestions: ["Financial Analyst"],
+      wordGroups: [
+        { title: "Job titles", words: [{ text: "Financial Analyst", why: "Your latest role" }, { text: "Finanzanalyst", why: "In German" }] },
+        { title: "Specialties", words: [{ text: "EMIR Refit", why: "Your headline" }] },
+      ],
+    });
+    expect(screen.queryByRole("group", { name: "Specialties" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "All search words" }));
+    expect(within(screen.getByRole("group", { name: "Job titles" })).getAllByRole("button").map((button) => button.textContent)).toEqual(["Financial Analyst", "Finanzanalyst"]);
+    await userEvent.click(within(screen.getByRole("group", { name: "Specialties" })).getByRole("button", { name: "EMIR Refit" }));
+    expect(screen.getByLabelText("What")).toHaveValue("EMIR Refit");
+    expect(runJobSearch).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Fewer words" }));
+    expect(screen.queryByRole("group", { name: "Specialties" })).not.toBeInTheDocument();
+  });
+
+  it("offers the titles employers use for her skills as one-click search words, with how many employers use each", async () => {
+    renderScreen({ alsoAdvertised: [{ title: "Middle Office Specialist", employers: 3 }] });
     const group = screen.getByRole("group", { name: "Titles employers use for your skills" });
-    await userEvent.click(within(group).getByRole("button", { name: "Middle Office Specialist 3" }));
+    await userEvent.click(within(group).getByRole("button", { name: /^Middle Office Specialist 3 ?employers$/ }));
     expect(screen.getByLabelText("What")).toHaveValue("Middle Office Specialist");
     expect(runJobSearch).not.toHaveBeenCalled();
   });
 });
 
 describe("what a search uses of the portals' plans (jobauto fork)", () => {
-  it("counts a search from each portal switched on that has a quota, Jooble's 500 in all among them", () => {
-    const { unmount } = renderScreen({ sources: ["JSEARCH", "JOOBLE", "ARBEITSAGENTUR"] });
-    expect(screen.getByText("Uses 1 search each from JSearch and Jooble")).toBeInTheDocument();
+  it("counts a search from each portal switched on that has a quota", () => {
+    const { unmount } = renderScreen({ sources: ["JSEARCH", "SERPAPI", "ARBEITSAGENTUR"] });
+    expect(screen.getByText("Uses 1 search each from JSearch and SerpApi")).toBeInTheDocument();
     unmount();
     renderScreen({ sources: ["ARBEITSAGENTUR"] });
     expect(screen.getByText("No search quota used")).toBeInTheDocument();
@@ -823,13 +850,13 @@ describe("what the job agent found (E22-8)", () => {
   });
 
   it("prepares a draft from a posting it scored, and links to one it wrote", async () => {
-    vi.mocked(prepareAgentDraft).mockResolvedValue({ ok: true, data: { jobId: "draft-job", applicationId: null } });
+    vi.mocked(prepareAgentDraft).mockResolvedValue({ ok: true, data: { jobId: "draft-job", applicationId: null, started: true } });
     const scored = byAgent("a", { candidateId: "c-a", status: "SCORED", applicationId: null });
     const drafted = byAgent("b", { candidateId: "c-b", status: "DRAFTED", applicationId: "app-b" });
     renderScreen({ library: { postings: [scored, drafted], total: 2, more: false } });
-    await userEvent.click(screen.getByRole("button", { name: "Prepare draft" }));
+    await userEvent.click(screen.getByRole("button", { name: "Prepare it for me" }));
     expect(prepareAgentDraft).toHaveBeenCalledWith({ candidateId: "c-a" });
-    expect(await screen.findByRole("button", { name: "Preparing draft…" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Preparing…" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^Designer b/ }));
     expect(screen.getByRole("link", { name: "Review the draft" })).toHaveAttribute("href", "/applications/app-b");
   });
@@ -866,8 +893,8 @@ describe("Positions while scoring is off (jobauto fork)", () => {
   });
 
   it("names the portals with a key that are off, once", () => {
-    render(<JobsScreen {...screenProps} portalsOff={["JSearch", "SerpApi", "Adzuna", "Jooble"]} />);
-    expect(screen.getByText(/You have keys for 4 portals that are off: JSearch, SerpApi, Adzuna, Jooble\. Switch them on in/)).toBeInTheDocument();
+    render(<JobsScreen {...screenProps} portalsOff={["JSearch", "SerpApi", "Adzuna"]} />);
+    expect(screen.getByText(/You have keys for 3 portals that are off: JSearch, SerpApi, Adzuna\. Switch them on in/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
   });
 });

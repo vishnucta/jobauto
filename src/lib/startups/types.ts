@@ -16,6 +16,25 @@ export const STARTUP_SOURCE_INFO: Record<StartupSource, { name: string; kind: st
   LICENCE: { name: "ESMA registers", kind: "New licence" },
 };
 
+/**
+ * Which sources a refresh asks (setting `startupSources`, jobauto fork). In
+ * this fork YC and Hacker News start off: their startups are tech companies,
+ * noise for work in finance. What they found before stays readable.
+ */
+export const startupSourcesSchema = z.object({ YC: z.boolean().catch(false), HN: z.boolean().catch(false), LICENCE: z.boolean().catch(true) });
+export type StartupSources = z.infer<typeof startupSourcesSchema>;
+export const DEFAULT_STARTUP_SOURCES: StartupSources = { YC: false, HN: false, LICENCE: true };
+
+/** The sources switched on, in their order. */
+export const sourcesOn = (sources: StartupSources): StartupSource[] => STARTUP_SOURCES.filter((source) => sources[source]);
+
+/** What each source is, in the Sources editor and the bar's chips. */
+export const STARTUP_SOURCE_LABELS: Record<StartupSource, { chip: string; about: string }> = {
+  YC: { chip: "YC job posts", about: "Y Combinator startups' job posts. Mostly tech companies." },
+  HN: { chip: "HN “Who is hiring?”", about: "This month's thread on Hacker News. Mostly tech companies, many remote." },
+  LICENCE: { chip: "ESMA new licences", about: "Investment firms and crypto-asset providers newly licensed in Germany, from ESMA's public registers. Their reporting is still to set up." },
+};
+
 export type StartupStatusName = "NEW" | "SAVED" | "CONTACTED" | "DISMISSED";
 
 /** What an address is for: an application address, the founders', a general one, or someone's own. */

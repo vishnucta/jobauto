@@ -7,7 +7,7 @@ import { logServerError } from "@/lib/log";
 import { emit } from "@/lib/notifications/notify";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
-import { saveSettings } from "@/lib/settings-data";
+import { loadSettings, saveSettings } from "@/lib/settings-data";
 
 import { SourceError } from "./http";
 import { placeOf } from "./place";
@@ -15,13 +15,15 @@ import { fetchHnStartups } from "./sources/hn";
 import { fetchLicensedFirms } from "./sources/licences";
 import { fetchYcStartups } from "./sources/yc";
 import { lookUpStartup, rescoreStartups, sweepStartups, upsertStartups } from "./store";
-import { STARTUP_SOURCE_INFO, startupsRefreshSchema, type FoundStartup, type StartupSource, type StartupsRefresh } from "./types";
+import { sourcesOn, STARTUP_SOURCE_INFO, startupsRefreshSchema, type FoundStartup, type StartupSource, type StartupsRefresh } from "./types";
 
 // "Refresh" on the Startups screen (#222), and once a day while the screen
-// is in use: asks every source what's new (YC, Hacker News, and ESMA's
-// registers for firms newly licensed in Germany), keeps it, scores it, and looks
+// is in use: asks every source switched on what's new (YC, Hacker News, and
+// ESMA's registers for firms newly licensed in Germany; in this fork only
+// ESMA's until she switches the others on), keeps it, scores it, and looks
 // for role addresses on the best new matches' own sites. One source failing
-// doesn't stop the other; what happened is kept for the screen.
+// doesn't stop the other; what happened is kept for the screen. A source
+// switched off isn't asked, and what it found before stays.
 
 export const STARTUPS_JOB_KEY = "startups-refresh";
 /** Sites read for addresses per refresh: the best matches not checked yet. */
@@ -29,20 +31,23 @@ const SITE_LOOKUPS = 12;
 /** Different sites read at once; each site's own pages are read one at a time. */
 const SITE_CONCURRENCY = 4;
 
-/** Runs both sources, keeps what they found, and looks up addresses for the best new startups. */
+/** Runs the sources switched on, keeps what they found, and looks up addresses for the best new startups. */
 export async function refreshStartups(
   step: (name: string) => Promise<void> = async () => {},
   signal: AbortSignal = new AbortController().signal,
   now = new Date(),
 ): Promise<StartupsRefresh> {
-  const place = placeOf((await loadProfile()).basics);
-  const sources: { source: StartupSource; fetch: () => Promise<FoundStartup[]> }[] = [
-    { source: "YC", fetch: () => fetchYcStartups(signal) },
-    { source: "HN", fetch: () => fetchHnStartups(place, signal) },
-    { source: "LICENCE", fetch: () => fetchLicensedFirms(signal, now) },
-  ];
+  const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+  const place = placeOf(profile.basics);
+  const fetchers: Record<StartupSource, () => Promise<FoundStartup[]>> = {
+    YC: () => fetchYcStartups(signal),
+    HN: () => fetchHnStartups(place, signal),
+    LICENCE: () => fetchLicensedFirms(signal, now),
+  };
+  const asked = sourcesOn(settings.startupSources);
+  const sources = asked.map((source) => ({ source, fetch: fetchers[source] }));
 
-  await step("Asking Y Combinator, Hacker News and ESMA's registers");
+  await step(asked.length > 0 ? `Asking ${sourceNames(asked)}` : "No source is switched on");
   const results = await Promise.allSettled(sources.map((entry) => entry.fetch()));
   signal.throwIfAborted();
   const outcomes = results.map((result, index) => {
@@ -74,7 +79,7 @@ export async function refreshStartups(
   }
   // Ones this refresh didn't find again are scored against today's profile too.
   await rescoreStartups(now);
-  await sweepStartups(now);
+  await sweepStartups(now, asked);
 
   await step("Looking for application addresses on their own sites");
   const toCheck = await prisma.startup.findMany({
@@ -98,6 +103,12 @@ export async function refreshStartups(
   const result: StartupsRefresh = { at: now.toISOString(), added, sources: outcomes, emailsFound };
   await saveSettings({ startupsLastRefresh: result });
   return result;
+}
+
+/** "Y Combinator, Hacker News and ESMA registers", or fewer. */
+function sourceNames(sources: readonly StartupSource[]): string {
+  const names = sources.map((source) => STARTUP_SOURCE_INFO[source].name);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
 }
 
 export const refreshStartupsJob = defineJob({

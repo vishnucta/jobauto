@@ -3,7 +3,6 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { demoResumeUnits } from "@/lib/demo-profile";
 import { readPostingJob } from "@/lib/jobs/read-posting";
 import { writeDocumentsJob } from "@/lib/jobs/write-documents";
-import { saveSettings } from "@/lib/settings-data";
 import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
@@ -96,19 +95,11 @@ describe("a draft asked for from Claude chat (#221)", () => {
   });
 });
 
-describe("experiments (jobauto fork)", () => {
-  it("gives each new application of a running experiment the version with fewer so far, and none without one", async () => {
-    const run = async (n: number) => {
-      const job = await prisma().job.create({ data: { type: "connector-draft", status: "RUNNING", input: {} } });
-      const { applicationId } = await connectorDraftJob.run({ posting: `Analyst ${n} at Acme.`, postingUrl: "", note: "", postingId: null, profileId: null }, { id: job.id, step: async () => {}, signal: new AbortController().signal });
-      return prisma().application.findUniqueOrThrow({ where: { id: applicationId }, select: { experiment: true, arm: true } });
-    };
-    expect(await run(0)).toEqual({ experiment: null, arm: null });
-    await saveSettings({ experiment: { name: "Letter language", a: "English letter", b: "German letter", startedAt: "2026-11-20T10:00:00.000Z" } });
-    expect([await run(1), await run(2), await run(3)]).toEqual([
-      { experiment: "Letter language", arm: "A" },
-      { experiment: "Letter language", arm: "B" },
-      { experiment: "Letter language", arm: "A" },
-    ]);
+describe("experiments, removed (jobauto fork)", () => {
+  it("gives a new application no version, even with an old experiment's setting still saved", async () => {
+    await prisma().setting.create({ data: { key: "experiment", value: JSON.stringify({ name: "Letter language", a: "English letter", b: "German letter", startedAt: "2026-11-20T10:00:00.000Z" }) } });
+    const job = await prisma().job.create({ data: { type: "connector-draft", status: "RUNNING", input: {} } });
+    const { applicationId } = await connectorDraftJob.run({ posting: "Analyst at Acme.", postingUrl: "", note: "", postingId: null, profileId: null }, { id: job.id, step: async () => {}, signal: new AbortController().signal });
+    expect(await prisma().application.findUniqueOrThrow({ where: { id: applicationId }, select: { experiment: true, arm: true } })).toEqual({ experiment: null, arm: null });
   });
 });

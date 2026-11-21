@@ -18,7 +18,9 @@ vi.mock("@/lib/prisma", async () => {
   db.client = createTestClient();
   return { prisma: db.client };
 });
-vi.mock("@/lib/env", () => ({ env: { DOSSIER_SECRET: "a".repeat(32) } }));
+// The catalog is off in this fork unless switched on; these tests read it.
+const config = vi.hoisted(() => ({ DOSSIER_SECRET: "a".repeat(32), DOSSIER_PORTAL_CATALOG: "on" as "on" | "off" | undefined }));
+vi.mock("@/lib/env", () => ({ env: config }));
 const sent = vi.hoisted(() => ({ events: [] as { name: string; data: unknown }[] }));
 vi.mock("@/lib/notifications/notify", () => ({
   emit: vi.fn(async (name: string, data: unknown) => {
@@ -64,6 +66,20 @@ beforeEach(async () => {
   await loadInstalledPortals();
 });
 afterAll(() => prisma().$disconnect());
+
+describe("the portal catalog in this fork (jobauto)", () => {
+  it("asks nothing while DOSSIER_PORTAL_CATALOG isn't on, not even for Browse portals", async () => {
+    config.DOSSIER_PORTAL_CATALOG = undefined;
+    const fetchImpl = vi.fn(async () => new Response("{}"));
+    try {
+      expect(await readCatalog({ fetchImpl, base: "https://api.example/v1" })).toBe("skipped");
+      expect(await readCatalog({ fetchImpl, base: "https://api.example/v1", force: true })).toBe("skipped");
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      config.DOSSIER_PORTAL_CATALOG = "on";
+    }
+  });
+});
 
 describe("the portal catalog (E23-2)", () => {
   it("leaves out an entry that doesn't fit, or whose config this Dossier can't read", () => {

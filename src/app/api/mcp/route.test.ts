@@ -11,7 +11,8 @@ vi.mock("@/lib/profiles", () => ({
   loadProfileLevels: async () => ({ from: "mid", to: "senior" }),
   loadProfileWorkplace: async () => ({ workplace: (await import("@/lib/profile-workplace")).DEFAULT_WORKPLACE, seen: true }),
 }));
-const db = vi.hoisted(() => ({ postingSearch: { findUnique: vi.fn() }, postingFind: { findMany: vi.fn() }, postingScore: { upsert: vi.fn() } }));
+// Her German (the postings' German line, herGerman): none listed.
+const db = vi.hoisted(() => ({ postingSearch: { findUnique: vi.fn() }, postingFind: { findMany: vi.fn() }, postingScore: { upsert: vi.fn() }, language: { findMany: vi.fn(async () => []) } }));
 vi.mock("@/lib/prisma", () => ({ prisma: db }));
 vi.mock("@/lib/ai/config", () => ({ isAiUsable: async () => false }));
 vi.mock("@/lib/profile-data", async () => {
@@ -118,8 +119,6 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "add_suggested_recruiters",
       "cancel_task",
       "check_careers_pages",
-      "check_draft",
-      "check_for_updates",
       "check_inbox",
       "check_resume",
       "check_task",
@@ -131,7 +130,6 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "draft_recruiter_message",
       "edit_document",
       "edit_profile_items",
-      "export_data",
       "export_pdf",
       "fill_apply_page",
       "find_free_slots",
@@ -160,7 +158,6 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "list_postings",
       "list_recruiters",
       "list_startups",
-      "list_themes",
       "more_jobs",
       "prepare_call",
       "prepare_practice",
@@ -176,25 +173,26 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "rewrite_in_language",
       "save_application",
       "save_apply_answers",
+      "save_custom_section",
       "save_email_reply",
       "save_job_scores",
       "save_note",
       "save_profile_entry",
-      "save_theme",
       "score_with_dossier",
       "search_jobs",
       "send_application_email",
       "send_email_reply",
       "set_application_status",
-      "set_base_theme",
       "set_document_look",
       "set_profile_levels",
       "set_recruiter_status",
       "settle_apply",
+      "settle_message_draft",
       "snooze_recruiter",
       "sort_profile_entries",
       "start_apply",
       "test_connection",
+      "tick_getting_ready",
       "undo_status_change",
       "update_application",
       "update_application_details",
@@ -211,11 +209,13 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "update_startup",
       "write_application_email",
       "write_work_sample",
-      "zip_all_pdfs",
     ]);
     // Reading never changes anything, and every tool that sends or deletes says so, for Claude to ask first.
     for (const entry of tools.filter(({ name }) => /^(get|list|read)_/.test(name))) expect(entry.annotations?.readOnlyHint, entry.name).toBe(true);
     for (const entry of tools.filter(({ name }) => /^(send|delete|remove)_/.test(name))) expect(entry.annotations?.destructiveHint, entry.name).toBe(true);
+    // Typing her details into an employer's site can't be taken back, and a portal's test spends a paid search (round 2 of the audit).
+    for (const name of ["start_apply", "fill_apply_page"]) expect(tools.find((entry) => entry.name === name)?.annotations?.destructiveHint, name).toBe(true);
+    expect(tools.find((entry) => entry.name === "test_connection")?.annotations?.readOnlyHint).toBe(false);
   });
 
   it("gives Claude the profile without contact details", async () => {

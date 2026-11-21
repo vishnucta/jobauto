@@ -52,11 +52,14 @@ const LEVEL_WORDS: readonly [Exclude<Level, "NONE" | "NATIVE"> | "PLUS", RegExp]
 const ENGLISH_WORKPLACE =
   /(?:arbeits|unternehmens|konzern|team)sprache\s+(?:ist\s+)?englisch|englisch\s+(?:ist\s+)?(?:unsere|die)\s+(?:arbeits|unternehmens|konzern)sprache|working language (?:is|will be) english|english is (?:our|the) (?:working|company|corporate|business|official) language|(?:company|corporate|business|official) language is english|english[- ]speaking (?:team|environment|company|workplace)/i;
 
+/** The German-speaking region or market ("im deutschsprachigen Raum", DACH), which is about where, not about the language. */
+const GERMAN_SPEAKING_REGION = /\bdeutschsprachig\w*\s+(?:raum|region|markt|märkte|ländern?|gebiet)\b|\bgerman[- ]speaking\s+(?:region|market|countries)\b/gi;
+
 /** Sentences and list items, cut at commas too so "fließend Englisch, Deutsch von Vorteil" reads as two. */
 function clauses(text: string): string[] {
   return text
     .split(/[\n\r•·;]+|(?<=[.!?])\s+|,\s+/)
-    .map((clause) => clause.replace(/\s+/g, " ").trim())
+    .map((clause) => clause.replace(/\s+/g, " ").trim().replace(/^[-–*]\s+/, ""))
     .filter(Boolean);
 }
 
@@ -78,7 +81,7 @@ export function germanNeed(text: string): GermanNeed {
   let optional = false;
   let evidence = "";
   for (const clause of clauses(text)) {
-    if (!MENTIONS_GERMAN.test(clause)) continue;
+    if (!MENTIONS_GERMAN.test(clause.replace(GERMAN_SPEAKING_REGION, ""))) continue;
     const found = LEVEL_WORDS.find(([, words]) => words.test(clause))?.[0];
     if (!found) continue;
     if (found === "PLUS") {
@@ -140,10 +143,7 @@ export function germanExplanation(need: GermanNeed, verdict: GermanVerdict): str
  * German she couldn't follow up in the interview does her no favours.
  */
 export function postingWriteLanguage(adLanguage: string | null | undefined, text: string, german: ProfileGerman): string | null {
-  if (!adLanguage || !/^(german|deutsch)$/i.test(adLanguage.trim())) return adLanguage ?? null;
-  const need = germanNeed(text);
-  if (need.englishWorkplace || need.optional) return "English";
-  return germanVerdict(need, german) === "fits" ? adLanguage : "English";
+  return germanDecision({ text, adLanguage, german }).writeLanguage;
 }
 
 /** The text a posting's German is read from: its title, then its description. */
@@ -156,3 +156,73 @@ export function germanFit(text: string, german: ProfileGerman) {
   return { need, verdict, label: germanLabel(need, verdict), explanation: germanExplanation(need, verdict) };
 }
 export type GermanFit = ReturnType<typeof germanFit>;
+
+/** "your A2", or "the German your profile lists" when it lists none. */
+const yourGerman = (german: ProfileGerman) => (german === "NONE" ? "your profile, which lists no German" : german === "NATIVE" ? "your native German" : `your ${german}`);
+
+/**
+ * The one reading of how much German a job needs against hers (jobauto fork,
+ * audit round 2): what New application's language choice, Ask, the
+ * recruiter's eyes, the documents' default language and the connector all
+ * read, so they can't disagree. `writeLanguage` is the language "the
+ * posting's language" writes in: a German ad gets German documents only
+ * when the job needs German she has (with `onlyWhenFit`, Settings →
+ * Documents); `reason` says why, in a sentence she can act on.
+ */
+export function germanDecision({
+  text,
+  adLanguage,
+  german,
+  onlyWhenFit = true,
+}: {
+  /** The posting's title and text. */
+  text: string;
+  /** The ad's language as the AI read it, e.g. "German". */
+  adLanguage: string | null | undefined;
+  german: ProfileGerman;
+  /** Settings' "German only when the job needs German you have"; on unless said. */
+  onlyWhenFit?: boolean;
+}) {
+  const fit = germanFit(text, german);
+  const { need, verdict } = fit;
+  const germanAd = Boolean(adLanguage && /^(german|deutsch)$/i.test(adLanguage.trim()));
+  const english = onlyWhenFit && germanAd && (need.englishWorkplace || need.optional || verdict !== "fits");
+  // A quoted sentence ends the reason; else a full stop does.
+  const quoted = need.evidence ? `: “${need.evidence}”` : ".";
+  const reason = need.englishWorkplace
+    ? `The team works in English${quoted}`
+    : need.optional
+      ? `German is only a plus${quoted}`
+      : need.implied
+        ? `The ad is written in German and names no level, so expect about B2 at work${verdict === "fits" ? "." : `, more than ${yourGerman(german)}.`}`
+        : need.level
+          ? verdict === "fits"
+            ? `The ad asks for German you have${quoted}`
+            : `The ad asks for more German (${need.level}) than ${yourGerman(german)}${quoted}`
+          : need.adLanguage === "English"
+            ? "The ad is in English and asks for no German."
+            : "";
+  // The same, in a few words, after "English:" on the language choice.
+  const because = need.englishWorkplace
+    ? "the team works in English"
+    : need.optional
+      ? "German is only a plus"
+      : verdict === "fits"
+        ? ""
+        : need.implied
+          ? `the ad expects about B2 German, more than ${yourGerman(german)}`
+          : `the ad asks for more German than ${yourGerman(german)}`;
+  return {
+    ...fit,
+    because,
+    /** The language "the posting's language" writes in. */
+    writeLanguage: english ? "English" : (adLanguage ?? null),
+    /** The German rule turned a German ad into English documents. */
+    toEnglish: english,
+    /** One sentence why, or "" when the posting says nothing about German. */
+    reason,
+    /** The job needs more German than she has, whatever the documents' language. */
+    below: verdict !== "fits",
+  };
+}
+export type GermanDecision = ReturnType<typeof germanDecision>;

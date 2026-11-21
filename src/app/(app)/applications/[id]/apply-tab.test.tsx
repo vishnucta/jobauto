@@ -7,7 +7,7 @@ import { DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import type { ApplyAttemptView, ApplyTabData } from "@/lib/apply/view";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { fillThisPage, saveApplyBrowser, startApply, testApplyBrowser } from "./apply-actions";
+import { fillThisPage, startApply } from "./apply-actions";
 import { ApplyTab } from "./apply-tab";
 
 // The Apply tab's run card and its "Fill this page" button (jobauto fork).
@@ -15,9 +15,6 @@ import { ApplyTab } from "./apply-tab";
 vi.mock("./apply-actions", () => ({
   startApply: vi.fn(async () => ({ ok: true, data: { jobId: "job-1", attemptId: "run-2" } })),
   fillThisPage: vi.fn(async () => ({ ok: true, data: { jobId: "job-9", attemptId: "run-1" } })),
-  saveApplyAnswers: vi.fn(async () => ({ ok: true, data: null })),
-  saveApplyBrowser: vi.fn(async () => ({ ok: true, data: null, toast: "Saved." })),
-  testApplyBrowser: vi.fn(async () => ({ ok: true, data: { version: "Chrome/142.0.7444.60" } })),
   settleApplyAttempt: vi.fn(async () => ({ ok: true, data: null })),
 }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn() }));
@@ -85,49 +82,56 @@ beforeEach(() => {
   jobs.listeners.clear();
 });
 
-describe("The warning at the top", () => {
-  it("comes first, and says where the window opens, what job boards may stop, and to check before Send", () => {
-    renderTab();
+const form = { kind: "web", url: "https://jobs.ledgerly.example/apply/1", host: "jobs.ledgerly.example", atsLabel: "Personio", account: false, autoSubmitOk: false, board: false } as const;
+
+describe("One send path: the assistant only for a form (audit round 2)", () => {
+  it("shows the assistant and its warning for the employer's own form, without the job-board line", () => {
+    renderTab(tabData({ plan: form, attempts: [] }));
     expect(screen.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Before you use it");
     const warning = card("Before you use it");
-    expect(warning.getByText(/The browser window opens on the computer the app runs on/)).toBeInTheDocument();
-    expect(warning.getByText(/may forbid automated tools/)).toBeInTheDocument();
     expect(warning.getByText(/Check every field, and every answer the AI wrote/)).toBeInTheDocument();
-    expect(warning.queryByText(/the server controls it/)).not.toBeInTheDocument();
+    expect(warning.queryByText(/may forbid automated tools/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open and fill it in" })).toBeInTheDocument();
   });
 
-  it("adds that the server controls the laptop's Chrome once one is connected", () => {
-    renderTab(tabData({ browserAddress: "http://100.101.102.103:9222" }));
-    expect(card("Before you use it").getByText(/the server controls it/)).toBeInTheDocument();
-  });
-});
-
-describe("Browser window", () => {
-  it("opens on the computer the app runs on until a laptop's Chrome is saved", () => {
-    renderTab();
-    const panel = card("Browser window");
-    expect(panel.getByText(/The window opens on the computer the app runs on/)).toBeInTheDocument();
-    expect(panel.getByRole("button", { name: "Save" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(/a Chrome window on the computer the app runs on/)).toBeInTheDocument();
+  it("says where the window opens, and links to Settings to change it rather than setting it up here", () => {
+    const { unmount } = renderTab(tabData({ plan: form, attempts: [] }));
+    expect(screen.getByText(/The window opens on the computer the app runs on\. On a server with no screen/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Change where it opens" })).toHaveAttribute("href", "/settings?section=answers#apply-browser");
+    expect(screen.queryByLabelText("Your laptop's Chrome")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tailscale/)).not.toBeInTheDocument();
+    unmount();
+    renderTab(tabData({ plan: form, attempts: [], browserAddress: "http://100.101.102.103:9222" }));
+    expect(screen.getByText(/The window opens in the Chrome on your laptop, at http:\/\/100\.101\.102\.103:9222\./)).toBeInTheDocument();
   });
 
-  it("saves the laptop's address, and tests it", async () => {
+  it("says to apply on a job board by hand, with the assistant one click away", async () => {
     const user = userEvent.setup();
-    renderTab();
-    const panel = card("Browser window");
-    await user.type(panel.getByLabelText("Your laptop's Chrome"), " 100.101.102.103:9222 ");
-    await user.click(panel.getByRole("button", { name: "Test" }));
-    expect(testApplyBrowser).toHaveBeenCalledWith({ address: "100.101.102.103:9222" });
-    expect(toast).toHaveBeenLastCalledWith("Chrome/142.0.7444.60 answered. It's ready.");
-    await user.click(panel.getByRole("button", { name: "Save" }));
-    expect(saveApplyBrowser).toHaveBeenCalledWith({ id: "app-1", address: "100.101.102.103:9222" });
-    expect(router.refresh).toHaveBeenCalled();
+    renderTab(tabData({ attempts: [] }));
+    const board = card("Apply on the job board");
+    expect(board.getByText(/upload the Bewerbungsmappe/)).toBeInTheDocument();
+    expect(board.getByRole("link", { name: /Open the posting/ })).toHaveAttribute("href", "https://www.learn4good.com/jobs/1/");
+    expect(screen.queryByRole("heading", { name: "Before you use it" })).not.toBeInTheDocument();
+    await user.click(board.getByRole("button", { name: "Try the apply assistant anyway" }));
+    expect(card("Before you use it").getByText(/may forbid automated tools/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open and fill it in" })).toBeInTheDocument();
   });
 
-  it("says the window opens on the laptop once one is saved", () => {
-    renderTab(tabData({ browserAddress: "http://100.101.102.103:9222" }));
-    expect(card("Browser window").getByText(/opens in the Chrome on your laptop, at http:\/\/100.101.102.103:9222/)).toBeInTheDocument();
-    expect(screen.getByText(/I open it in the Chrome on your laptop/)).toBeInTheDocument();
+  it("keeps the assistant on a job board where it has run before", () => {
+    renderTab();
+    expect(screen.getByRole("heading", { name: "Before you use it" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try the apply assistant anyway" })).not.toBeInTheDocument();
+  });
+
+  it("shows no assistant, browser warning or bot check for an email posting, and names Gmail only when it sends", () => {
+    const email = tabData({ plan: { kind: "email", to: "jobs@ledgerly.example" }, attempts: [] });
+    const { unmount } = renderTab(email);
+    expect(screen.queryByRole("heading", { name: "Before you use it" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/browser window|bot check/i)).not.toBeInTheDocument();
+    expect(card("Apply by email").getByText(/to send from your own mail with your PDFs attached/)).toBeInTheDocument();
+    unmount();
+    render(<ApplyTab applicationId="app-1" data={email} onGoToEmail={() => {}} gmailSends />);
+    expect(card("Apply by email").getByText(/and sends it with your PDFs attached/)).toBeInTheDocument();
   });
 });
 
@@ -255,5 +259,19 @@ describe("what was filled in, by step of the form", () => {
     const waiting = card("Waiting for you");
     expect(waiting.getByText(/What I filled in \(2\)/)).toBeInTheDocument();
     expect(waiting.queryAllByRole("heading", { level: 4 })).toHaveLength(0);
+  });
+});
+
+describe("Your standard answers (jobauto fork)", () => {
+  it("shows them read-only, with the salary guide beside the salary and a link to edit them in Settings", () => {
+    renderTab(tabData({ answers: { ...DEFAULT_APPLY_ANSWERS, salary: "55.000 € brutto/Jahr", startDate: "sofort", confirmed: true }, salaryGuide: "€54,000–€59,000 a year (middle €58,000), from 12 jobs like this one" }));
+    const panel = card("Your standard answers");
+    expect(panel.getByText("Used for every application", { exact: false })).toBeInTheDocument();
+    expect(panel.getByRole("link", { name: "Edit them in Settings" })).toHaveAttribute("href", "/settings?section=answers");
+    expect(panel.getByText("55.000 € brutto/Jahr")).toBeInTheDocument();
+    expect(panel.getByText("Postings like this one: €54,000–€59,000 a year (middle €58,000), from 12 jobs like this one.")).toBeInTheDocument();
+    expect(panel.getAllByText("Not filled in")).toHaveLength(4);
+    expect(panel.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(panel.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument();
   });
 });

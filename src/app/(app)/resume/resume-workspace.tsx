@@ -21,7 +21,7 @@ import type { ResumeCheck } from "@/lib/resume-check";
 import { saveFile } from "@/lib/save-file";
 import type { SectionLayout } from "@/lib/resume-sections";
 import { parseThemeFile, themeFile, themeFileName } from "@/lib/theme-file";
-import { FIT_LEVELS, hasSidebar, PAPER_SIZES, type ThemeData } from "@/lib/themes";
+import { FIT_LEVELS, hasSidebar, PAPER_SIZES, withoutSidebar, type ThemeData } from "@/lib/themes";
 
 import { ProfileIdProvider } from "../profile/profile-id";
 import { ProfileSwitcher, type ProfileChoice } from "../profile/profile-switcher";
@@ -260,6 +260,11 @@ export function ResumeWorkspace({
       <div className="@container flex flex-1 flex-wrap border-t border-line">
         <DocumentPreview
           label={theme.name}
+          // On a phone, the same resume to read (jobauto fork).
+          reading={{
+            title: "Base resume",
+            document: <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} sections={sections} layout={withoutSidebar(theme.layout)} />,
+          }}
           meta={(pages) => `${PAPER_SIZES[paper].label} · ${pages} ${pages === 1 ? "page" : "pages"}${fit > 0 ? " · squeezed to fit" : ""}`}
           onPages={onPages}
           notice={() =>

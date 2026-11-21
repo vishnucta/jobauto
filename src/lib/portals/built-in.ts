@@ -2,7 +2,6 @@ import { portalConfigSchema, type PortalConfig } from "./format";
 import adzuna from "./built-in/adzuna.json";
 import arbeitsagentur from "./built-in/arbeitsagentur.json";
 import freehire from "./built-in/freehire.json";
-import jooble from "./built-in/jooble.json";
 import jsearch from "./built-in/jsearch.json";
 import serpapi from "./built-in/serpapi.json";
 
@@ -14,14 +13,14 @@ import serpapi from "./built-in/serpapi.json";
 // installs through the catalog between releases. Their environment variables
 // are mapped in code, in src/lib/job-search/config.ts, never in the configs.
 //
-// SerpApi and Jooble (jobauto fork) are built in too, but not in the public
-// repository, and `yarn portals-snapshot` leaves them be: what they need
-// can't be said in a config (SerpApi asks Google in the country's language
-// and reads the ages it writes in it; Jooble is asked by POST, with the key
-// in the path), so they run on code of their own (src/lib/portals/adapters.ts),
-// and their configs say what Settings and Find work show.
+// SerpApi (jobauto fork) is built in too, but not in the public repository,
+// and `yarn portals-snapshot` leaves it be: what it needs can't be said in a
+// config (it asks Google in the country's language and reads the ages it
+// writes in it), so it runs on code of its own (src/lib/portals/adapters.ts),
+// and its config says what Settings and Find work show. The fork's Jooble
+// was removed: it answered a search in Hamburg with jobs in the US.
 
-export const BUILT_IN_PORTALS: readonly PortalConfig[] = [jsearch, serpapi, adzuna, jooble, freehire, arbeitsagentur].map((config) => portalConfigSchema.parse(config));
+export const BUILT_IN_PORTALS: readonly PortalConfig[] = [jsearch, serpapi, adzuna, freehire, arbeitsagentur].map((config) => portalConfigSchema.parse(config));
 
 const BY_ID = new Map(BUILT_IN_PORTALS.map((config) => [config.id, config]));
 

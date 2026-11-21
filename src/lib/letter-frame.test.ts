@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { demoLetterUnits, demoProfile } from "@/lib/demo-profile";
 import { documentLabels } from "@/lib/document-labels";
 
-import { defaultFrame, isFrameUnit, isParagraph, letterDate, letterText, newFrame, withFrame, withoutPrivateParts } from "./letter-frame";
+import { defaultFrame, draftLetterUnits, isFrameUnit, isParagraph, letterDate, letterText, newFrame, withFrame, withoutClosingComma, withoutPrivateParts, withSenderFromProfile } from "./letter-frame";
 
 const { basics } = demoProfile();
 const context = { basics, company: "Ledgerly", location: "Amsterdam", date: new Date(Date.UTC(2026, 9, 3)), dateFormat: "DAY_MONTH_YEAR" as const };
@@ -45,8 +45,35 @@ describe("the letter's frame (E8-11)", () => {
     expect(letterDate(context.date, "DAY_MONTH_YEAR", "not a tag!")).toBe("3 October 2026");
   });
 
-  it("frames a new letter with the profile's sender and the date in its language", () => {
-    expect(newFrame({ ...context, lang: "nl" })).toMatchObject({ date: "3 oktober 2026", signature: "Jane Doe", greeting: "Dear Ledgerly team," });
+  it("frames a new letter with the date in its language, and leaves the sender to the profile (jobauto fork)", () => {
+    const frame = newFrame({ ...context, lang: "nl" });
+    expect(frame).toEqual({ date: "3 oktober 2026", recipient: "Ledgerly · Hiring team\nAmsterdam", greeting: "Dear Ledgerly team," });
+    // Stored, the letter has no sender or signature: drawn, they're the profile's as it is then.
+    const stored = withFrame(demoLetterUnits(), frame);
+    expect(stored.map((unit) => unit.id)).not.toContain("sender");
+    const moved = { ...basics, phone: "+49 40 1234567", city: "Musterstadt" };
+    const drawn = withFrame(stored, defaultFrame({ ...context, basics: moved }));
+    expect(drawn.find((unit) => unit.id === "sender")?.text).toContain("+49 40 1234567");
+    expect(drawn.find((unit) => unit.id === "signature")?.text).toBe("Jane Doe");
+  });
+
+  it("puts the profile's sender and signature in place of those a letter stored (jobauto fork)", () => {
+    const stored = [{ id: "sender", label: "Sender", text: "Jane Doe\n+49 1111 · Hamburg" }, ...demoLetterUnits(), { id: "signature", label: "Signature", text: "J. Doe" }];
+    const drawn = withSenderFromProfile(stored, defaultFrame({ ...context, basics: { ...basics, phone: "+49 2222" } }));
+    expect(drawn.find((unit) => unit.id === "sender")?.text).toContain("+49 2222");
+    expect(drawn.find((unit) => unit.id === "sender")?.text).not.toContain("+49 1111");
+    expect(drawn.find((unit) => unit.id === "signature")?.text).toBe("Jane Doe");
+    expect(drawn.map((unit) => unit.id)).toEqual(["sender", "paragraph:1", "paragraph:2", "paragraph:3", "paragraph:4", "signature"]);
+  });
+
+  it("draws a German draft's sign-off without a comma, as DIN 5008 has it (jobauto fork)", () => {
+    const stored = [...demoLetterUnits(), { id: "sign-off", label: "Sign-off", text: "Mit freundlichen Grüßen," }];
+    const frame = defaultFrame(context);
+    const signOff = (units: { id: string; text: string }[]) => units.find((unit) => unit.id === "sign-off")?.text;
+    expect(signOff(draftLetterUnits(stored, frame, { german: true }))).toBe("Mit freundlichen Grüßen");
+    expect(signOff(draftLetterUnits(stored, frame, { german: false }))).toBe("Mit freundlichen Grüßen,");
+    expect(withoutClosingComma("Kind regards ,  ")).toBe("Kind regards");
+    expect(draftLetterUnits(stored, frame, { german: true }).map((unit) => unit.id)).toContain("sender");
   });
 
   it("puts every part in reading order, keeping the ones a letter has", () => {

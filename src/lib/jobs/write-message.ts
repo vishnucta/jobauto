@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { Prisma } from "@/generated/prisma/client";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { getAiProvider } from "@/lib/ai";
@@ -70,6 +71,16 @@ export async function keepMessageDraft(applicationId: string, kind: MessageKind,
   const draft = { kind, to: units.success ? emailParts(units.data).to : "", subject, body, writtenWith, at: new Date().toISOString() };
   await prisma.application.update({ where: { id: applicationId }, data: { messageDraft: draft } });
   return draft;
+}
+
+/**
+ * Lets a drafted message go: "I sent it" (sent some other way, so "Quiet
+ * for" starts again from now, decided 17 November) or Discard. False when
+ * the application is gone.
+ */
+export async function letMessageDraftGo(applicationId: string, { sent }: { sent: boolean }): Promise<boolean> {
+  const { count } = await prisma.application.updateMany({ where: { id: applicationId }, data: { messageDraft: Prisma.DbNull, ...(sent ? { contactedAt: new Date() } : {}) } });
+  return count > 0;
 }
 
 /** Drafts one in the background, as the page's buttons do; refused while one is being drafted already. Returns the job's id. */

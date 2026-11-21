@@ -56,10 +56,10 @@ test("the time filter scopes the left zone's figures and is remembered (E9-8, E2
   await expect(funnel.locator("dt", { hasText: "sent" }).locator("xpath=following-sibling::dd")).toHaveText(String(sent));
 });
 
-test("interview dates show in Needs you, and moving to Interview asks for one (E9-9, E28-4)", async ({ page }) => {
+test("interview dates show in Do today, and moving to Interview asks for one (E9-9, E28-4)", async ({ page }) => {
   // The demo's interview is tomorrow.
   await page.goto("/");
-  const needs = page.getByRole("region", { name: "Needs you" });
+  const needs = page.getByRole("region", { name: "Do today" });
   const northstar = needs.getByRole("listitem").filter({ hasText: "Northstar Health" });
   await expect(northstar).toContainText(/Interview\. · tomorrow, \d\d:\d\d/);
   await expect(northstar.getByText(/^tomorrow,/)).toHaveClass(/text-warning/);
@@ -89,7 +89,7 @@ test("interview dates show in Needs you, and moving to Interview asks for one (E
 
 test("the follow-up threshold is a setting (E9-9)", async ({ page }) => {
   await page.goto("/");
-  const needs = page.getByRole("region", { name: "Needs you" });
+  const needs = page.getByRole("region", { name: "Do today" });
   const threshold = needs.getByLabel("Suggest a follow-up after");
   await expect(threshold).toHaveValue("7");
   // Every row, Show all included.

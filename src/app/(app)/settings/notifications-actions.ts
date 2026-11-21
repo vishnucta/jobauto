@@ -4,9 +4,11 @@ import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
 import { CHANNEL_TYPES, configSchemas } from "@/lib/notifications/channels";
-import { EVENT_NAMES } from "@/lib/notifications/events";
-import { sendTest } from "@/lib/notifications/notify";
+import { EVENT_NAMES, onlyEvent } from "@/lib/notifications/events";
+import { anyChannelFor, sendTest } from "@/lib/notifications/notify";
 import { deleteChannel, listDeliveries, regenerateWebhookSecret, resumeChannel, saveChannel, setChannelEvent, setOnlyNew, webhookSecret } from "@/lib/notifications/store";
+import { ntfyTarget } from "@/lib/ntfy-address";
+import { sendDigest } from "@/lib/supporter-digest-data";
 
 // Settings → Notifications (E26, #416–#418): channels, the grid and the
 // delivery log. Each returns what the section shows, never a secret but the
@@ -62,3 +64,21 @@ export const copyWebhookSecret = action(z.object({ id }), async ({ id: channelId
 
 /** A new signing secret; the old one stops working at once. */
 export const regenerateNotificationSecret = action(z.object({ id }), async ({ id: channelId }) => regenerateWebhookSecret(channelId));
+
+// The weekly digest for a supporter (jobauto fork): a Notifications event,
+// delivered to a channel of the supporter's own with only it on.
+
+/** Their ntfy topic becomes a channel named "Supporter" that gets the digest and nothing else. */
+export const addSupporterChannel = action(z.object({ address: z.string().trim().min(1, "Paste their topic's address.").max(500) }), async ({ address }) => {
+  const target = ntfyTarget(address);
+  if (!target) throw new ActionError("That isn't an ntfy topic address, such as https://ntfy.sh/their-topic.");
+  return saveChannel({ type: "NTFY", name: "Supporter", config: target, secret: { action: "keep" }, events: onlyEvent("supporter.digest") });
+});
+
+/** "Send this week's now": the digest as it stands, to the channels that have it on; then the log as it is. */
+export const sendDigestNow = action(z.object({}), async (_input, { toast }) => {
+  if (!(await anyChannelFor("supporter.digest"))) throw new ActionError("No channel gets the weekly digest yet: add the supporter's topic first.");
+  const count = await sendDigest();
+  toast(count === 1 ? "On its way. It should be on their phone in a few seconds." : `On its way to ${count} channels.`);
+  return listDeliveries();
+});

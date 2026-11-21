@@ -54,8 +54,14 @@ export async function register() {
     const { startStartupsSchedule } = await import("@/lib/startups/schedule");
     startStartupsSchedule();
 
-    // The weekly digest for her supporter, while a topic is saved for it.
-    const { startDigestSchedule } = await import("@/lib/supporter-digest-data");
+    // The weekly digest for her supporter, a Notifications event (jobauto fork): its old
+    // ntfy topic becomes the channel Supporter once, then it goes to the channels that have it on.
+    const { moveSupporterAddress, startDigestSchedule } = await import("@/lib/supporter-digest-data");
+    try {
+      if (await moveSupporterAddress()) console.log("Notifications: the supporter digest's ntfy topic is now the channel Supporter in Settings → Notifications.");
+    } catch (error) {
+      logServerError("notifications", error);
+    }
     startDigestSchedule();
 
     // The careers pages the user follows, checked once a day while any are on.

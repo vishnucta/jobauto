@@ -1,8 +1,9 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
-import type { LanguageLevel } from "@/generated/prisma/enums";
+import type { CustomSectionCountsAs, CustomSectionFormat, LanguageLevel } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
+import { rewriteSectionOnDrafts } from "@/lib/custom-section-drafts";
 import { PHOTO_KEY, PHOTO_ON_RESUMES_KEY } from "@/lib/photo";
 import { prisma } from "@/lib/prisma";
 import {
@@ -179,6 +180,30 @@ export async function restoreCertificationEntry(profileId: string, entry: Certif
     create: { ...entry, profileId, sort: await nextSort(prisma.certification, { profileId }) },
     update: {},
   });
+}
+
+export type CustomSectionFields = { title: string; format: CustomSectionFormat; countsAs?: CustomSectionCountsAs };
+
+/** "Add a section" (#298, #338): Extra activities unless it says otherwise (E24-5). Answers with its id. */
+export async function newCustomSection(profileId: string, { title, format, countsAs = "EXTRA_ACTIVITIES" }: CustomSectionFields): Promise<string> {
+  return (await prisma.customSection.create({ data: { profileId, title, format, countsAs }, select: { id: true } })).id;
+}
+
+/**
+ * A section's name, format and what it counts as (E24-5). A blank name isn't
+ * saved: a resume's heading needs one. A new format rewrites the section on
+ * the drafts that hold it. False when the section is gone.
+ */
+export async function saveCustomSectionFields(sectionId: string, { title, format, countsAs }: CustomSectionFields): Promise<boolean> {
+  const before = await prisma.customSection.findUnique({ where: { id: sectionId }, select: { format: true } });
+  if (!before) return false;
+  const section = await prisma.customSection.update({
+    where: { id: sectionId },
+    data: { format, ...(countsAs ? { countsAs } : {}), ...(title.trim() ? { title: title.trim() } : {}) },
+    include: { items: { orderBy: [{ sort: "asc" }, { createdAt: "asc" }] } },
+  });
+  if (before.format !== format) await rewriteSectionOnDrafts(section);
+  return true;
 }
 
 /** "+ Add an item" in a section the user made (#298): at its end, since nothing in it says what's newest. Null when the section is gone. */

@@ -65,6 +65,14 @@ describe("Call prep", () => {
     expect(article).toHaveTextContent("Wie sieht das Team aus?");
   });
 
+  it("lists the sentences to check, each whole (jobauto fork)", () => {
+    const sentences = ["I have worked in Hamburg for 3 years.", "I lead a team of 5."];
+    render(<PrepTab applicationId="app-1" data={{ pack: { ...pack, unverified: sentences }, jobId: null }} aiReady company="Acme" />);
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Check these against your profile before you say them:");
+    expect(within(note).getAllByRole("listitem").map((item) => item.textContent)).toEqual(sentences);
+  });
+
   it("practises one question at a time, with the answer on request", async () => {
     render(<PrepTab applicationId="app-1" data={{ pack, jobId: null }} aiReady company="Acme" />);
     await userEvent.click(screen.getByRole("button", { name: "Practise out loud" }));

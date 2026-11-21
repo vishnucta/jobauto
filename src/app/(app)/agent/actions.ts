@@ -76,13 +76,16 @@ function revalidateAgent() {
 }
 
 /**
- * Prepare draft (E16-5): writes a candidate's draft in the background. A
- * draft under way is reused, and one already made is answered with.
+ * Prepare it for me on the Agent screen (E16-5): writes a candidate's draft
+ * in the background. A draft under way is reused, and one already made (by
+ * the agent, on Positions or from the same link) is answered with.
  */
 export const prepareAgentDraft = action(z.object({ candidateId }), async ({ candidateId }) => {
   const { jobId, applicationId, started } = await startCandidateDraft(candidateId);
   if (started) revalidatePath("/agent");
-  return { jobId, applicationId };
+  // One made already was taken as this posting's (one application per posting): it's in Applications now.
+  else if (applicationId) revalidateAgent();
+  return { jobId, applicationId, started };
 });
 
 /** Approve (E16-5): the draft joins Applications as a Draft. Nothing is sent. */

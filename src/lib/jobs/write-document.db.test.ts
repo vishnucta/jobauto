@@ -53,8 +53,8 @@ describe("writeDocumentJob (#367)", () => {
   it("writes the cover letter an application was created without, with its frame and a first version", async () => {
     await writeDocumentJob.run({ applicationId: "app-1", kind: "COVER_LETTER" }, context);
     const letter = await prisma().document.findUniqueOrThrow({ where: { applicationId_kind: { applicationId: "app-1", kind: "COVER_LETTER" } }, include: { versions: true } });
-    expect(letter.writtenWith).toBe("write-cover-letter@8");
-    expect((letter.units as { id: string }[]).map((unit) => unit.id)).toEqual(["sender", "date", "recipient", "greeting", "paragraph:1", "sign-off", "signature"]);
+    expect(letter.writtenWith).toBe("write-cover-letter@9");
+    expect((letter.units as { id: string }[]).map((unit) => unit.id)).toEqual(["date", "recipient", "greeting", "paragraph:1", "sign-off"]);
     expect(letter.versions.map((version) => version.cause)).toEqual(["WRITTEN"]);
   });
 

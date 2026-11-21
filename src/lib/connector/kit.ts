@@ -4,7 +4,7 @@ import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { unitsSchema } from "@/lib/application-data";
-import { germanNeed, textForGerman, type GermanNeed } from "@/lib/german-need";
+import { germanDecision, germanNeed, profileGerman, textForGerman, type GermanNeed, type ProfileGerman } from "@/lib/german-need";
 import { fullText } from "@/lib/job-search/find";
 import { postingText, type FoundPosting, type ProfileFit, type SearchPortal, type ShownPosting } from "@/lib/job-search/search";
 import { sourceInfo } from "@/lib/job-search/sources";
@@ -78,8 +78,17 @@ export function portalProblems(portals: readonly SearchPortal[]): string[] | und
 /** Whether Show more (more_jobs) has more to ask for: it asks every portal of the search that has a next page. */
 export const hasMore = (portals: readonly SearchPortal[]): boolean => portals.some((portal) => portal.next !== null);
 
-/** A posting as Claude sees it in a list: numbered, without its whole text. */
-export function postingLine(posting: ShownPosting | FoundPosting, number: number) {
+/** Her German, for the German line of each posting (germanDecision, jobauto fork): languages are shared by every profile. */
+export async function herGerman(): Promise<ProfileGerman> {
+  return profileGerman(await prisma.language.findMany({ select: { name: true, level: true } }));
+}
+
+/**
+ * A posting as Claude sees it in a list: numbered, without its whole text.
+ * With her German, its German line is the one reading every screen shows
+ * (germanDecision): what the ad asks for against hers.
+ */
+export function postingLine(posting: ShownPosting | FoundPosting, number: number, german?: ProfileGerman) {
   const state = "state" in posting ? posting.state : null;
   // The other portals the same job was found on (E22-6); its own comes first.
   const alsoOn = state?.foundOn.slice(1).map((found) => sourceInfo(found.portal).name) ?? [];
@@ -99,9 +108,15 @@ export function postingLine(posting: ShownPosting | FoundPosting, number: number
     saved: state?.saved || undefined,
     applied: state?.applicationId ? true : undefined,
     fit: fitLine(state?.score),
-    german: germanLine(germanNeed(textForGerman(posting))),
+    german: german === undefined ? germanLine(germanNeed(textForGerman(posting))) : germanReading(textForGerman(posting), german),
     snippet: posting.description.replace(/\s+/g, " ").slice(0, 280),
   };
+}
+
+/** What the German a posting asks for means for her (germanDecision): "out: The ad asks for more German (C1) than your A2: …"; undefined when it says nothing. */
+function germanReading(text: string, german: ProfileGerman): string | undefined {
+  const decision = germanDecision({ text, adLanguage: null, german });
+  return decision.reason ? `${decision.verdict === "fits" ? "within reach" : decision.verdict === "stretch" ? "a stretch" : "needs more German than she has"}. ${decision.reason}` : undefined;
 }
 
 /** The German a posting asks for, in a few words for Claude to weigh against the profile's; undefined when it names none. */

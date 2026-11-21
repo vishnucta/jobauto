@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState, useTransition, type ReactNode } from "react";
 
+import { NOT_SCORED_ANEW, OlderReasons } from "@/components/fit-details";
 import { FilterChip, FilterChips, listingList, listingPreview, ListingRow, listingScreen, listingSplit, ListingTabs, PreviewBody, PreviewCard, PreviewFacts, PreviewHeader, PreviewReasons, RowTag, SourceBar } from "@/components/listing";
 import { PageHeader } from "@/components/page-header";
 import { ScoreRing } from "@/components/score-ring";
@@ -15,7 +16,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useJob } from "@/hooks/use-job";
 import { AGENT_MAX_SOURCE_REQUESTS_PER_DAY } from "@/lib/agent/limits";
 import type { AgentCandidateView, AgentView } from "@/lib/agent/view";
-import { coversLine, fitWords, withoutPoints } from "@/lib/posting-coverage";
+import { coversLine, factorReason, fitWords, withoutPoints } from "@/lib/posting-coverage";
 import type { ScoringOffNotice } from "@/lib/scoring-off";
 
 import { ScoringOffNotice as ScoringOff } from "../scoring-off-notice";
@@ -109,7 +110,8 @@ export function AgentScreen({
       const result = toastResult(await prepareAgentDraft({ candidateId: candidate.id }));
       if (!result.ok) return;
       if (result.data.applicationId) return router.push(`/applications/${result.data.applicationId}`);
-      toast("Preparing a draft. It shows under Drafts to review once it's ready.");
+      // Followed rather than started: Prepare it for me on Positions writes it (one application per posting).
+      toast(result.data.started === false ? "It's being prepared already, from Positions. It opens from there once it's ready." : "Preparing a draft. It shows under Drafts to review once it's ready.");
       router.refresh();
     });
 
@@ -315,7 +317,8 @@ function AgentPreview({
   onDismiss: () => void;
 }) {
   const headingId = useId();
-  const reasons = [...candidate.reasons.map((text) => ({ text: withoutPoints(text), good: true })), ...candidate.redFlags.map((text) => ({ text: withoutPoints(text), good: false }))];
+  // Each factor for or against by its points; an older score's lines as they are (jobauto fork).
+  const reasons = [...candidate.reasons.map(factorReason), ...candidate.redFlags.map((text) => ({ text: withoutPoints(text), good: false }))];
   const kicker = tab === "drafts" ? `Draft ready · ${candidate.origin}` : tab === "finds" ? `Best find · ${candidate.origin}` : (candidate.why ?? candidate.origin);
   return (
     <section
@@ -341,7 +344,8 @@ function AgentPreview({
             )}
             {tab === "finds" && (
               <Button size="sm" aria-disabled={busy || candidate.draftJobId !== null || undefined} onClick={() => !busy && !candidate.draftJobId && onPrepare()}>
-                {candidate.draftJobId ? "Preparing the draft…" : "Prepare draft"}
+                {/* One name for the one writer, as on Positions (jobauto fork). */}
+                {candidate.draftJobId ? "Preparing…" : "Prepare it for me"}
               </Button>
             )}
             {candidate.url && (
@@ -368,11 +372,15 @@ function AgentPreview({
           <div className="flex items-center gap-3.5">
             <ScoreRing hit={candidate.coverage.hit} total={candidate.coverage.total} size="lg" />
             <div className="flex min-w-0 flex-col gap-0.5">
-              <p className="text-[15px] font-medium text-ink">{candidate.coverage.total === 0 && tab === "skipped" ? "Not scored" : fitWords(candidate.coverage)}</p>
-              <p className="text-meta text-muted">{candidate.coverage.total > 0 ? `${candidate.coverage.hit} of ${candidate.coverage.total} requirements covered` : "No requirements counted"}</p>
+              <p className="text-[15px] font-medium text-ink">
+                {candidate.older ? NOT_SCORED_ANEW : candidate.coverage.total === 0 && tab === "skipped" ? "Not scored" : fitWords(candidate.coverage)}
+              </p>
+              <p className="text-meta text-muted">
+                {candidate.older ? "Score it again in Positions" : candidate.coverage.total > 0 ? `${candidate.coverage.hit} of ${candidate.coverage.total} requirements covered` : "No requirements counted"}
+              </p>
             </div>
           </div>
-          {reasons.length > 0 && <PreviewReasons reasons={reasons} />}
+          {candidate.older ? <OlderReasons lines={[...candidate.reasons, ...candidate.redFlags]} /> : reasons.length > 0 && <PreviewReasons reasons={reasons} />}
         </PreviewCard>
         <PreviewCard label="Facts">
           <PreviewFacts

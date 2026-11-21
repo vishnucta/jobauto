@@ -108,9 +108,9 @@ export function salaryGuide(title: string, postings: readonly { title: string; s
   return { low: round(quantile(sorted, 0.25)), high: round(quantile(sorted, 0.75)), median: round(quantile(sorted, 0.5)), postings: used.length, basis };
 }
 
-/** "€58,000–€72,000 a year (middle €65,000), from 14 jobs like this one". */
-export function describeGuide(guide: SalaryGuide): string {
+/** "€58,000–€72,000 a year (middle €65,000), from 14 jobs like this one"; `alike` names them otherwise, as Settings does: "jobs like “Financial Analyst”". */
+export function describeGuide(guide: SalaryGuide, alike = "jobs like this one"): string {
   const euros = (value: number) => `€${value.toLocaleString("en-GB")}`;
   const range = guide.low === guide.high ? euros(guide.median) : `${euros(guide.low)}–${euros(guide.high)}`;
-  return `${range} a year (middle ${euros(guide.median)}), from ${guide.postings} ${guide.basis === "alike" ? "jobs like this one" : "jobs you've looked at"}`;
+  return `${range} a year (middle ${euros(guide.median)}), from ${guide.postings} ${guide.basis === "alike" ? alike : "jobs you've looked at"}`;
 }

@@ -15,8 +15,8 @@ export { isAddedSource, isJobSource } from "./sources";
 // job ad is a "posting".
 
 /** The job sources Dossier can search (E14-1 to E14-3, FreeHire), in the order Settings lists them; one is chosen there. */
-/** The built-in portals' ids; SerpApi and Jooble are the jobauto fork's. */
-export const JOB_SOURCES = ["JSEARCH", "SERPAPI", "ADZUNA", "JOOBLE", "FREEHIRE", "ARBEITSAGENTUR"] as const;
+/** The built-in portals' ids; SerpApi is the jobauto fork's. Jooble was too, until it was removed: postings found there keep "JOOBLE" as their source (sources.ts names it). */
+export const JOB_SOURCES = ["JSEARCH", "SERPAPI", "ADZUNA", "FREEHIRE", "ARBEITSAGENTUR"] as const;
 /** A portal's id: a built-in's, or one the user added (E23-3). */
 export type JobSource = string;
 
@@ -162,6 +162,8 @@ export type PostingState = {
   dismissed: boolean;
   /** The application made from it, or from the same link before Find jobs. */
   applicationId: string | null;
+  /** That application is still a Draft, nothing sent: "Draft ready", not "Applied" (jobauto fork); missing in older callers. */
+  draft?: boolean;
   /** Its best score of the profiles it was scored against (#208, E25-5), or null before it's scored. */
   score: ProfileFit | null;
   /** Its score for each profile it was scored against, in the profiles' order (E25-5). */
@@ -176,7 +178,7 @@ export type PostingState = {
   agentSearches: string[];
   /** The AI clients, or the employers' careers pages, that added it, by name: "Added by Claude" (jobauto fork). */
   addedBy: string[];
-  /** Where it stands with the job agent, when the agent scored it: Prepare draft, or its draft. */
+  /** Where it stands with the job agent, when the agent scored it: Prepare it for me, or its draft. */
   agent: { candidateId: string; status: "SCORED" | "DRAFTING" | "DRAFTED" | "APPROVED" | "DISMISSED"; applicationId: string | null } | null;
 };
 

@@ -103,7 +103,7 @@ export async function renderDocumentPdf(
   const application = APPLICATION_ID.test(applicationId)
     ? await prisma.application.findUnique({
         where: { id: applicationId },
-        select: { company: true, role: true, documents: { where: { kind: TAILORED[doc] }, select: { id: true } } },
+        select: { company: true, role: true, language: true, documents: { where: { kind: TAILORED[doc] }, select: { id: true } } },
       })
     : null;
   if (!application) return { error: "That application no longer exists." };
@@ -113,6 +113,6 @@ export async function renderDocumentPdf(
 
   return {
     pdf: await renderPdf(`/print/${doc}/${applicationId}`),
-    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: TAILORED[doc], date }),
+    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: TAILORED[doc], date, language: application.language }),
   };
 }

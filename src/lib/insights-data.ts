@@ -1,9 +1,8 @@
 import "server-only";
 
 import { DocumentKind } from "@/generated/prisma/enums";
-import { armLabel, runWhere, type ArmResult, type Experiment } from "@/lib/experiments";
 import { germanFit, profileGerman } from "@/lib/german-need";
-import { insights, MOVED_ON, type Insights } from "@/lib/insights";
+import { insights, type Insights } from "@/lib/insights";
 import { sourceInfo } from "@/lib/job-search/sources";
 import { prisma } from "@/lib/prisma";
 import { agencyOf } from "@/lib/recruiters/types";
@@ -65,24 +64,4 @@ export async function loadInsights(): Promise<Insights> {
       german: application.postingText.trim() ? germanFit(application.postingText, german).verdict : null,
     })),
   );
-}
-
-/** The running experiment with how each version has done so far; null when none runs. */
-export async function loadExperiment(): Promise<{ experiment: Experiment; results: ArmResult[] } | null> {
-  const { experiment } = await loadSettings();
-  if (!experiment) return null;
-  const applications = await prisma.application.findMany({
-    where: { ...runWhere(experiment), awaitingReview: false },
-    select: { arm: true, sentAt: true, furthestStage: true },
-  });
-  const results = (["A", "B"] as const).map((arm) => {
-    const sent = applications.filter((application) => application.arm === arm && application.sentAt);
-    return {
-      arm,
-      label: armLabel(experiment, arm),
-      sent: sent.length,
-      replies: sent.filter((application) => application.furthestStage !== null && MOVED_ON.has(application.furthestStage)).length,
-    };
-  });
-  return { experiment, results };
 }

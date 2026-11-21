@@ -23,7 +23,10 @@ import { googleClientView, googleView, requestOrigin, whenRan } from "@/lib/sett
 import { lastKnownTimeZone, userTimeZone } from "@/lib/time-zone";
 import { appVersion } from "@/lib/version";
 import { prisma } from "@/lib/prisma";
-import { loadProfileName } from "@/lib/profile-data";
+import { loadProfile, loadProfileName } from "@/lib/profile-data";
+import { searchChips, searchWords } from "@/lib/job-search/suggestions";
+import { describeGuide } from "@/lib/salary-guide";
+import { loadSalaryGuide } from "@/lib/salary-guide-data";
 import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig, scoringView } from "@/lib/scoring/config";
 import { loadScoringOff } from "@/lib/scoring-off-data";
@@ -35,6 +38,8 @@ import { loadSettingsStatus } from "@/lib/settings-status-data";
 import { availableUpdate } from "@/lib/update-check";
 
 import { AgentSection } from "./agent-section";
+import { AnswersSection, type SalaryHint } from "./answers-section";
+import { ApplyBrowserCard } from "./apply-browser-card";
 import { PortalCatalog } from "./browse-portals";
 import { AiBehaviour } from "./ai-behaviour";
 import { AiDataFlows } from "./ai-data-flows";
@@ -52,7 +57,7 @@ import { NotificationsSection } from "./notifications-section";
 import { settingsSectionFromParam } from "./sections";
 import { SettingsOverview } from "./settings-overview";
 import { SettingsScreen } from "./settings-screen";
-import { listProfiles, profileSearchDefaults } from "@/lib/profiles";
+import { listProfiles, openProfileId, profileSearchDefaults } from "@/lib/profiles";
 import { listChannels, listDeliveries } from "@/lib/notifications/store";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -79,6 +84,13 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         </>
       ) : section === "jobs" ? (
         <JobSearchSectionWithNote archiveDays={settings.archiveAfterDays} />
+      ) : section === "answers" ? (
+        // The answers every application uses (jobauto fork), edited here only.
+        <>
+          <AnswersSection initial={settings.applyAnswers} salaryGuide={await answersSalaryGuide()} />
+          {/* Where the apply assistant's window opens, moved here from the Apply tab (audit round 2). */}
+          <ApplyBrowserCard address={settings.applyBrowserAddress} />
+        </>
       ) : section === "scoring" ? (
         <ScoringWithNotice />
       ) : section === "agent" ? (
@@ -94,7 +106,6 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             portals: settings.agentPortals,
           }}
           searches={await listAgentSearches()}
-          supporter={{ address: settings.supporterAddress, day: settings.supporterDay, hour: settings.supporterHour }}
           suggestedQuery={(await loadSearch())?.query}
           profiles={await Promise.all((await listProfiles()).map(async (profile) => ({ ...profile, defaults: await profileSearchDefaults(profile.id) })))}
           source={agentPortal(jobConfig!)}
@@ -106,7 +117,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
           onlyWhileOpen={isDesktopApp()}
         />
       ) : section === "notifications" ? (
-        <NotificationsSection initial={{ channels: await listChannels(), log: await listDeliveries() }} />
+        <NotificationsSection initial={{ channels: await listChannels(), log: await listDeliveries(), supporter: { day: settings.supporterDay, hour: settings.supporterHour } }} />
       ) : section === "google" ? (
         <>
           <GoogleNotice outcome={typeof params.google === "string" ? params.google : null} />
@@ -189,6 +200,14 @@ async function JobSearchSectionWithNote({ archiveDays }: { archiveDays: number }
 async function ScoringWithNotice() {
   const [config, off] = await Promise.all([loadScoringConfig(), loadScoringOff()]);
   return <ScoringSection initial={scoringView(config)} notice={off && <ScoringOffNotice off={off} />} />;
+}
+
+/** The salary guide beside the salary expectation (jobauto fork): for the open profile's own title, from the postings she has seen. */
+async function answersSalaryGuide(): Promise<SalaryHint | null> {
+  const profile = await loadProfile(await openProfileId());
+  const title = searchChips(searchWords(profile, new Date()), 1)[0] ?? "";
+  const guide = await loadSalaryGuide(title);
+  return guide ? { title, text: describeGuide(guide, `jobs like “${title}”`) } : null;
 }
 
 /** What scores the job agent's postings, and whether it's set up (#274). */

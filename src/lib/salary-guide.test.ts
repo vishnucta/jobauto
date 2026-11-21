@@ -45,6 +45,8 @@ describe("salaryGuide", () => {
     const guide = salaryGuide("Regulatory Reporting Analyst", postings);
     expect(guide).toEqual({ low: 59_000, high: 73_000, median: 65_000, postings: 4, basis: "alike" });
     expect(describeGuide(guide!)).toBe("€59,000–€73,000 a year (middle €65,000), from 4 jobs like this one");
+    // Settings → Standard answers names the title (jobauto fork).
+    expect(describeGuide(guide!, "jobs like “Financial Analyst”")).toBe("€59,000–€73,000 a year (middle €65,000), from 4 jobs like “Financial Analyst”");
   });
 
   it("falls back to every job seen when too few are alike, and says nothing with too few salaries", () => {

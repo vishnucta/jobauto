@@ -5,18 +5,14 @@ import { z } from "zod";
 
 import { ApplicationStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
-import { applyAnswersSchema } from "@/lib/apply/answers";
-import { closeApplyBrowser } from "@/lib/apply/browser";
-import { browserAddressSchema } from "@/lib/apply/browser-address";
 import { resolveAttempt } from "@/lib/apply/run";
 import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { prisma } from "@/lib/prisma";
-import { saveSettings } from "@/lib/settings-data";
 import { statusInfo } from "@/lib/status";
 
-// The Apply tab's actions (Phase A): start a run in the browser, save the
-// standard answers and where the browser window opens, and settle a run by
-// the user's word.
+// The Apply tab's actions (Phase A): start a run in the browser and settle
+// a run by the user's word. The standard answers and where the browser
+// window opens are saved in Settings → Standard answers (jobauto fork).
 
 const refresh = (id: string) => revalidatePath(`/applications/${id}`);
 
@@ -42,45 +38,6 @@ export const fillThisPage = action(z.object({ id: z.string().min(1) }), async ({
   if (!started.ok) throw new ActionError(started.message);
   if (!started.alreadyRunning) refresh(id);
   return { jobId: started.jobId, attemptId: started.attemptId };
-});
-
-/** The standard answers on the Apply tab, saved for every application. */
-export const saveApplyAnswers = action(z.object({ id: z.string().min(1), answers: applyAnswersSchema }), async ({ id, answers }, { toast }) => {
-  await saveSettings({ applyAnswers: answers });
-  refresh(id);
-  toast("Saved. I'll use these answers on every form.");
-  return null;
-});
-
-/**
- * Browser window: the laptop's Chrome the window opens in when the app runs on
- * a server, or none (an empty address) for a window on the computer the app
- * runs on. A window already open is let go, so the next run uses the new one.
- */
-export const saveApplyBrowser = action(
-  z.object({ id: z.string().min(1), address: z.union([z.literal(""), browserAddressSchema]) }),
-  async ({ id, address }, { toast }) => {
-    await saveSettings({ applyBrowserAddress: address || null });
-    await closeApplyBrowser();
-    refresh(id);
-    toast(address ? `Saved. The window will open in the Chrome at ${address}.` : "Saved. The window will open on the computer the app runs on.");
-    return null;
-  },
-);
-
-/** How long "Test" waits for the laptop's Chrome. */
-const TEST_TIMEOUT_MS = 5_000;
-
-/** "Test": whether the laptop's Chrome answers at the address, before a run depends on it. Nothing is opened. */
-export const testApplyBrowser = action(z.object({ address: browserAddressSchema }), async ({ address }) => {
-  try {
-    const response = await fetch(`${address}/json/version`, { signal: AbortSignal.timeout(TEST_TIMEOUT_MS) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { Browser: version } = (await response.json()) as { Browser?: string };
-    return { version: version ?? "Chrome" };
-  } catch {
-    throw new ActionError(`Nothing answered at ${address}. Start Chrome with the Apply shortcut on the laptop, and check that Tailscale is on there.`);
-  }
 });
 
 /** "I sent it" / "I didn't send it": settles a run the page couldn't read the end of. */

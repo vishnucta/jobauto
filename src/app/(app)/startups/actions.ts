@@ -10,8 +10,10 @@ import { scoreStartupJob, startupScoreJobKey } from "@/lib/jobs/score-startup";
 import { scoreLevelsProblem, type LevelsProblem } from "@/lib/profiles";
 import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig } from "@/lib/scoring/config";
+import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { startStartupsRefresh } from "@/lib/startups/refresh";
 import { lookUpStartup, removeStartup, updateStartup } from "@/lib/startups/store";
+import { STARTUP_SOURCES } from "@/lib/startups/types";
 
 // The Startups screen's actions (#222). Nothing here sends anything: the
 // user writes to a startup from New application or their own mail.
@@ -19,8 +21,18 @@ import { lookUpStartup, removeStartup, updateStartup } from "@/lib/startups/stor
 const startupId = z.string().min(1).max(64);
 const GONE = "That startup is no longer in the list. Refresh the page.";
 
-/** "Refresh": asks both sources again, in the background; returns the job to follow. */
+/** "Refresh": asks the sources switched on again, in the background; returns the job to follow. */
 export const refreshStartupsNow = action(z.object({}), async () => ({ jobId: await startStartupsRefresh() }));
+
+/**
+ * Sources: switches one source on or off for the next refreshes (jobauto
+ * fork). What it found stays; a source switched off is only no longer asked.
+ */
+export const setStartupSource = action(z.object({ source: z.enum(STARTUP_SOURCES), on: z.boolean() }), async ({ source, on }) => {
+  const sources = { ...(await loadSettings()).startupSources, [source]: on };
+  await saveSettings({ startupSources: sources });
+  return sources;
+});
 
 /**
  * "Score" (#524): how well a startup's post fits one profile, or all of

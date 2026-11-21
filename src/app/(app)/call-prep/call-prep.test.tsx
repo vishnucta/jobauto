@@ -21,7 +21,7 @@ const pack = {
   unverified: [],
 };
 
-describe("Interview practice", () => {
+describe("Call prep, general practice (jobauto fork)", () => {
   it("prepares a practice call from the profile, not an application's", async () => {
     const user = userEvent.setup();
     render(<PrepTab applicationId="" practice data={{ pack: null, jobId: null }} aiReady company="" />);
@@ -37,5 +37,14 @@ describe("Interview practice", () => {
     expect(screen.getByRole("heading", { name: "Practice call" })).toBeInTheDocument();
     expect(screen.getByText("Ich bin Finanzanalystin.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Practise out loud" })).toBeInTheDocument();
+    // It is the general practice already: no link to itself.
+    expect(screen.queryByRole("link", { name: "General practice" })).not.toBeInTheDocument();
+  });
+
+  it("is reachable from an application's Call prep tab, before and after its pack", () => {
+    const { rerender } = render(<PrepTab applicationId="a1" data={{ pack: null, jobId: null }} aiReady company="Acme" />);
+    expect(screen.getByRole("link", { name: "General practice" })).toHaveAttribute("href", "/call-prep");
+    rerender(<PrepTab applicationId="a1" data={{ pack, jobId: null }} aiReady company="Acme" />);
+    expect(screen.getByRole("link", { name: "General practice" })).toHaveAttribute("href", "/call-prep");
   });
 });

@@ -24,13 +24,14 @@ import {
   type PostedWithin,
   type SearchQuery,
 } from "@/lib/job-search/search";
-import { getJob, startJob } from "@/lib/jobs/runner";
+import { startJob } from "@/lib/jobs/runner";
 import { logServerError } from "@/lib/log";
 import { coverageOf, fitWords } from "@/lib/posting-coverage";
 import { saveScore } from "@/lib/posting-scores";
 import { postingsOfSearch } from "@/lib/library";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { foundFromPosting } from "@/lib/postings";
+import { startPreparing } from "@/lib/jobs/prepare-application";
 import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
@@ -44,7 +45,7 @@ import { lastKnownTimeZone } from "@/lib/time-zone";
 import { appVersion } from "@/lib/version";
 
 import { connectorDraftJob } from "./draft";
-import { documentText, failure, hasMore, portalProblems, portalsAnswered, postingLine, postingSource, profileInput, resolvePosting, text, type ToolContext } from "./kit";
+import { documentText, failure, hasMore, herGerman, portalProblems, portalsAnswered, postingLine, postingSource, profileInput, resolvePosting, started, text, type ToolContext } from "./kit";
 import { registerAgentTools } from "./tools/agent";
 import { registerApplicationTools } from "./tools/applications";
 import { registerApplyTools } from "./tools/apply";
@@ -157,7 +158,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         instructions:
           "Dossier is the user's own job search app: their profiles (one per kind of job they look for), tailored resumes and cover letters, and every application tracked from Draft to Offer. " +
           "Its tools do what its screens do. Tools that read or write a profile take its name as profile (get_profile lists them); without one they use the first. " +
-          "When the user asks what to do next, get_today answers as the dashboard does: Today's three and Needs you. " +
+          "When the user asks what to do next, get_today answers as the dashboard does: its Do today list (Today's three and Needs you), the weekly target and what's left of Start here. " +
           "Find jobs with search_jobs (in the profile's city and country unless the user says otherwise) and more_jobs: they ask every portal switched on in Settings and keep what they find in Positions; " +
           "keep its keywords short, as a portal treats every word as a requirement: get_search_words suggests them from the profile; " +
           "jobs you find yourself on the web go into Positions with add_found_jobs, marked as found by an AI client; score postings yourself and save the scores with save_job_scores, " +
@@ -165,14 +166,16 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
           "To draft an application, write it yourself: call get_profile and get_posting, write a tailored resume and cover letter from facts in the profile only " +
           "(never invent experience, employers, numbers or degrees; say what's missing instead), show the user a short summary, then save it with save_application; " +
           "change a saved Draft with update_application rather than saving it again. " +
-          "Or let Dossier's AI draft it with draft_application. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
+          "Or let Dossier's AI draft it with draft_application, which prepares a posting from Positions as Prepare it for me does: one application per posting. Review and change documents with get_document and edit_document, rewrite them with rewrite_document, and get PDFs with export_pdf. " +
           "Recruiters are the agencies and recruiters on Find work → Recruiters: list_recruiters, add_recruiter, update_recruiter, set_recruiter_status, snooze_recruiter and remove_recruiter keep track of them, " +
           "and draft_recruiter_message drafts the message to write; Dossier sends nothing, so record that the user wrote or heard back only when they say so. " +
           "check_resume says whether a resume's PDF reads correctly for an applicant tracking system, names the posting's requirements, and has clean text. " +
           "Rehearse a first call with get_call_prep for an application, or get_practice_prep before there is one; get_salary_guide fills the salary line. " +
           "Change the profile only with what the user told you or confirmed. " +
           "Work that takes a while answers with a task_id: follow it with check_task. " +
-          "start_apply fills in the employer's application form in a browser window on the user's computer; the user checks it and presses Send there, then settle_apply records it. " +
+          "start_apply fills in the employer's application form in a browser window on the computer Dossier runs on, or in the laptop's Chrome set up for it; the user checks it and presses Send there, then settle_apply records it. " +
+          "It types the user's details into the employer's site, so use it only when the user asked for exactly that; on a server without a screen and no laptop Chrome set up, it says so and opens nothing. " +
+          "search_jobs, more_jobs, test_connection of a portal and update_job_agent with run_now spend searches from the user's paid portal plans (JSearch, SerpApi): run them when the user asks for a search, not again on your own, and never in a loop. " +
           "Tools marked destructive send email, delete or can't be undone: use them only when the user asked for exactly that, after telling them what will happen. " +
           "Links in answers open the screen in Dossier where the user sees the result.",
       },
@@ -231,7 +234,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         problems: portalProblems(search.portals),
         found: search.postings.length,
         more_available: hasMore(search.portals),
-        postings: search.postings.map((posting, index) => postingLine(posting, index + 1)),
+        postings: await herGerman().then((german) => search.postings.map((posting, index) => postingLine(posting, index + 1, german))),
         link: linkTo(`/jobs?search=${search.id}`),
       });
     },
@@ -254,7 +257,7 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
         search_id,
         added: more.postings.length,
         more_available: more.next !== null,
-        postings: more.postings.map((posting, index) => postingLine(posting, before.found + index + 1)),
+        postings: await herGerman().then((german) => more.postings.map((posting, index) => postingLine(posting, before.found + index + 1, german))),
       });
     },
   );
@@ -521,11 +524,13 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       title: "Have Dossier draft an application",
       description:
         "Has Dossier's own AI model draft the application, only when an AI provider is set up in Dossier's settings. " +
-        "Without one, write it yourself with get_profile, get_posting and save_application. Takes one to three minutes: follow it with check_draft.",
+        "A posting Positions keeps (posting_id, or search_id and number) is prepared as Prepare it for me on Positions does it: it gets one application, and the email too when the employer takes applications by email; " +
+        "a posting that has one already answers with it. Without an AI model, write it yourself with get_profile, get_posting and save_application. " +
+        "Takes one to three minutes: follow it with check_task.",
       inputSchema: z.object({
         ...postingSource,
         note: z.string().max(2000).optional().describe("Anything the documents should stress, in the user's words"),
-        profile: profileInput.describe("The profile to write it from; the first when left out"),
+        profile: profileInput.describe("The profile to write it from; left out, the one that fits the posting best, else the first"),
       }),
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
@@ -535,35 +540,32 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       }
       const chosen = await profileNamed(profile);
       if ("error" in chosen) return failure(chosen.error);
+      // The one writer Positions' Prepare it for me uses, so a posting it keeps gets one application (round 2 of the audit).
+      const prepare = async (postingId: string) => {
+        const prepared = await startPreparing(postingId, { profileId: profile === undefined ? null : chosen.id, note: note ?? "" });
+        if (!prepared.applicationId) return started(prepared.jobId!, { posting_id: postingId, link: linkTo("/jobs") });
+        return text({
+          application_id: prepared.applicationId,
+          status: "exists",
+          message: "This posting has an application already, so no second one is made.",
+          next: "get_application reads it.",
+          link: linkTo(`/applications/${prepared.applicationId}`),
+        });
+      };
+      // Prepared from what Positions keeps, as its button does: nothing to fetch.
+      if (source.posting_id) return prepare(source.posting_id);
       const posting = await resolvePosting(source);
       if ("error" in posting) return failure(posting.error);
+      // A posting from a search is kept in Positions first, then prepared the same way.
+      if (posting.postingId) return prepare(posting.postingId);
       const jobId = await startJob(connectorDraftJob, {
         posting: posting.text.slice(0, 100_000),
         postingUrl: posting.url.slice(0, 2000),
         note: note ?? "",
-        postingId: posting.postingId,
+        postingId: null,
         profileId: chosen.id,
       });
-      return text({ draft_id: jobId, status: "started", next: "Call check_draft with this draft_id in a minute or so." });
-    },
-  );
-
-  server.registerTool(
-    "check_draft",
-    {
-      title: "Check a draft",
-      description: "How a draft from draft_application is coming along; once done, the new application's id and link.",
-      inputSchema: z.object({ draft_id: z.string().min(1).max(100) }),
-      annotations: { readOnlyHint: true },
-    },
-    async ({ draft_id }) => {
-      const job = await getJob(draft_id);
-      if (!job || job.type !== connectorDraftJob.type) return failure("There's no such draft.");
-      if (job.status === "FAILED") return failure(job.error ?? "The draft couldn't be written.");
-      if (job.status !== "DONE") return text({ draft_id, status: "working", step: job.step ?? "Starting", next: "Check again in a little while." });
-      const result = connectorDraftJob.result.safeParse(job.result);
-      if (!result.success) return failure("The draft finished, but its application couldn't be found.");
-      return text({ draft_id, status: "done", application_id: result.data.applicationId, link: linkTo(`/applications/${result.data.applicationId}`) });
+      return started(jobId);
     },
   );
 

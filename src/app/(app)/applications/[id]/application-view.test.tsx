@@ -250,12 +250,13 @@ describe("the document tabs (E8-2)", () => {
     expect(screen.getByRole("tab", { name: "Apply" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("shows a draft how to send it, but not an agent draft still waiting for review (jobauto fork)", async () => {
+  it("shows a draft how to send it, in one line, but not an agent draft still waiting for review (jobauto fork)", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<ApplicationView {...props} />);
     const guide = screen.getByRole("region", { name: "How to send this application" });
-    await user.click(within(guide).getByRole("button", { name: "Cover letter" }));
-    expect(screen.getByRole("tab", { name: "Cover letter" })).toHaveAttribute("aria-selected", "true");
+    expect(guide).toHaveTextContent("How to send it: The posting gives no link or address Dossier can use.");
+    await user.click(within(guide).getByRole("button", { name: "Email tab" }));
+    expect(screen.getByRole("tab", { name: /^Email/ })).toHaveAttribute("aria-selected", "true");
     unmount();
     render(<ApplicationView {...props} application={{ ...props.application, awaitingReview: true }} />);
     expect(screen.queryByRole("region", { name: "How to send this application" })).not.toBeInTheDocument();
@@ -273,8 +274,18 @@ describe("the document tabs (E8-2)", () => {
   it("offers the one next step for its status, which opens its tab (E30-2)", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ApplicationView {...props} />);
-    await user.click(screen.getByRole("button", { name: "Review and send" }));
+    // A draft's is the send guide's (one send path, jobauto fork): here no route, so the posting.
+    expect(screen.queryByRole("button", { name: "Review and send" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Read the posting" }));
+    expect(screen.getByRole("tab", { name: /Job posting/ })).toHaveAttribute("aria-selected", "true");
+    rerender(<ApplicationView {...props} apply={{ ...props.apply, plan: { kind: "email", to: "jobs@ledgerly.example" } }} />);
+    await user.click(screen.getByRole("button", { name: "Write the email" }));
     expect(screen.getByRole("tab", { name: /^Email/ })).toHaveAttribute("aria-selected", "true");
+    // A job board: the header opens the posting there, never the Email tab (the audit's Fielmann case).
+    const board = { kind: "web", url: "https://www.arbeitsagentur.de/jobsuche/1", host: "arbeitsagentur.de", atsLabel: "the Bundesagentur", account: true, autoSubmitOk: false, board: true } as const;
+    rerender(<ApplicationView {...props} apply={{ ...props.apply, plan: board }} />);
+    expect(screen.getByRole("link", { name: /Apply on the job board/ })).toHaveAttribute("href", board.url);
+    expect(screen.getByRole("region", { name: "How to send this application" })).toHaveTextContent("Bewerbungsmappe");
     rerender(<ApplicationView {...props} application={{ ...props.application, status: "OFFER" }} />);
     expect(screen.getByRole("button", { name: "Review offer" })).toBeInTheDocument();
     rerender(<ApplicationView {...props} application={{ ...props.application, status: "SENT" }} />);
@@ -305,6 +316,22 @@ describe("the document tabs (E8-2)", () => {
     expect(screen.getByText("Tailored resume")).toBeInTheDocument();
     const resume = screen.getByRole("article", { name: "Resume" });
     expect(resume.querySelector('[data-unit="summary"]')).toHaveTextContent(demoResumeUnits()[0].text);
+  });
+
+  it("opens the resume and the letter to read on a phone, as printed, without editing in place (jobauto fork)", async () => {
+    const user = userEvent.setup();
+    render(<ApplicationView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Read as text" }));
+    let reading = screen.getByRole("dialog", { name: "Tailored resume" });
+    expect(within(reading).getByRole("article", { name: "Resume" }).querySelector('[data-unit="summary"]')).toHaveTextContent(demoResumeUnits()[0].text);
+    await user.click(within(reading).getByRole("button", { name: "Close" }));
+
+    await user.click(screen.getByRole("tab", { name: "Cover letter" }));
+    await user.click(screen.getByRole("button", { name: "Read as text" }));
+    reading = screen.getByRole("dialog", { name: "Cover letter" });
+    expect(within(reading).getByText("Dear Ledgerly team,")).toBeInTheDocument();
+    // Plain text: nothing on it opens an editor.
+    expect(within(reading).queryAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["Close"]);
   });
 
   it("has nothing to switch in a single-column theme without a photo (E30-9)", async () => {
@@ -495,6 +522,19 @@ describe("editing a unit (E8-3)", () => {
   it("leaves nothing out of the cover letter", () => {
     render(<ApplicationView {...props} initialTab="letter" />);
     expect(screen.queryByRole("button", { name: "Leave out" })).not.toBeInTheDocument();
+  });
+
+  it("sends the letter's sender and signature to the profile when they're drawn from it (jobauto fork)", () => {
+    const { rerender } = render(<ApplicationView {...props} initialTab="letter" senderFromProfile />);
+    for (const name of ["Sender", "Signature"]) {
+      const part = screen.getByRole("group", { name });
+      expect(within(part).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+      expect(within(part).getByRole("link", { name: "Edit in your profile" })).toHaveAttribute("href", "/profile?section=basics");
+    }
+    expect(within(screen.getByRole("group", { name: "Greeting" })).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    // A letter sent before keeps its own, edited here.
+    rerender(<ApplicationView {...props} initialTab="letter" senderFromProfile={false} />);
+    expect(within(screen.getByRole("group", { name: "Sender" })).getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 
   it("swaps in a text box and saves what was written", async () => {

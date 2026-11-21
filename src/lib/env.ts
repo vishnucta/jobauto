@@ -11,7 +11,7 @@ const GENERATE_SECRET = "for example the output of `openssl rand -base64 32`";
 const HASH_PASSWORD = "Make one with `docker run --rm -it ghcr.io/aientech/dossier hash-password`";
 
 const AI_PROVIDERS = ["local", "openai", "anthropic", "mistral", "lmstudio", "groq", "deepseek", "gemini"] as const;
-const JOB_SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "jooble", "arbeitsagentur", "freehire", "off"] as const;
+const JOB_SOURCE_NAMES = ["jsearch", "serpapi", "adzuna", "arbeitsagentur", "freehire", "off"] as const;
 const SCORER_NAMES = ["ai", "jev", "openai-decisions", "openrouter"] as const;
 
 // An empty value (`DOSSIER_AI_KEY=` in .env) counts as unset.
@@ -106,10 +106,14 @@ const schema = z.object({
       .pipe(z.number().min(5, { error: "DOSSIER_AI_TIMEOUT_SECONDS must be at least 5." })),
   ),
   // Defaults for Settings → Job search (E14-4), until a choice is saved there.
-  DOSSIER_JOBS_SOURCE: optional(
-    z.enum(JOB_SOURCE_NAMES, {
-      error: (issue) => `DOSSIER_JOBS_SOURCE must be one of ${JOB_SOURCE_NAMES.join(", ")} (got "${String(issue.input)}").`,
-    }),
+  // Jooble was the fork's until it was removed (jobauto fork): a server still naming it starts as if it were unset.
+  DOSSIER_JOBS_SOURCE: z.preprocess(
+    (value) => (typeof value === "string" && value.trim().toLowerCase() === "jooble" ? undefined : value),
+    optional(
+      z.enum(JOB_SOURCE_NAMES, {
+        error: (issue) => `DOSSIER_JOBS_SOURCE must be one of ${JOB_SOURCE_NAMES.join(", ")} (got "${String(issue.input)}").`,
+      }),
+    ),
   ),
   // Never echo the values: they're API keys.
   DOSSIER_JSEARCH_KEY: optional(z.string()),
@@ -121,7 +125,6 @@ const schema = z.object({
   DOSSIER_SERPAPI_KEY: optional(z.string()),
   DOSSIER_ADZUNA_APP_ID: optional(z.string()),
   DOSSIER_ADZUNA_KEY: optional(z.string()),
-  DOSSIER_JOOBLE_KEY: optional(z.string()),
   // FreeHire origin; unset uses https://freehire.me. Point at a self-hosted
   // FreeHire, or leave unset for the public catalogue.
   DOSSIER_FREEHIRE_URL: optional(
@@ -184,6 +187,10 @@ const schema = z.object({
   DOSSIER_API_URL: optional(
     z.url({ protocol: /^https?$/, error: "DOSSIER_API_URL must be an http:// or https:// URL." }).transform((url) => url.replace(/\/+$/, "")),
   ),
+  // The portal catalog (portals/catalog.ts): off in this fork (jobauto), so
+  // nothing asks the project's backend for it, not even Browse portals; "on"
+  // reads it from DOSSIER_API_URL, or Dossier's own backend.
+  DOSSIER_PORTAL_CATALOG: optional(z.enum(["on", "off"], { error: "DOSSIER_PORTAL_CATALOG must be on or off." })),
   // Set by the desktop app on a server it starts: the token it signs in with
   // for this launch (desktop.ts). Never set on a server otherwise.
   DOSSIER_DESKTOP_TOKEN: optional(z.string()),

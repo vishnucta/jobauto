@@ -4,22 +4,28 @@ import { z } from "zod";
 
 import { needsYouHref, type NeedsYouItem } from "@/lib/dashboard";
 import { loadDashboard } from "@/lib/dashboard-data";
+import { doToday, doTodaySummary } from "@/lib/do-today";
+import { loadWeeklyProgress } from "@/lib/insights-data";
 import { waitingByApplication } from "@/lib/google/inbox-data";
 import { fitWords, type Coverage } from "@/lib/posting-coverage";
 import { prisma } from "@/lib/prisma";
 import { loadScoringOff } from "@/lib/scoring-off-data";
 import { loadSettings } from "@/lib/settings-data";
+import type { SetupStep } from "@/lib/setup-checklist";
+import { loadSetupSteps } from "@/lib/setup-checklist-data";
 import { statusInfo } from "@/lib/status";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 import { loadToday } from "@/lib/today-data";
 import type { TodayItem } from "@/lib/today";
+import { weekStatus, type WeeklyProgress } from "@/lib/weekly-target";
 
 import { text, type ToolContext } from "../kit";
 
 // The dashboard (jobauto fork): what she'd ask Claude first, "what should I
-// do today?", answered as the dashboard answers it. Today's three and Needs
-// you come from the same functions the dashboard draws, with links to the
-// screen each row opens, and the scoring-off notice while it shows.
+// do today?", answered as the dashboard answers it. Do today (Today's three
+// and Needs you, each thing once), the weekly target and Start here come
+// from the same functions the dashboard draws, with links to the screen each
+// row opens, and the scoring-off notice while it shows.
 
 /** What each of Today's three asks of her, as its row says it. */
 const WHAT: Record<TodayItem["kind"], string> = {
@@ -37,15 +43,23 @@ export function registerTodayTools({ server, linkTo }: ToolContext): void {
     {
       title: "What to do today",
       description:
-        "The dashboard's Today's three (the three things that get applications out today: the user's drafts, the job agent's drafts, then its best matches still to write) " +
-        "and Needs you (what's due this week first, soonest on top, then what has no date), each with the ids the other tools take and a link to the screen it opens. " +
+        "The dashboard's Do today list, given in two parts: todays_three (the three things that get applications out today: the user's drafts, the job agent's drafts, then its best matches still to write) " +
+        "and needs_you (what's due this week first, soonest on top, then what has no date), each with the ids the other tools take and a link to the screen it opens; " +
+        "summary is the dashboard's line under the greeting; " +
+        "the weekly target and how this week is going; and Start here's steps not done yet, each with what it buys and where it's done. " +
         "Use it when the user asks what to do next.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     async () => {
       const [settings, timeZone, replies] = await Promise.all([loadSettings(), lastKnownTimeZone(), waitingByApplication().catch(() => undefined)]);
-      const [figures, three, scoringOff] = await Promise.all([loadDashboard({ quietDays: settings.quietDays, timeZone, replies }), loadToday(), loadScoringOff()]);
+      const [figures, three, scoringOff, week, setup] = await Promise.all([
+        loadDashboard({ quietDays: settings.quietDays, timeZone, replies }),
+        loadToday(),
+        loadScoringOff(),
+        loadWeeklyProgress(timeZone),
+        loadSetupSteps(),
+      ]);
       // An agent's draft is acted on by its find, as on the Agent screen.
       const reviews = three.flatMap((item) => (item.kind === "review" ? [item.applicationId] : []));
       const finds = reviews.length > 0 ? await prisma.agentCandidate.findMany({ where: { applicationId: { in: reviews } }, select: { id: true, applicationId: true } }) : [];
@@ -58,10 +72,14 @@ export function registerTodayTools({ server, linkTo }: ToolContext): void {
               link: linkTo(scoringOff.href),
             }
           : undefined,
+        // The line under the dashboard's greeting, from the Do today list (do-today.ts).
+        summary: doTodaySummary(doToday(figures.needsYou, three), { empty: figures.total === 0 }),
         todays_three: three.map((item, index) => todayLine(item, index + 1, findOf, linkTo)),
         nothing_waiting: three.length === 0 ? "Nothing is waiting. Run the job agent, or find a posting and start an application." : undefined,
         due_this_week: figures.needsYou.filter((item) => item.soon).length,
         needs_you: figures.needsYou.map((item) => needsYouLine(item, linkTo)),
+        weekly_target: weekLine(week),
+        start_here: startHereLine(setup, linkTo),
         link: linkTo("/"),
       });
     },
@@ -109,5 +127,22 @@ function needsYouLine(item: NeedsYouItem, linkTo: ToolContext["linkTo"]) {
     this_week: item.soon,
     action: item.action,
     link: linkTo(needsYouHref(item)),
+  };
+}
+
+/** The weekly target as the This week card shows it, or that there's none. */
+function weekLine(week: WeeklyProgress) {
+  if (week.target === 0) return { target: 0, note: "No weekly target is set. The user sets one on the dashboard's This week card." };
+  return { target: week.target, sent_this_week: week.sent, status: weekStatus(week), weeks_in_a_row: week.streak };
+}
+
+/** Start here's steps not done yet, as the dashboard lists them; undefined once every one is done, when the card is gone. */
+function startHereLine(steps: readonly SetupStep[], linkTo: ToolContext["linkTo"]) {
+  const open = steps.filter((step) => !step.done);
+  if (open.length === 0) return undefined;
+  return {
+    done: `${steps.length - open.length} of ${steps.length}`,
+    // The weekly target's step leads to the dashboard's This week card.
+    steps: open.map((step) => ({ step: step.title, why: step.why, action: step.action, link: linkTo(step.href.startsWith("#") ? `/${step.href}` : step.href) })),
   };
 }

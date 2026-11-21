@@ -1,4 +1,4 @@
-import { Bell, Bot, Database, FileText, Gauge, Info, Mail, Plug, Search, Sparkles, type LucideIcon } from "lucide-react";
+import { Bell, Bot, Database, FileText, Gauge, Info, ListChecks, Mail, Plug, Search, Sparkles, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 
 import { cn } from "@/lib/cn";
@@ -9,6 +9,7 @@ import { SETTINGS_GROUPS, settingsLabel, settingsSectionHref, type SettingsSecti
 const ICONS: Record<SettingsSectionId, LucideIcon> = {
   ai: Sparkles,
   documents: FileText,
+  answers: ListChecks,
   scoring: Gauge,
   jobs: Search,
   agent: Bot,

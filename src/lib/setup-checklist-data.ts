@@ -9,7 +9,7 @@ import { setupSteps, type SetupStep } from "./setup-checklist";
 
 /** Start here (setup-checklist.ts), as things stand. */
 export async function loadSetupSteps(): Promise<SetupStep[]> {
-  const [settings, agentProblem, google, agencies, agenciesWritten, connections, careers, latest, channels] = await Promise.all([
+  const [settings, agentProblem, google, agencies, agenciesWritten, connections, careers, channels] = await Promise.all([
     loadSettings(),
     agentSetupProblem(),
     prisma.googleAccount.count(),
@@ -17,7 +17,6 @@ export async function loadSetupSteps(): Promise<SetupStep[]> {
     prisma.recruiter.count({ where: { kind: "AGENCY", status: { not: "NOT_CONTACTED" } } }),
     prisma.connection.count(),
     prisma.employer.count(),
-    prisma.application.findFirst({ where: { awaitingReview: false }, orderBy: { updatedAt: "desc" }, select: { id: true } }),
     listChannels(),
   ]);
   const answers = settings.applyAnswers;
@@ -28,7 +27,6 @@ export async function loadSetupSteps(): Promise<SetupStep[]> {
     agencies,
     agenciesWritten,
     readinessAnswered: answers.confirmed !== false && Boolean(answers.germanCourse.trim() && answers.degreeRecognition.trim() && answers.mobility.trim()),
-    answersApplicationId: latest?.id ?? null,
     networkImported: connections > 0,
     // The fork's phone alerts became the "Strong new matches" event of Notifications (E26).
     phoneAlerts: channels.some((channel) => channel.events["matches.strong"] && channel.pausedAt === null),

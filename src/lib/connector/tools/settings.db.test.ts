@@ -4,15 +4,10 @@ import { encryptApiKey } from "@/lib/ai/api-key";
 import { AiError } from "@/lib/ai/errors";
 import { MockProvider } from "@/lib/ai/providers/mock";
 import { json, stubFetch } from "@/lib/ai/test-http";
-import { exportSchema } from "@/lib/data-export";
 import { clearJobSearchCache } from "@/lib/job-search/cache";
-import { startJob } from "@/lib/jobs/runner";
-import { zipPdfsJob } from "@/lib/jobs/zip-pdfs";
 import { encryptSecret, GOOGLE_CLIENT_SECRET, JOB_SOURCE_KEY } from "@/lib/secrets";
 import { loadProfileSettings } from "@/lib/profiles";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
-import { themeFile } from "@/lib/theme-file";
-import { BUILT_IN_THEMES } from "@/lib/themes";
 import { appVersion } from "@/lib/version";
 import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { jsearchV2LastPage } from "@/test/job-search-fixtures";
@@ -22,7 +17,7 @@ import { seedDemo } from "../../../../prisma/seed/demo";
 
 import { challengeOf, exchangeCode, issueCode, registerClient } from "../oauth";
 
-// The connector's themes, settings and export tools (jobauto fork), called as
+// The connector's settings tools (jobauto fork), called as
 // Claude calls them, through /api/mcp, against the test database with the
 // demo data.
 
@@ -54,11 +49,6 @@ vi.mock("@/lib/ai", async (importOriginal) => {
   const ai = await importOriginal<typeof import("@/lib/ai")>();
   return { ...ai, createProvider: vi.fn((config: Parameters<typeof ai.createProvider>[0]) => provider.current ?? ai.createProvider(config)) };
 });
-// Zipping renders PDFs; here it only starts.
-vi.mock("@/lib/jobs/runner", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/jobs/runner")>()),
-  startJob: vi.fn(async () => "zip-job"),
-}));
 
 import { POST } from "@/app/api/mcp/route";
 
@@ -67,11 +57,6 @@ const settings = () => loadSettings();
 /** The first profile's own settings (E24-1): its Base resume's theme and language. */
 const own = () => loadProfileSettings(TEST_PROFILE_ID);
 const CLAUDE = "https://claude.ai/api/mcp/auth_callback";
-const THEME_GONE = "There's no theme with that id. list_themes shows them all.";
-/** The demo's one profile, named after its headline (prisma/seed/demo.ts), and its Base resume. */
-const DEMO_PROFILE = "Senior Product Designer";
-const RESUME = `https://dossier.example/resume?profile=${TEST_PROFILE_ID}`;
-const NOW_BASE = `It's now the base resume theme of ${DEMO_PROFILE}.`;
 
 let token = "";
 beforeEach(async () => {
@@ -83,7 +68,6 @@ beforeEach(async () => {
   fakeEnv.DOSSIER_JOBS_ARBEITSAGENTUR = undefined;
   fakeEnv.DOSSIER_AI_PROVIDER = undefined;
   fakeEnv.DOSSIER_AI_KEY = undefined;
-  vi.mocked(startJob).mockClear();
   clearJobSearchCache();
   const clientId = await registerClient({ name: "Claude", redirectUris: [CLAUDE] });
   const verifier = "v".repeat(50);
@@ -122,109 +106,6 @@ async function tool(name: string, args: Record<string, unknown> = {}) {
   return { isError: (result.isError ?? false) as boolean, text, json: json as Record<string, unknown>, content };
 }
 
-describe("the theme tools (RES-2…RES-4, E5-7)", () => {
-  it("lists every theme with its look and use, and sets a profile's base theme", async () => {
-    const listed = await tool("list_themes");
-    expect(listed.json).toMatchObject({ profile: DEMO_PROFILE, base_theme_id: "editorial" });
-    const themes = listed.json.themes as Record<string, unknown>[];
-    expect(themes.map((theme) => theme.id)).toEqual(BUILT_IN_THEMES.map((theme) => theme.id));
-    // The demo's application uses Editorial for both its documents.
-    expect(themes[0]).toEqual({
-      id: "editorial",
-      name: "Editorial",
-      built_in: true,
-      applications: 1,
-      head_font: "NEWSREADER",
-      body_font: "GEIST",
-      accent: "#7a3b2e",
-      layout: "SINGLE",
-      align: "LEFT",
-      heading_style: "PLAIN",
-      density: "REGULAR",
-      header_style: "PLAIN",
-      sidebar_style: "PLAIN",
-      date_style: "INLINE",
-      photo_shape: "CIRCLE",
-      photo_position: "HEADER_END",
-    });
-    expect(listed.json.link).toBe(RESUME);
-
-    expect((await tool("set_base_theme", { id: "modern" })).json).toEqual({ profile: DEMO_PROFILE, base_theme: { id: "modern", name: "Modern" }, link: RESUME });
-    expect((await own()).baseThemeId).toBe("modern");
-    expect(await tool("set_base_theme", { id: "gone" })).toMatchObject({ isError: true, text: THEME_GONE });
-    expect((await own()).baseThemeId).toBe("modern");
-    expect(await tool("set_base_theme", { id: "classic", profile: "Frontend" })).toMatchObject({ isError: true });
-  });
-
-  it("makes a new theme from the base theme or another, and changes custom ones only", async () => {
-    const made = await tool("save_theme", { accent: "#2D6A4F", head_font: "PLEX_MONO" });
-    expect(made.json).toMatchObject({
-      message: `Saved “My theme”. ${NOW_BASE}`,
-      // The rest is Editorial's, the base theme.
-      theme: { name: "My theme", accent: "#2d6a4f", head_font: "PLEX_MONO", body_font: "GEIST", layout: "SINGLE" },
-    });
-    const id = (made.json.theme as { id: string }).id;
-    expect((await own()).baseThemeId).toBe(id);
-
-    await tool("set_base_theme", { id: "classic" });
-    const changed = await tool("save_theme", { id, name: "Green mono", density: "AIRY" });
-    expect(changed.json).toMatchObject({ theme: { id, name: "Green mono", density: "AIRY", accent: "#2d6a4f", head_font: "PLEX_MONO" } });
-    expect((await own()).baseThemeId).toBe(id);
-    expect(await prisma().theme.count({ where: { builtIn: false } })).toBe(1);
-    expect((await tool("list_themes")).json.themes).toContainEqual(expect.objectContaining({ id, name: "Green mono", built_in: false, applications: 0 }));
-
-    // From another theme: with changes, as the builder starts one; alone, a copy as Duplicate makes it.
-    expect((await tool("save_theme", { based_on: "modern", accent: "#1f3a5f" })).json).toMatchObject({ theme: { name: "My theme", layout: "SPLIT", accent: "#1f3a5f" } });
-    expect((await tool("save_theme", { based_on: "modern" })).json).toMatchObject({ message: `Made “Modern copy”. ${NOW_BASE}`, theme: { name: "Modern copy", accent: "#2f5d8a" } });
-
-    expect(await tool("save_theme", { id: "editorial", accent: "#000000" })).toMatchObject({ isError: true, text: expect.stringMatching(/^Built-in themes can't be changed/) });
-    expect((await prisma().theme.findUniqueOrThrow({ where: { id: "editorial" } })).accent).toBe("#7a3b2e");
-    expect(await tool("save_theme", { id: "gone", accent: "#000000" })).toMatchObject({ isError: true, text: THEME_GONE });
-    expect(await tool("save_theme", { based_on: "gone" })).toMatchObject({ isError: true, text: THEME_GONE });
-    expect(await tool("save_theme", { id })).toMatchObject({ isError: true, text: "Say what to change, for example accent or head_font." });
-    expect(await tool("save_theme", {})).toMatchObject({ isError: true });
-    expect(await tool("save_theme", { id, based_on: "modern", accent: "#000000" })).toMatchObject({ isError: true });
-    expect(await tool("save_theme", { accent: "red" })).toMatchObject({ isError: true });
-    expect(await prisma().theme.count({ where: { builtIn: false } })).toBe(3);
-  });
-
-  it("imports a theme file's text, checked as the screen checks it", async () => {
-    const file = themeFile({ ...BUILT_IN_THEMES[0], name: "Shared theme", accent: "#1F6F5C" });
-    const imported = await tool("save_theme", { theme_file: JSON.stringify(file) });
-    expect(imported.json).toMatchObject({ message: `Imported “Shared theme”. ${NOW_BASE}`, theme: { name: "Shared theme", accent: "#1f6f5c" } });
-    expect((await own()).baseThemeId).toBe((imported.json.theme as { id: string }).id);
-
-    expect(await tool("save_theme", { theme_file: "{ not json" })).toMatchObject({ isError: true, text: "That file isn't a Dossier theme." });
-    expect(await tool("save_theme", { theme_file: JSON.stringify({ ...file, theme: { ...file.theme, bodyFont: "PAPYRUS" } }) })).toMatchObject({
-      isError: true,
-      text: "That theme uses a font Dossier doesn't have (PAPYRUS).",
-    });
-    expect(await tool("save_theme", { theme_file: JSON.stringify(file), accent: "#000000" })).toMatchObject({ isError: true });
-    expect(await prisma().theme.count({ where: { builtIn: false } })).toBe(1);
-  });
-
-  it("deletes a custom theme: its documents lose the link, and the base falls back to Editorial", async () => {
-    const copy = (await tool("save_theme", { based_on: "modern" })).json.theme as { id: string };
-    const ledgerly = await prisma().application.findFirstOrThrow({ where: { company: "Ledgerly" } });
-    await prisma().document.updateMany({ where: { applicationId: ledgerly.id }, data: { themeId: copy.id } });
-
-    expect(await tool("save_theme", { id: copy.id, delete: true, accent: "#000000" })).toMatchObject({ isError: true, text: "To delete a theme, give only its id and delete: true." });
-    expect(await tool("save_theme", { delete: true })).toMatchObject({ isError: true });
-    expect((await tool("save_theme", { id: copy.id, delete: true })).json).toEqual({
-      message: "Deleted “Modern copy”.",
-      profile: DEMO_PROFILE,
-      base_theme: { id: "editorial", name: "Editorial" },
-      link: RESUME,
-    });
-    expect(await prisma().theme.findUnique({ where: { id: copy.id } })).toBeNull();
-    expect(await prisma().document.count({ where: { applicationId: ledgerly.id, themeId: null } })).toBe(2);
-    expect((await own()).baseThemeId).toBe("editorial");
-
-    expect(await tool("save_theme", { id: "editorial", delete: true })).toMatchObject({ isError: true, text: "Built-in themes can't be deleted." });
-    expect(await tool("save_theme", { id: copy.id, delete: true })).toMatchObject({ isError: true, text: THEME_GONE });
-  });
-});
-
 describe("get_settings and update_settings", () => {
   it("tells every setting by its section, keys only by whether they're saved", async () => {
     await saveSettings({
@@ -253,18 +134,17 @@ describe("get_settings and update_settings", () => {
       link: "https://dossier.example/settings",
     });
     const portals = (read.json.job_search as { portals: Record<string, unknown>[] }).portals;
-    // SerpApi and Jooble (jobauto fork) are built-in portals beside upstream's.
+    // SerpApi (jobauto fork) is a built-in portal beside upstream's.
     expect(portals.map((portal) => [portal.id, portal.on])).toEqual([
       ["JSEARCH", true],
       ["SERPAPI", false],
       ["ADZUNA", false],
-      ["JOOBLE", false],
       ["FREEHIRE", false],
       ["ARBEITSAGENTUR", false],
     ]);
     expect(portals[0]).toMatchObject({ name: "JSearch", fields: { key: "key: set" } });
     expect(portals[2]).toMatchObject({ name: "Adzuna", fields: { appId: "app-1", key: "key: none" } });
-    expect(portals[5]).toMatchObject({ note_accepted: false });
+    expect(portals[4]).toMatchObject({ id: "ARBEITSAGENTUR", note_accepted: false });
     const stored = await settings();
     for (const secret of ["sk-ant-secret", "ak_secret", "gcs_secret", stored.apiKeyEnc!, stored.portalKeysEnc.JSEARCH.key, stored.googleClientSecretEnc!, "1234-client"]) {
       expect(read.text).not.toContain(secret);
@@ -487,99 +367,18 @@ describe("the AI provider's models and the Test connection buttons", () => {
   });
 });
 
-describe("your data", () => {
-  it("zips every tailored document in the background, and says when there's none", async () => {
-    expect((await tool("zip_all_pdfs")).json).toEqual({ task_id: "zip-job", status: "started", documents: 2, next: "Call check_task with this task_id until it's done." });
-    expect(startJob).toHaveBeenCalledWith(zipPdfsJob, {});
-    await prisma().document.deleteMany();
-    expect(await tool("zip_all_pdfs")).toMatchObject({ isError: true, text: "There are no tailored documents to download yet." });
-    expect(startJob).toHaveBeenCalledTimes(1);
-  });
-
-  it("exports everything as the Export button does, as an embedded file without API keys", async () => {
-    await saveSettings({ provider: "ANTHROPIC", apiKeyEnc: encryptApiKey("sk-ant-secret"), portalKeysEnc: { JSEARCH: { key: encryptSecret(JOB_SOURCE_KEY, "ak_secret") } }, paper: "LETTER" });
-    const exported = await tool("export_data");
-    expect(exported.isError).toBe(false);
-    const [about, file] = exported.content;
-    expect(file).toMatchObject({ type: "resource", resource: { uri: expect.stringMatching(/^dossier:\/\/export\/dossier-export-\d{4}-\d{2}-\d{2}\.json$/), mimeType: "application/json" } });
-    const text = file.type === "resource" ? file.resource.text : "";
-    expect(JSON.parse(about.type === "text" ? about.text : "")).toEqual({
-      file: expect.stringMatching(/^dossier-export-\d{4}-\d{2}-\d{2}\.json$/),
-      size: expect.stringMatching(/^\d+ KB$/),
-      bytes: Buffer.byteLength(text),
-      applications: await prisma().application.count(),
-      link: "https://dossier.example/settings?section=data",
-    });
-
-    const data = exportSchema.parse(JSON.parse(text));
-    expect(data.applications.length).toBe(await prisma().application.count());
-    expect(data.settings).toContainEqual({ key: "paper", value: "LETTER" });
-    expect(data).not.toHaveProperty("apiKey");
-    expect(data).not.toHaveProperty("jobSourceKeys");
-    const stored = await settings();
-    for (const secret of ["sk-ant-secret", "ak_secret", stored.apiKeyEnc!, stored.portalKeysEnc.JSEARCH.key, "connectorEnabledAt"]) expect(text).not.toContain(secret);
-  });
-
-  it("answers a big export with its size only, for Export in Settings to download", async () => {
-    // A profile photo as the profile keeps it: a data URL, here of 600 KB.
-    await prisma().profileField.create({ data: { key: "photo", value: `data:image/jpeg;base64,/9j/${"A".repeat(600_000)}` } });
-    const exported = await tool("export_data");
-    expect(exported.isError).toBe(false);
-    expect(exported.content).toHaveLength(1);
-    expect(exported.json).toEqual({
-      file: expect.stringMatching(/^dossier-export-\d{4}-\d{2}-\d{2}\.json$/),
-      size: expect.stringMatching(/^\d+ KB$/),
-      bytes: expect.any(Number),
-      applications: await prisma().application.count(),
-      link: "https://dossier.example/settings?section=data",
-      next: "It's too big to hand over in a chat. The user downloads it with Export in Settings → Data and backups.",
-    });
-    expect(exported.json.bytes).toBeGreaterThan(600_000);
-    expect(exported.text).not.toContain("/9j/");
-  });
-});
-
-describe("check_for_updates (E10-9)", () => {
-  const release = (version: string) => vi.fn(async () => Response.json({ tag_name: `v${version}`, html_url: `https://github.com/AienTech/dossier/releases/tag/v${version}` }));
-
-  it("says whether a newer release is out, and keeps it for the sidebar", async () => {
-    vi.stubGlobal("fetch", release("99.0.0"));
-    expect((await tool("check_for_updates")).json).toEqual({
-      status: "newer",
-      version: "99.0.0",
-      current_version: appVersion,
-      whats_new: "https://github.com/AienTech/dossier/releases/tag/v99.0.0",
-      how_to_update: expect.stringMatching(/^https:\/\/github\.com\//),
-      link: "https://dossier.example/settings?section=about",
-    });
-    expect(await settings()).toMatchObject({ latestVersion: "99.0.0" });
-
-    vi.stubGlobal("fetch", release("0.0.1"));
-    expect((await tool("check_for_updates")).json).toMatchObject({ status: "latest", version: appVersion, message: "You're on the latest version." });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new TypeError("fetch failed");
-      }),
-    );
-    expect(await tool("check_for_updates")).toMatchObject({ isError: true, text: "Couldn't check for updates right now. Try again later." });
-  });
-});
-
 describe("the tools' hints", () => {
   it("marks reads as read-only, and what can't be undone or reaches out as such", async () => {
     const { tools } = (await rpc("tools/list")) as { tools: { name: string; description: string; annotations?: Record<string, boolean> }[] };
     const hints = Object.fromEntries(tools.map((entry) => [entry.name, entry.annotations ?? {}]));
-    for (const name of ["list_themes", "get_settings", "export_data"]) expect(hints[name], name).toEqual({ readOnlyHint: true, openWorldHint: false });
-    for (const name of ["list_ai_models", "test_connection"]) expect(hints[name], name).toEqual({ readOnlyHint: true, openWorldHint: true });
-    expect(hints.set_base_theme).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
-    // Deleting a custom theme, and switching the AI provider, which removes its key, can't be undone.
-    expect(hints.save_theme).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
+    expect(hints.get_settings).toEqual({ readOnlyHint: true, openWorldHint: false });
+    expect(hints.list_ai_models).toEqual({ readOnlyHint: true, openWorldHint: true });
+    // A portal's test spends one of the user's paid searches (round 2 of the audit).
+    expect(hints.test_connection).toEqual({ readOnlyHint: false, destructiveHint: false, openWorldHint: true });
+    expect(tools.find((entry) => entry.name === "test_connection")?.description).toContain("paid search");
+    // Switching the AI provider, which removes its key, can't be undone.
     expect(hints.update_settings).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
-    expect(hints.zip_all_pdfs).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
-    expect(hints.check_for_updates).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
-    // The export holds contact details and private notes: only for a file the user asked for.
-    expect(tools.find((entry) => entry.name === "export_data")?.description).toContain("Only when the user asks for an export or backup file");
+    // The themes, Download all PDFs, Export and Check for updates stay on the screens: an export holds contact details and private notes.
+    for (const name of ["list_themes", "set_base_theme", "save_theme", "zip_all_pdfs", "export_data", "check_for_updates"]) expect(hints, name).not.toHaveProperty(name);
   });
 });

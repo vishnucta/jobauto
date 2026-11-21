@@ -27,6 +27,11 @@
   color: var(--doc-ink);
 }
 
+/* In the phone's reading view (document.module.css), the title stays a title, not a poster. */
+[data-reading] .name {
+  font-size: min(calc(var(--u) * 24), 26px);
+}
+
 .headline {
   font-size: 1.05em;
   color: var(--doc-ink);

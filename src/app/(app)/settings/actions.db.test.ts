@@ -202,12 +202,11 @@ describe("job search settings (E14-4, E22-3)", () => {
   it("switches any number of portals on and off, and says what the section shows", async () => {
     const result = await setPortalOn({ portal: "JSEARCH", on: true });
     expect(result).toMatchObject({ ok: true, data: { freehire: { host: "freehire.me" } } });
-    // SerpApi and Jooble (jobauto fork) are built-in portals beside upstream's.
+    // SerpApi (jobauto fork) is a built-in portal beside upstream's; Jooble was too, until it was removed.
     expect(result.ok && result.data.portals.map((entry) => [entry.id, entry.on])).toEqual([
       ["JSEARCH", true],
       ["SERPAPI", false],
       ["ADZUNA", false],
-      ["JOOBLE", false],
       ["FREEHIRE", false],
       ["ARBEITSAGENTUR", false],
     ]);
@@ -253,28 +252,13 @@ describe("job search settings (E14-4, E22-3)", () => {
     expect(await savePortalKey({ portal: "ADZUNA", field: "appId", change: { action: "set", value: "x" } })).toMatchObject({ ok: false });
   });
 
-  it("stores Jooble's key encrypted, and tests it in the address Jooble takes it in, without logging it", async () => {
-    clearJobSearchCache();
-    expect(await testPortal({ portal: "JOOBLE" })).toEqual({ ok: true, data: { connected: false, message: "Add your Jooble key in Settings → Job search first." } });
-
-    const result = await savePortalKey({ portal: "JOOBLE", field: "key", change: { action: "set", value: " jooble_secret " } });
-    expect(result.ok && portal(result.data, "JOOBLE")).toMatchObject({ fields: [expect.objectContaining({ name: "key", keyState: "set" })] });
-    expect(JSON.stringify(result)).not.toContain("jooble_secret");
-    const stored = (await settings()).portalKeysEnc.JOOBLE.key;
-    expect(stored).not.toContain("jooble_secret");
-    expect(decryptSecret(JOB_SOURCE_KEY, stored)).toBe("jooble_secret");
-
+  it("neither saves nor tests a key for Jooble, which the fork removed (jobauto fork)", async () => {
     const requests = stubFetch(() => json({ totalCount: 0, jobs: [] }));
-    expect(await testPortal({ portal: "JOOBLE" })).toEqual({ ok: true, data: { connected: true, seconds: expect.any(Number) } });
-    expect(requests[0]).toMatchObject({ method: "POST" });
-    expect(requests[0].url.pathname).toBe("/api/jooble_secret");
-
-    stubFetch(() => json({}, { status: 403 }));
-    expect(await testPortal({ portal: "JOOBLE" })).toMatchObject({ ok: true, data: { connected: false, message: expect.stringContaining("Jooble didn't accept your key") } });
+    expect(await savePortalKey({ portal: "JOOBLE", field: "key", change: { action: "set", value: "jooble_secret" } })).toMatchObject({ ok: false, error: "Jooble isn't offered on this server." });
+    expect((await settings()).portalKeysEnc.JOOBLE).toBeUndefined();
+    expect(await testPortal({ portal: "JOOBLE" })).toMatchObject({ ok: true, data: { connected: false } });
+    expect(requests).toHaveLength(0);
     vi.unstubAllGlobals();
-
-    await savePortalKey({ portal: "JOOBLE", field: "key", change: { action: "clear" } });
-    expect((await settings()).portalKeysEnc.JOOBLE).toEqual({});
   });
 
   it("saves where the JSearch key is from, as one of its options only", async () => {

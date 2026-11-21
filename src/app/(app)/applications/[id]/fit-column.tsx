@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose } from "lucide-react";
+import { PanelLeftClose, X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useId, useState, type ReactNode } from "react";
 
@@ -206,12 +206,13 @@ export function FitColumn({
       </aside>
       <div className="relative flex w-[68px] flex-none border-r border-line min-[1500px]:hidden max-sm:w-full max-sm:border-r-0 max-sm:border-b">
         <Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
-          <Dialog.Trigger
-            // Named once for every width: the rail and the phone's button show it differently.
-            aria-label={`Show how you fit: ${total > 0 ? `${hit} of ${total} requirements covered` : "No requirements to cover yet"}`}
-            className="flex w-full flex-col items-center gap-2.5 overflow-y-auto py-[22px] hover:bg-hover max-sm:flex-row max-sm:gap-3 max-sm:px-4 max-sm:py-2.5"
-          >
-            <span className="sr-only">Show how you fit:</span> <ScoreRing hit={hit} total={total} size="lg" className="max-sm:hidden" />
+          <Dialog.Trigger className="flex w-full flex-col items-center gap-2.5 overflow-y-auto py-[22px] hover:bg-hover max-sm:flex-row max-sm:gap-3 max-sm:px-4 max-sm:py-2.5">
+            {/* Named once for every width, from this text rather than an aria-label, which would leave out the ring's visible "2/3". */}
+            <span className="sr-only">Show how you fit: {total > 0 ? `${hit} of ${total} requirements covered` : "No requirements to cover yet"}</span>
+            {/* The rail's ring. */}
+            <span aria-hidden="true" className="max-sm:hidden">
+              <ScoreRing hit={hit} total={total} size="lg" />
+            </span>
             <span aria-hidden="true" className="flex flex-col items-center gap-2 pt-1 max-sm:hidden">
               {match?.items.map((item, index) => <Mark key={index} result={item.result} />)}
             </span>
@@ -226,8 +227,13 @@ export function FitColumn({
             className="absolute inset-y-0 left-0 z-30 w-[380px] max-w-[calc(100vw-80px)] overflow-y-auto border-r border-line-card bg-surface px-6 py-[22px] shadow-menu focus:outline-none max-sm:fixed max-sm:inset-0 max-sm:z-50 max-sm:w-auto max-sm:max-w-none max-sm:border-r-0 max-sm:px-4 max-sm:pt-14"
           >
             <Dialog.Title className="sr-only">How you fit</Dialog.Title>
-            <Dialog.Close aria-label="Close" className="absolute top-3 right-3 grid size-8 place-items-center rounded-control text-muted hover:bg-hover hover:text-ink">
-              <PanelLeftClose size={16} aria-hidden="true" />
+            {/* Folding the column back on wide windows; on a phone, where it fills the screen, an X (jobauto fork). */}
+            <Dialog.Close
+              aria-label="Close"
+              className="absolute top-3 right-3 grid size-8 place-items-center rounded-control text-muted hover:bg-hover hover:text-ink max-sm:size-10 max-sm:text-ink"
+            >
+              <PanelLeftClose size={16} aria-hidden="true" className="max-sm:hidden" />
+              <X size={20} aria-hidden="true" className="sm:hidden" />
             </Dialog.Close>
             {children}
           </Dialog.Content>

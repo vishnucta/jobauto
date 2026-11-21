@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Popover } from "radix-ui";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
@@ -40,6 +41,11 @@ export type UnitFrameProps = {
   onAskAi?: () => void;
   /** Takes it off a tailored resume (#217). */
   onLeaveOut?: () => void;
+  /**
+   * The part is drawn from the profile, like a letter's sender (jobauto
+   * fork): its toolbar links to where it's changed instead of offering Edit.
+   */
+  profileHref?: string;
 };
 
 const toolButton =
@@ -71,6 +77,7 @@ export function UnitFrame({
   onRegenerate,
   onAskAi,
   onLeaveOut,
+  profileHref,
 }: UnitFrameProps) {
   const frame = useRef<HTMLDivElement>(null);
   const wasEditing = useRef(editing);
@@ -167,9 +174,15 @@ export function UnitFrame({
               "gap-0.5 rounded-control bg-inverse p-[3px] font-sans text-xs leading-[1.2] font-medium whitespace-nowrap shadow-toolbar",
             )}
           >
-            <button type="button" className={toolButton} onClick={onEdit}>
-              Edit
-            </button>
+            {profileHref ? (
+              <Link href={profileHref} className={toolButton} title="It comes from your profile: change it there and every draft follows.">
+                Edit in your profile
+              </Link>
+            ) : (
+              <button type="button" className={toolButton} onClick={onEdit}>
+                Edit
+              </button>
+            )}
             {onRegenerate && (
               <button type="button" className={toolButton} onClick={onRegenerate}>
                 Regenerate

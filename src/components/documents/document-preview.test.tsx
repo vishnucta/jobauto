@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countPages, DocumentPreview } from "./document-preview";
@@ -124,5 +125,37 @@ describe("DocumentPreview", () => {
     expect(ends.map((end) => end.dataset.page)).toEqual(["2", "3"]);
     // Each page holds 805 units below its 50 units of padding.
     expect(ends[0].style.top).toMatch(/855/);
+  });
+
+  it("offers a phone the same document to read, reflowed over the whole screen (jobauto fork)", async () => {
+    render(
+      <DocumentPreview label="Editorial" reading={{ title: "Tailored resume", document: <article aria-label="Resume to read">Jane Doe</article> }}>
+        <article aria-label="Resume" />
+      </DocumentPreview>,
+    );
+    // Only on a phone: the button's row is hidden from sm up.
+    const button = screen.getByRole("button", { name: "Read as text" });
+    expect(button.parentElement).toHaveClass("sm:hidden");
+    expect(screen.queryByRole("article", { name: "Resume to read" })).not.toBeInTheDocument();
+
+    await userEvent.click(button);
+    const dialog = screen.getByRole("dialog", { name: "Tailored resume" });
+    const drawn = within(dialog).getByRole("article", { name: "Resume to read" });
+    // Inside the reading layout, which reflows the page at a size to read.
+    expect(drawn.parentElement).toHaveAttribute("data-reading");
+    expect(drawn.parentElement!.className).toMatch(/reading/);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Read as text" })).toHaveFocus();
+  });
+
+  it("has no reading view without a document to read", () => {
+    render(
+      <DocumentPreview label="Editorial">
+        <article aria-label="Resume" />
+      </DocumentPreview>,
+    );
+    expect(screen.queryByRole("button", { name: "Read as text" })).not.toBeInTheDocument();
   });
 });

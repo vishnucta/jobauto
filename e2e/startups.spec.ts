@@ -18,6 +18,16 @@ async function expectAccessible(page: Page) {
 test("finds hiring startups with the addresses they publish, and leaves alone what it should", async ({ page }) => {
   await page.goto("/startups");
   await expect(page.getByRole("note")).toContainText("Press Refresh to look for startups.");
+  // YC and Hacker News start switched off in this fork; the fakes here are theirs.
+  await page.getByRole("button", { name: "Sources", exact: true }).click();
+  const sources = page.getByRole("group", { name: "Sources to ask" });
+  await expect(sources.getByRole("switch", { name: "ESMA registers" })).toBeChecked();
+  for (const name of ["Y Combinator", "Hacker News"]) {
+    await expect(sources.getByRole("switch", { name })).not.toBeChecked();
+    await sources.getByRole("switch", { name }).click();
+    await expect(sources.getByRole("switch", { name })).toBeChecked();
+  }
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByText("Found 5 new startups.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("region", { name: "Sources" }).getByText(/^Refreshed .* · reads their sites politely, following robots\.txt$/)).toBeVisible();
