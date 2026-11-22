@@ -64,7 +64,7 @@ export function registerCareersTools({ server, linkTo }: ToolContext): void {
       title: "Follow a careers page",
       description:
         "Adds an employer to Find work → Careers pages, as Follow does: its careers page is read each morning, and new jobs that match its words and places go into Positions. " +
-        "Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, and pages with job data (JSON-LD). Follow with check_careers_pages to read it now.",
+        "Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, SuccessFactors job feeds (the site's address with /services/rss/job/), and pages with job data (JSON-LD). Follow with check_careers_pages to read it now.",
       inputSchema: z.object(fieldsInput),
       annotations: { readOnlyHint: false, openWorldHint: false },
     },

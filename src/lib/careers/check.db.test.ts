@@ -5,6 +5,7 @@ import { loadSearch } from "@/lib/posting-searches";
 import { createTestClient, resetDatabase } from "@/test/db";
 
 import { careersCheckDue, checkCareersPages } from "./check";
+import { politeness } from "./read";
 import { createEmployer, listEmployers, updateEmployer } from "./store";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
@@ -34,6 +35,7 @@ function stubFeeds(feeds: Record<string, unknown>) {
 const ACME = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true";
 
 beforeEach(async () => {
+  Object.assign(politeness, { pauseMs: 0, retryMs: 0 });
   await resetDatabase(prisma());
   vi.mocked(emit).mockClear();
 });
@@ -66,9 +68,16 @@ describe("checkCareersPages", () => {
     );
     expect((await listEmployers())[0]).toMatchObject({ name: "Acme", ats: "greenhouse", lastMatched: 2, lastNew: 2, problem: null, lastCheckedAt: now.toISOString() });
 
+    // Not again within the hour: the site isn't asked too often.
+    expect(await checkCareersPages({}, context, new Date(now.getTime() + 30 * 60 * 1000))).toMatchObject({
+      checked: 0,
+      added: 0,
+      message: "This careers page was read less than an hour ago: Dossier reads it again later, so the sites aren't asked too often.",
+    });
+
     // The next day, only what's new.
     vi.mocked(emit).mockClear();
-    const second = await checkCareersPages({}, context, now);
+    const second = await checkCareersPages({}, context, new Date(now.getTime() + 24 * 60 * 60 * 1000));
     expect(second).toMatchObject({ added: 0, searchId: null, message: "No new jobs from 1 careers page." });
     expect(emit).not.toHaveBeenCalled();
     expect((await listEmployers())[0]).toMatchObject({ lastMatched: 2, lastNew: 0 });
@@ -83,6 +92,24 @@ describe("checkCareersPages", () => {
     expect(result.message).toBe("1 new job added to Positions from 2 careers pages. 1 page couldn't be read.");
     await updateEmployer(gone.id, { name: "Gone", careersUrl: "https://boards.greenhouse.io/acme" });
     expect((await listEmployers()).find((employer) => employer.id === gone.id)).toMatchObject({ problem: null, lastCheckedAt: null });
+  });
+
+  it("keeps what a feed found before it asked for fewer requests, and reads new words right away", async () => {
+    const acme = await createEmployer({ careersUrl: "https://acme.wd3.myworkdayjobs.com/Careers", keywords: "EMIR, MiFIR", places: "Hamburg" });
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ++calls === 1 ? new Response(JSON.stringify({ total: 1, jobPostings: [{ title: "EMIR Analyst", externalPath: "/job/Hamburg/EMIR-Analyst_R100", locationsText: "Hamburg" }] })) : new Response("", { status: 429 }),
+      ),
+    );
+    const result = await checkCareersPages({}, context, now);
+    expect(result).toMatchObject({ checked: 1, added: 1, problems: ["Acme: acme.wd3.myworkdayjobs.com asks for fewer requests just now. Dossier reads it again at the next check."] });
+    expect((await listEmployers())[0]).toMatchObject({ lastMatched: 1, lastNew: 1, problem: expect.stringContaining("fewer requests") });
+
+    // New words: read again within the hour.
+    await updateEmployer(acme.id, { careersUrl: "https://acme.wd3.myworkdayjobs.com/Careers", keywords: "EMIR", places: "Hamburg" });
+    expect((await listEmployers())[0]).toMatchObject({ lastCheckedAt: null });
   });
 
   it("checks only the employers asked for, and leaves out those turned off", async () => {

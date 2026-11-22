@@ -35,7 +35,7 @@ export const FIELD_EMPLOYERS: readonly FieldEmployer[] = [
   { name: "Commerzbank", cities: "Frankfurt", why: "Meldewesen and finance reporting.", careersUrl: "https://jobs.commerzbank.com" },
   { name: "DZ BANK", cities: "Frankfurt", why: "Central bank of the cooperative banks: regulatory reporting.", careersUrl: "https://www.dzbank.de/content/dzbank/de/home/karriere.html" },
   { name: "Helaba", cities: "Frankfurt", why: "Landesbank: regulatory reporting and finance.", careersUrl: "https://www.helaba.com/de/karriere" },
-  { name: "DekaBank", cities: "Frankfurt", why: "The savings banks' asset manager: fund reporting and Meldewesen.", careersUrl: "https://karriere.deka.de" },
+  { name: "DekaBank", cities: "Frankfurt", why: "The savings banks' asset manager: fund reporting and Meldewesen.", careersUrl: "https://karriere.deka.de", followUrl: "https://karriere.deka.de/services/rss/job/?locale=de_DE" },
   { name: "Deutsche Börse Group", cities: "Frankfurt, Eschborn", why: "Runs Eurex and Clearstream: trade reporting and client asset operations.", careersUrl: "https://careers.deutsche-boerse.com" },
   { name: "Citi", cities: "Frankfurt", why: "Regulatory reporting for its German entities, to the ECB, Bundesbank and BaFin.", careersUrl: "https://jobs.citi.com" },
   { name: "Goldman Sachs Bank Europe", cities: "Frankfurt", why: "Regulatory reporting controllers for its German entities.", careersUrl: "https://higher.gs.com" },
@@ -55,9 +55,18 @@ export const FIELD_EMPLOYERS: readonly FieldEmployer[] = [
   { name: "Regnology", cities: "Frankfurt, Munich", why: "Makes the reporting software banks use (COREP, FINREP): implementation and analyst roles.", careersUrl: "https://www.regnology.net/en/careers/" },
   { name: "EY Germany", cities: "Frankfurt, Hamburg", why: "Financial services regulatory and tax reporting advisory.", careersUrl: "https://www.ey.com/de_de/careers" },
   { name: "PwC Germany", cities: "Frankfurt, Hamburg", why: "Regulatory reporting advisory for banks and funds.", careersUrl: "https://jobs.pwc.de/de/en" },
-  { name: "KPMG Germany", cities: "Frankfurt, Hamburg", why: "Regulatory reporting advisory for banks and funds.", careersUrl: "https://karriere.kpmg.de/" },
+  { name: "KPMG Germany", cities: "Frankfurt, Hamburg", why: "Regulatory reporting advisory for banks and funds.", careersUrl: "https://karriere.kpmg.de/", followUrl: "https://jobs.kpmg.de/services/rss/job/?locale=de_DE" },
   { name: "Deloitte Germany", cities: "Frankfurt, Hamburg", why: "Regulatory reporting advisory for banks and funds.", careersUrl: "https://job.deloitte.com/" },
 ];
+
+/**
+ * What a field employer is followed for: the titles her kind of work goes
+ * by, not the profile's search words, whose "Financial Analyst" floods a
+ * big bank's feed. The broadest come first, as feeds searched word by word
+ * (Workday, SuccessFactors) are asked for the first few; every word still
+ * picks titles from what they find. They can be changed on Careers pages.
+ */
+export const FIELD_WORDS = "Regulatory Reporting, Transaction Reporting, Meldewesen, Reconciliation, Abstimmung, Trade Reporting, EMIR, MiFIR, COREP";
 
 /** Places a followed feed is narrowed to: a big employer's feed is worldwide. */
 export const GERMAN_PLACES = "Germany, Deutschland, Hamburg, Frankfurt, Eschborn, Berlin, München, Munich, Düsseldorf, Köln, Stuttgart, Remote";

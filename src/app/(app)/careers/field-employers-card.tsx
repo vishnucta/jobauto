@@ -6,7 +6,7 @@ import { useState } from "react";
 import { KnownPeople } from "@/components/known-people";
 import { toast, toastResult } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
-import { fieldSearchHref, GERMAN_PLACES, type FieldEmployer } from "@/lib/careers/field-employers";
+import { FIELD_WORDS, fieldSearchHref, GERMAN_PLACES, type FieldEmployer } from "@/lib/careers/field-employers";
 import type { EmployerView } from "@/lib/careers/store-types";
 import type { Person } from "@/lib/network";
 
@@ -21,14 +21,12 @@ import { addEmployer } from "./actions";
 export function FieldEmployersCard({
   employers,
   followed,
-  suggestedWords,
   network,
   onFollowed,
 }: {
   employers: readonly FieldEmployer[];
   /** The careers addresses followed already. */
   followed: ReadonlySet<string>;
-  suggestedWords: string;
   network: Record<string, Person[]>;
   onFollowed: (employer: EmployerView) => void;
 }) {
@@ -37,11 +35,11 @@ export function FieldEmployersCard({
   const follow = async (employer: FieldEmployer) => {
     if (!employer.followUrl || busy) return;
     setBusy(employer.name);
-    const result = toastResult(await addEmployer({ name: employer.name, careersUrl: employer.followUrl, keywords: suggestedWords, places: GERMAN_PLACES, notes: employer.why }));
+    const result = toastResult(await addEmployer({ name: employer.name, careersUrl: employer.followUrl, keywords: FIELD_WORDS, places: GERMAN_PLACES, notes: employer.why }));
     setBusy(null);
     if (!result.ok) return;
     onFollowed(result.data);
-    toast(`Following ${employer.name}: its jobs in Germany that match your words are checked each morning.`);
+    toast(`Following ${employer.name}: its jobs in Germany with titles in your field are checked each morning.`);
   };
 
   return (

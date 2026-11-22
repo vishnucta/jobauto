@@ -13,20 +13,61 @@ import { BOARD_NAMES, type Board } from "./boards";
 // job system's own hosts; a page of the employer's own goes through the
 // guarded fetch, as a posting's link does.
 
-export class CareersError extends Error {}
+export class CareersError extends Error {
+  /** The jobs a feed read word by word gave before it failed: kept rather than lost. */
+  constructor(
+    message: string,
+    readonly partial: FoundPosting[] = [],
+  ) {
+    super(message);
+  }
+}
 
 const TIMEOUT_MS = 20_000;
 const MAX_CHARS = 20 * 1024 * 1024;
 /** Workday lists 20 jobs a page: this many pages for each search word, at most. */
-const WORKDAY_PAGES = 5;
+const WORKDAY_PAGES = 2;
+/** Feeds searched word by word (Workday, SuccessFactors) are asked for this many of the employer's words a check, at most. */
+const SEARCH_WORDS = 5;
+
+/**
+ * How gently careers sites are read: one request to a job system at a
+ * time, a pause after the one before, and a "too many requests" tried once
+ * more after a wait, then left for the next check. Tests set them to 0.
+ */
+export const politeness = { pauseMs: 2_000, retryMs: 30_000 };
+
+/** When each job system was last asked. Workday's limit counts every employer on it at once. */
+const lastAsked = new Map<string, number>();
+const systemOf = (host: string) => (/\.myworkday(jobs|site)\.com$/.test(host) ? "workday" : host);
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function inTurn(host: string): Promise<void> {
+  const since = Date.now() - (lastAsked.get(systemOf(host)) ?? 0);
+  if (since < politeness.pauseMs) await wait(politeness.pauseMs - since);
+  lastAsked.set(systemOf(host), Date.now());
+}
+
+/** The wait a "too many requests" asks for, up to a minute. */
+function retryAfter(response: Response): number {
+  const seconds = Number(response.headers.get("retry-after"));
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 60_000) : politeness.retryMs;
+}
 
 /** The feed's answer as text, or why it couldn't be had, in words. */
-async function get(url: string, init: RequestInit = {}): Promise<string> {
+async function get(url: string, init: RequestInit = {}, again = false): Promise<string> {
+  const host = new URL(url).host;
+  await inTurn(host);
   let response: Response;
   try {
     response = await fetch(url, { ...init, headers: { accept: "application/json, application/xml;q=0.9, */*;q=0.8", ...init.headers }, signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" });
   } catch {
-    throw new CareersError(`${new URL(url).host} couldn't be reached.`);
+    throw new CareersError(`${host} couldn't be reached.`);
+  }
+  if (response.status === 429) {
+    if (again) throw new CareersError(`${host} asks for fewer requests just now. Dossier reads it again at the next check.`);
+    await wait(retryAfter(response));
+    return get(url, init, true);
   }
   if (response.status === 404) throw new CareersError("The job system doesn't know this careers page. Check its address.");
   if (!response.ok) throw new CareersError(`${new URL(url).host} answered ${response.status}.`);
@@ -54,7 +95,10 @@ const iso = (value: unknown): string | null => {
 const web = (value: string) => (/^https?:\/\//i.test(value) ? value.slice(0, 2000) : "");
 
 /** One job, as a posting from the CAREERS source. */
-function job(board: Board, fields: { id: string; title: string; company: string; place?: string; remote?: boolean | null; postedAt?: string | null; url: string; description?: string }): FoundPosting {
+function job(
+  board: Board,
+  fields: { id: string; title: string; company: string; place?: string; remote?: boolean | null; postedAt?: string | null; url: string; description?: string; complete?: boolean },
+): FoundPosting {
   const description = (fields.description ?? "").slice(0, 100_000);
   return {
     source: CAREERS_SOURCE,
@@ -68,7 +112,7 @@ function job(board: Board, fields: { id: string; title: string; company: string;
     url: web(fields.url),
     via: BOARD_NAMES[board.kind],
     description,
-    complete: description.length > 200,
+    complete: fields.complete ?? description.length > 200,
   };
 }
 
@@ -88,6 +132,8 @@ function boardKey(board: Board): string {
       return board.name;
     case "workday":
       return `${board.tenant}/${board.site}`;
+    case "successfactors":
+      return new URL(board.origin).hostname;
     case "page":
       return new URL(board.url).hostname;
   }
@@ -96,8 +142,9 @@ function boardKey(board: Board): string {
 /**
  * Every open job on the board, as postings from the CAREERS source, with
  * `company` as their company where the feed doesn't name one. `words` are
- * the employer's search words: Workday, whose feeds of big employers run
- * to thousands of jobs, is searched for each instead of read whole.
+ * the employer's search words: Workday and SuccessFactors, whose feeds of
+ * big employers run to thousands of jobs, are searched for each of the
+ * first few instead of read whole.
  */
 export async function readBoard(board: Board, company: string, words: readonly string[] = []): Promise<FoundPosting[]> {
   switch (board.kind) {
@@ -179,6 +226,8 @@ export async function readBoard(board: Board, company: string, words: readonly s
     }
     case "workday":
       return readWorkday(board, company, words);
+    case "successfactors":
+      return readSuccessFactors(board, company, words);
     case "page":
       return readPage(board, company);
   }
@@ -222,11 +271,24 @@ const xmlText = (value: string) => parse(cdata(value)).text.replace(/\s+/g, " ")
 
 // ─── Workday ────────────────────────────────────────────────────────────────
 
+/** A feed searched word by word, the first few words: what the words before a failure found stays with the error. */
+async function wordByWord(words: readonly string[], found: Map<string, FoundPosting>, read: (word: string) => Promise<void>): Promise<FoundPosting[]> {
+  for (const word of words.length > 0 ? words.slice(0, SEARCH_WORDS) : [""]) {
+    try {
+      await read(word);
+    } catch (error) {
+      if (error instanceof CareersError && found.size > 0) throw new CareersError(error.message, [...found.values()]);
+      throw error;
+    }
+  }
+  return [...found.values()];
+}
+
 /** Workday's job search, as its careers site asks it: 20 jobs a page, searched for each word. */
 async function readWorkday(board: Extract<Board, { kind: "workday" }>, company: string, words: readonly string[]): Promise<FoundPosting[]> {
   const api = `${board.origin}/wday/cxs/${encodeURIComponent(board.tenant)}/${encodeURIComponent(board.site)}/jobs`;
   const found = new Map<string, FoundPosting>();
-  for (const searchText of words.length > 0 ? words : [""]) {
+  return wordByWord(words, found, async (searchText) => {
     for (let page = 0; page < WORKDAY_PAGES; page++) {
       const data = record(
         await getJson(api, {
@@ -243,7 +305,8 @@ async function readWorkday(board: Extract<Board, { kind: "workday" }>, company: 
           id: path.split("_").pop() || path,
           title: str(item.title),
           company,
-          place: str(item.locationsText),
+          // "2 Locations" names none of them: an unknown place, kept to be checked by hand.
+          place: /^\d+\s+(locations|standorte)$/i.test(str(item.locationsText)) ? "" : str(item.locationsText),
           remote: /remote/i.test(str(item.remoteType)) || null,
           postedAt: workdayPosted(str(item.postedOn)),
           url: `${board.origin}${board.locale ? `/${board.locale}` : ""}/${board.site}${path}`,
@@ -251,8 +314,7 @@ async function readWorkday(board: Extract<Board, { kind: "workday" }>, company: 
       }
       if (postings.length < 20 || (page + 1) * 20 >= Number(data.total ?? 0)) break;
     }
-  }
-  return [...found.values()];
+  });
 }
 
 /** "Posted Today", "Posted Yesterday", "Posted 3 Days Ago" as a date; "30+ Days Ago" too far back to say. */
@@ -261,6 +323,59 @@ export function workdayPosted(text: string, now = new Date()): string | null {
   if (days === undefined || /\+/.test(text)) return null;
   const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - Number(days)));
   return day.toISOString();
+}
+
+// ─── SuccessFactors ─────────────────────────────────────────────────────────
+
+/**
+ * A SuccessFactors career site's RSS search, for each word: its newest
+ * jobs, each with a teaser of its text and its place in the title's last
+ * brackets, "Analyst (w/m/d) (Frankfurt, DE, 60549)".
+ */
+async function readSuccessFactors(board: Extract<Board, { kind: "successfactors" }>, company: string, words: readonly string[]): Promise<FoundPosting[]> {
+  const found = new Map<string, FoundPosting>();
+  return wordByWord(words, found, async (keywords) => {
+    const xml = await get(`${board.origin}/services/rss/job/?${new URLSearchParams({ locale: board.locale, keywords })}`);
+    if (!/<rss[\s>]/.test(xml)) throw new CareersError("The job system's answer couldn't be read.");
+    for (const [, item] of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+      const field = (tag: string) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(item)?.[1] ?? "";
+      const link = xmlText(field("link"));
+      const id = /\/(\d+)\/?(\?|$)/.exec(link)?.[1];
+      if (!id) continue;
+      const heading = xmlText(field("title"));
+      const [, title = heading, place = ""] = /^(.*?\S)\s*\(([^()]*,\s*[A-Z]{2}\b[^()]*)\)$/.exec(heading) ?? [];
+      found.set(
+        id,
+        job(board, {
+          id,
+          title,
+          company,
+          // "Frankfurt, DE, 60549" without its postcode.
+          place: place
+            .split(",")
+            .map((part) => part.trim())
+            .filter((part) => part && !/^\d+$/.test(part))
+            .join(", "),
+          postedAt: iso(xmlText(field("pubDate"))),
+          url: withoutTracking(link),
+          description: htmlText(cdata(field("description"))),
+          // A teaser: the whole posting is read from its link when it's needed.
+          complete: false,
+        }),
+      );
+    }
+  });
+}
+
+/** A link without the feed's utm_ and feedId parameters. */
+function withoutTracking(link: string): string {
+  try {
+    const url = new URL(link);
+    for (const key of [...url.searchParams.keys()]) if (/^utm_|^feedId$/.test(key)) url.searchParams.delete(key);
+    return url.toString();
+  } catch {
+    return link;
+  }
 }
 
 // ─── A page of the employer's own ───────────────────────────────────────────
@@ -300,7 +415,7 @@ async function readPage(board: Extract<Board, { kind: "page" }>, company: string
   }
   if (postings.length === 0) {
     throw new CareersError(
-      "Dossier can't read the jobs on this page. It reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday careers pages, and pages with job data: look for the page where the jobs are listed on one of those, often linked as “All jobs” or “Offene Stellen”.",
+      "Dossier can't read the jobs on this page. It reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday careers pages, SuccessFactors job feeds (the site's address with /services/rss/job/), and pages with job data: look for the page where the jobs are listed on one of those, often linked as “All jobs” or “Offene Stellen”.",
     );
   }
   return postings;

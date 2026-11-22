@@ -4,7 +4,7 @@
 // scraping the page isn't. Anything else is read as a page, for the job data
 // (JSON-LD) many careers pages carry.
 
-export const BOARD_KINDS = ["personio", "greenhouse", "lever", "smartrecruiters", "recruitee", "ashby", "workday", "page"] as const;
+export const BOARD_KINDS = ["personio", "greenhouse", "lever", "smartrecruiters", "recruitee", "ashby", "workday", "successfactors", "page"] as const;
 export type BoardKind = (typeof BOARD_KINDS)[number];
 
 export const BOARD_NAMES: Record<BoardKind, string> = {
@@ -15,6 +15,7 @@ export const BOARD_NAMES: Record<BoardKind, string> = {
   recruitee: "Recruitee",
   ashby: "Ashby",
   workday: "Workday",
+  successfactors: "SuccessFactors",
   page: "its own page",
 };
 
@@ -27,10 +28,13 @@ export type Board =
   | { kind: "recruitee"; slug: string }
   | { kind: "ashby"; name: string }
   | { kind: "workday"; origin: string; tenant: string; site: string; locale: string }
+  /** A SuccessFactors career site on the employer's own host, by its job feed's address: …/services/rss/job/. */
+  | { kind: "successfactors"; origin: string; locale: string }
   | { kind: "page"; url: string };
 
 const SLUG = /^[\w.-]{1,100}$/;
 const LOCALE = /^[a-z]{2}-[A-Z]{2}$/;
+const SF_LOCALE = /^[a-z]{2}_[A-Z]{2}$/;
 
 /** The board a careers page's address points to; null when it isn't a web address. */
 export function boardFor(address: string): Board | null {
@@ -66,6 +70,11 @@ export function boardFor(address: string): Board | null {
       return { kind: "workday", origin: url.origin, tenant: rest[1], site: rest[2], locale: LOCALE.test(first) ? first : "" };
     }
   }
+  // The host is the employer's own (jobs.kpmg.de), so only the feed's path tells SuccessFactors apart.
+  if (path.slice(0, 3).join("/") === "services/rss/job") {
+    const locale = url.searchParams.get("locale") ?? "";
+    return { kind: "successfactors", origin: url.origin, locale: SF_LOCALE.test(locale) ? locale : "de_DE" };
+  }
   url.hash = "";
   return { kind: "page", url: url.toString() };
 }
@@ -85,6 +94,6 @@ export function nameFromBoard(board: Board): string {
               ? board.name
               : board.kind === "workday"
                 ? board.tenant
-                : new URL(board.url).hostname.replace(/^(www|careers|jobs|karriere)\./, "").split(".")[0];
+                : new URL(board.kind === "successfactors" ? board.origin : board.url).hostname.replace(/^(www|careers|jobs|karriere)\./, "").split(".")[0];
   return raw.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

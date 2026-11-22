@@ -86,14 +86,14 @@ export function CareersScreen({ employers: initial, counts, suggestedWords, toda
       <div className="flex max-w-[860px] flex-col gap-5 px-10 pb-16">
         <p className="text-sm text-pretty text-muted">
           Follow the employers you&apos;d most like to work for. Their careers pages are checked every morning, and new jobs that match the words and places you give go into Positions as a
-          search of their own, often days before job boards list them. Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, and pages that
+          search of their own, often days before job boards list them. Dossier reads Personio, Greenhouse, Lever, SmartRecruiters, Recruitee, Ashby and Workday pages, SuccessFactors job feeds, and pages that
           carry job data.
         </p>
 
         <AddEmployer suggestedWords={suggestedWords} onAdded={added} />
 
         {fieldEmployers.length > 0 && (
-          <FieldEmployersCard employers={fieldEmployers} followed={new Set(employers.map((employer) => employer.careersUrl))} suggestedWords={suggestedWords} network={network} onFollowed={added} />
+          <FieldEmployersCard employers={fieldEmployers} followed={new Set(employers.map((employer) => employer.careersUrl))} network={network} onFollowed={added} />
         )}
 
         {employers.length > 0 && (

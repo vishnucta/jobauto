@@ -40,13 +40,16 @@ export async function createEmployer(input: EmployerFields): Promise<EmployerVie
   return employerView(await prisma.employer.create({ data: stored(input) }));
 }
 
-/** Saves an employer's fields; a new address is checked afresh. Null when it's gone. */
+/** Saves an employer's fields; a new address is checked afresh, and new words or places can be read right away. Null when it's gone. */
 export async function updateEmployer(id: string, input: EmployerFields): Promise<EmployerView | null> {
   const before = await prisma.employer.findUnique({ where: { id } });
   if (!before) return null;
   const data = stored(input);
   const moved = data.careersUrl !== before.careersUrl;
-  return employerView(await prisma.employer.update({ where: { id }, data: { ...data, ...(moved ? { problem: null, lastCheckedAt: null, lastMatched: 0, lastNew: 0 } : {}) } }));
+  const reread = data.keywords !== before.keywords || data.places !== before.places;
+  return employerView(
+    await prisma.employer.update({ where: { id }, data: { ...data, ...(moved ? { problem: null, lastCheckedAt: null, lastMatched: 0, lastNew: 0 } : reread ? { lastCheckedAt: null } : {}) } }),
+  );
 }
 
 export async function setEmployerEnabled(id: string, enabled: boolean): Promise<EmployerView | null> {

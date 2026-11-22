@@ -27,6 +27,9 @@ export { careersCheckResultSchema, type CareersCheckResult };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
+/** A page read less than this long ago isn't read again, whatever asks (Check now twice, the morning check after it): its site isn't asked too often. */
+const REREAD_MS = 60 * 60 * 1000;
+
 /** Checks the given employers, or every one that's on, one page after another. */
 export async function checkCareersPages({ ids }: { ids?: string[] }, context: Pick<JobContext, "step" | "signal">, now = new Date()): Promise<CareersCheckResult> {
   const employers = await prisma.employer.findMany({ where: ids ? { id: { in: ids } } : { enabled: true }, orderBy: { name: "asc" } });
@@ -35,26 +38,37 @@ export async function checkCareersPages({ ids }: { ids?: string[] }, context: Pi
   const matched = new Map<string, number>();
   const problems: string[] = [];
   let checked = 0;
+  let recent = 0;
   for (const employer of employers) {
     if (context.signal.aborted) break;
+    if (employer.lastCheckedAt && now.getTime() - employer.lastCheckedAt.getTime() < REREAD_MS) {
+      recent += 1;
+      continue;
+    }
     checked += 1;
     await context.step(employers.length === 1 ? `Reading ${employer.name}'s careers page` : `Reading ${employer.name}'s careers page (${employers.indexOf(employer) + 1} of ${employers.length})`);
     const board = boardFor(employer.careersUrl);
-    try {
-      if (!board) throw new CareersError("That isn't a web address.");
-      const jobs = (await readBoard(board, employer.name, listOf(employer.keywords))).filter((posting) => posting.title && matchesEmployer(posting, employer));
-      matched.set(employer.id, jobs.length);
-      for (const posting of jobs) {
+    const keep = (jobs: FoundPosting[]) => {
+      const kept = jobs.filter((posting) => posting.title && matchesEmployer(posting, employer));
+      matched.set(employer.id, kept.length);
+      for (const posting of kept) {
         if (owner.has(postingKey(posting))) continue;
         owner.set(postingKey(posting), employer.id);
         found.push(posting);
       }
-      await prisma.employer.update({ where: { id: employer.id }, data: { lastCheckedAt: now, lastMatched: jobs.length, lastNew: 0, problem: null } });
+      return kept.length;
+    };
+    try {
+      if (!board) throw new CareersError("That isn't a web address.");
+      const count = keep(await readBoard(board, employer.name, listOf(employer.keywords)));
+      await prisma.employer.update({ where: { id: employer.id }, data: { lastCheckedAt: now, lastMatched: count, lastNew: 0, problem: null } });
     } catch (error) {
       const problem = error instanceof CareersError ? error.message : "Its careers page couldn't be read.";
       if (!(error instanceof CareersError)) logServerError("careers page", error);
       problems.push(`${employer.name}: ${problem}`);
-      await prisma.employer.update({ where: { id: employer.id }, data: { lastCheckedAt: now, problem } });
+      // What its first words found before it stopped (a "too many requests", say) still goes into Positions.
+      const partial = error instanceof CareersError && error.partial.length > 0 ? { lastMatched: keep(error.partial), lastNew: 0 } : {};
+      await prisma.employer.update({ where: { id: employer.id }, data: { lastCheckedAt: now, problem, ...partial } });
     }
   }
 
@@ -72,7 +86,9 @@ export async function checkCareersPages({ ids }: { ids?: string[] }, context: Pi
   const message =
     employers.length === 0
       ? "There are no careers pages to check. Add an employer first."
-      : `${added.length > 0 ? `${plural(added.length, "new job", "new jobs")} added to Positions` : "No new jobs"} from ${plural(employers.length, "careers page", "careers pages")}.${problems.length ? ` ${plural(problems.length, "page", "pages")} couldn't be read.` : ""}`;
+      : checked === 0 && recent > 0
+        ? `${recent === 1 ? "This careers page was" : "Every careers page was"} read less than an hour ago: Dossier reads ${recent === 1 ? "it" : "them"} again later, so the sites aren't asked too often.`
+        : `${added.length > 0 ? `${plural(added.length, "new job", "new jobs")} added to Positions` : "No new jobs"} from ${plural(checked, "careers page", "careers pages")}.${problems.length ? ` ${plural(problems.length, "page", "pages")} couldn't be read.` : ""}${recent ? ` ${plural(recent, "page", "pages")} read less than an hour ago left for later.` : ""}`;
   return { checked, added: added.length, searchId: id, problems, message };
 }
 

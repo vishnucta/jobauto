@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { boardFor } from "./boards";
-import { CareersError, readBoard, workdayPosted } from "./read";
+import { CareersError, politeness, readBoard, workdayPosted } from "./read";
 
 vi.mock("@/lib/posting-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/posting-fetch")>()),
@@ -11,6 +11,9 @@ vi.mock("@/lib/posting-fetch", async (importOriginal) => ({
 const pages: Record<string, string> = {};
 const answers = new Map<string, () => Response>();
 const asked: { url: string; init?: RequestInit }[] = [];
+
+// No pauses between requests in tests.
+beforeEach(() => Object.assign(politeness, { pauseMs: 0, retryMs: 0 }));
 
 function serve(url: string, body: unknown, status = 200) {
   answers.set(url, () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status }));
@@ -33,6 +36,11 @@ function stubFetch() {
     }),
   );
 }
+
+const SUCCESSFACTORS = `<?xml version="1.0" encoding="UTF-8" ?><rss version='2.0'><channel><title>Acme - Individuelle Suche Reporting</title>
+<item><title><![CDATA[Regulatory Reporting Analyst (w/m/d) (Frankfurt, DE, 60549)]]></title><description><![CDATA[<p>Meldewesen &amp; COREP.</p>]]></description><pubDate>Fri, 20 Nov 2026 2:00:00 GMT</pubDate><link>https://jobs.acme.de/job/Frankfurt-Regulatory-Reporting-Analyst-60549/995106401/?feedId=null&amp;utm_source=J2WRSS&amp;utm_medium=rss</link></item>
+<item><title><![CDATA[Werkstudent Reporting]]></title><description><![CDATA[]]></description><pubDate>Thu, 19 Nov 2026 2:00:00 GMT</pubDate><link>https://jobs.acme.de/job/Werkstudent-Reporting/995106402/</link></item>
+</channel></rss>`;
 
 const PERSONIO = `<?xml version="1.0" encoding="UTF-8"?>
 <workzag-jobs>
@@ -92,6 +100,59 @@ describe("readBoard", () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ externalId: "workday:acme/Careers:R100", url: "https://acme.wd3.myworkdayjobs.com/de-DE/Careers/job/Hamburg/EMIR-Analyst_R100", complete: false });
     expect(asked.map(({ init }) => JSON.parse(init!.body as string).searchText)).toEqual(["EMIR", "Reporting"]);
+  });
+
+  it("asks Workday for the first five words, two pages each at most, and keeps a job in several places", async () => {
+    stubFetch();
+    const api = "https://acme.wd3.myworkdayjobs.com/wday/cxs/acme/Careers/jobs";
+    let next = 0;
+    answers.set(api, () => {
+      const page = Array.from({ length: 20 }, (_, index) => ({ title: "Reporting Analyst", externalPath: `/job/x_R${next + index}`, locationsText: "2 Locations" }));
+      next += 20;
+      return new Response(JSON.stringify({ total: 500, jobPostings: page }));
+    });
+    const jobs = await readBoard(boardFor("https://acme.wd3.myworkdayjobs.com/Careers")!, "Acme", ["a", "b", "c", "d", "e", "f", "g"]);
+    const words = asked.map(({ init }) => JSON.parse(init!.body as string).searchText);
+    expect(words).toEqual(["a", "a", "b", "b", "c", "c", "d", "d", "e", "e"]);
+    expect(jobs[0].place).toBe("");
+  });
+
+  it("tries a 'too many requests' once more, then keeps what the words before it found", async () => {
+    stubFetch();
+    const api = "https://acme.wd3.myworkdayjobs.com/wday/cxs/acme/Careers/jobs";
+    answers.set(api, () => new Response("", { status: 429 }));
+    await expect(readBoard(boardFor("https://acme.wd3.myworkdayjobs.com/Careers")!, "Acme", ["EMIR"])).rejects.toThrow("acme.wd3.myworkdayjobs.com asks for fewer requests just now. Dossier reads it again at the next check.");
+    expect(asked).toHaveLength(2);
+
+    asked.length = 0;
+    let calls = 0;
+    answers.set(api, () =>
+      ++calls === 1 ? new Response(JSON.stringify({ total: 1, jobPostings: [{ title: "EMIR Analyst", externalPath: "/job/Hamburg/EMIR-Analyst_R100", locationsText: "Hamburg" }] })) : new Response("", { status: 429 }),
+    );
+    const failed = await readBoard(boardFor("https://acme.wd3.myworkdayjobs.com/Careers")!, "Acme", ["EMIR", "MiFIR"]).catch((error: unknown) => error);
+    expect(failed).toBeInstanceOf(CareersError);
+    expect((failed as CareersError).partial.map((job) => job.title)).toEqual(["EMIR Analyst"]);
+  });
+
+  it("searches a SuccessFactors job feed for each word, its place from the title", async () => {
+    stubFetch();
+    serve("https://jobs.acme.de/services/rss/job/?locale=de_DE&keywords=Reporting", SUCCESSFACTORS);
+    serve("https://jobs.acme.de/services/rss/job/?locale=de_DE&keywords=Meldewesen", SUCCESSFACTORS);
+    const jobs = await readBoard(boardFor("https://jobs.acme.de/services/rss/job/?locale=de_DE")!, "Acme", ["Reporting", "Meldewesen"]);
+    expect(asked).toHaveLength(2);
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toMatchObject({
+      externalId: "successfactors:jobs.acme.de:995106401",
+      title: "Regulatory Reporting Analyst (w/m/d)",
+      company: "Acme",
+      place: "Frankfurt, DE",
+      postedAt: "2026-11-20T02:00:00.000Z",
+      url: "https://jobs.acme.de/job/Frankfurt-Regulatory-Reporting-Analyst-60549/995106401/",
+      via: "SuccessFactors",
+      description: "Meldewesen & COREP.",
+      complete: false,
+    });
+    expect(jobs[1]).toMatchObject({ title: "Werkstudent Reporting", place: "" });
   });
 
   it("reads JobPosting data on a page of the employer's own, and says when there's none", async () => {

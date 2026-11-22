@@ -23,6 +23,9 @@ describe("boardFor", () => {
 
   it("reads anything else as a page of the employer's own, and refuses what isn't a web address", () => {
     expect(boardFor("https://www.acme.de/karriere#jobs")).toEqual({ kind: "page", url: "https://www.acme.de/karriere" });
+    // A SuccessFactors career site is on the employer's own host: its job feed's address tells it apart.
+    expect(boardFor("https://jobs.acme.de/services/rss/job/?locale=en_US&keywords=x")).toEqual({ kind: "successfactors", origin: "https://jobs.acme.de", locale: "en_US" });
+    expect(boardFor("https://karriere.acme.de/services/rss/job/")).toEqual({ kind: "successfactors", origin: "https://karriere.acme.de", locale: "de_DE" });
     expect(boardFor("acme.de/karriere")).toBeNull();
     expect(boardFor("ftp://acme.de/")).toBeNull();
   });
