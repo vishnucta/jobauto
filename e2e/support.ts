@@ -93,23 +93,28 @@ export async function resetData(): Promise<void> {
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'",
   );
   const truncate = `TRUNCATE TABLE ${tables.map(({ tablename }) => `"${tablename}"`).join(", ")} RESTART IDENTITY CASCADE`;
-  // The app may be writing as it's emptied (the last test's requests, its background checks), and
+  // The app may be writing as it's emptied (the last test's requests, its background jobs), and
   // Postgres can end that in a deadlock (40P01): it rolls the TRUNCATE back, so trying again is safe.
+  // A job that finishes in between can also start a first profile again, and the demo then refuses
+  // to load over it: emptied once more, it loads.
   for (let attempt = 1; ; attempt++) {
     try {
       await sql(truncate);
-      break;
+      execFileSync("yarn", ["prisma", "db", "seed", "--", "--demo"], {
+        env: { ...process.env, DATABASE_URL: e2eDatabaseUrl() },
+        stdio: "pipe",
+        // Windows runs yarn as yarn.cmd, which needs a shell.
+        shell: process.platform === "win32",
+      });
+      return;
     } catch (error) {
-      if ((error as { code?: string }).code !== "40P01" || attempt === 3) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+      const deadlock = (error as { code?: string }).code === "40P01";
+      const { stdout = "", stderr = "" } = error as { stdout?: unknown; stderr?: unknown };
+      const written = `${String(stdout)}${String(stderr)}`.includes("already has a profile or applications");
+      if ((!deadlock && !written) || attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
     }
   }
-  execFileSync("yarn", ["prisma", "db", "seed", "--", "--demo"], {
-    env: { ...process.env, DATABASE_URL: e2eDatabaseUrl() },
-    stdio: "pipe",
-    // Windows runs yarn as yarn.cmd, which needs a shell.
-    shell: process.platform === "win32",
-  });
 }
 
 /** The startups' pages the app asked the fake sites for (#222), with its user agent. */
