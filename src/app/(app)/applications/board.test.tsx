@@ -104,7 +104,7 @@ describe("the board (E9-2)", () => {
     open();
     const draft = within(column("Draft")).getByRole("listitem");
     expect(within(draft).getByText("Apply by Sat 3 Oct · 3 days")).toHaveClass("text-warning");
-    expect(within(draft).getByRole("link", { name: "Send for Senior Product Designer, Brightline Transit" })).toHaveAttribute("href", "/applications/brightline?tab=email");
+    expect(within(draft).getByRole("link", { name: "Send for Senior Product Designer, Brightline Transit" })).toHaveAttribute("href", "/applications/brightline?start=send");
     expect(within(within(column("Offer")).getByRole("listitem")).getByRole("link", { name: /^Review/ })).toHaveAttribute("href", "/applications/oaken");
     // A recent send has nothing to do yet.
     expect(within(column("Sent")).queryByRole("link", { name: /^Follow up/ })).not.toBeInTheDocument();

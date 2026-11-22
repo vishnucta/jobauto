@@ -190,7 +190,7 @@ describe("resolveListParams (E9-4, LST-7, E29-1)", () => {
 describe("rowAction (E29-2, E29-4)", () => {
   const base = { waiting: 0, docs: { resume: true, letter: true }, flag: null };
   it("names the next thing to do, shorter on a card, with a waiting reply first", () => {
-    expect(rowAction({ ...base, status: "DRAFT" }, "card")).toEqual({ label: "Send", tab: "email" });
+    expect(rowAction({ ...base, status: "DRAFT" }, "card")).toEqual({ label: "Send", tab: "email", start: "send" });
     expect(rowAction({ ...base, status: "DRAFT", docs: { resume: false, letter: false } }, "list")).toEqual({ label: "Finish draft", tab: "resume" });
     expect(rowAction({ ...base, status: "SENT" }, "card")).toBeNull();
     expect(rowAction({ ...base, status: "SENT", flag: { kind: "quiet" } }, "card")).toEqual({ label: "Follow up", tab: "email", start: "follow-up" });
@@ -199,7 +199,7 @@ describe("rowAction (E29-2, E29-4)", () => {
     expect(rowAction({ ...base, status: "OFFER" }, "list")).toEqual({ label: "Review offer", tab: "resume" });
     expect(rowAction({ ...base, status: "REJECTED", waiting: 1 }, "card")).toBeNull();
     // The application's header says it in full (E30-2).
-    expect(rowAction({ ...base, status: "DRAFT" }, "header")).toEqual({ label: "Review and send", tab: "email" });
+    expect(rowAction({ ...base, status: "DRAFT" }, "header")).toEqual({ label: "Review and send", tab: "email", start: "send" });
     expect(rowAction({ ...base, status: "SCREENING", waiting: 2 }, "header")).toEqual({ label: "Answer reply", tab: "conversation" });
   });
 });
@@ -243,5 +243,7 @@ describe("actionHref (E30-6)", () => {
     expect(actionHref("a1", { label: "Prepare", tab: "resume", start: "prepare" })).toBe("/applications/a1?start=prepare");
     expect(actionHref("a1", { label: "Answer", tab: "conversation" })).toBe("/applications/a1?tab=conversation");
     expect(actionHref("a1", { label: "Finish draft", tab: "resume" })).toBe("/applications/a1");
+    // Send opens where the send guide says, by how the employer takes applications: the page picks the tab.
+    expect(actionHref("a1", { label: "Send", tab: "email", start: "send" })).toBe("/applications/a1?start=send");
   });
 });

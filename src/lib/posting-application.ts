@@ -26,8 +26,12 @@ export async function keptApplication(ref: PostingRef): Promise<string | null> {
     select: { applicationId: true, mergedInto: { select: { applicationId: true } } },
   });
   const kept = posting?.applicationId ?? posting?.mergedInto?.applicationId ?? null;
-  if (kept) return kept;
-  const link = linkKey(ref.url);
+  return kept ?? sameLinkApplication(ref.url);
+}
+
+/** An application made from the same link, for a posting Positions doesn't keep (save_application from a link). */
+export async function sameLinkApplication(url: string): Promise<string | null> {
+  const link = linkKey(url);
   if (!link) return null;
   const sameLink = await prisma.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true }, orderBy: { createdAt: "asc" } });
   return sameLink.find((application) => linkKey(application.postingUrl) === link)?.id ?? null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sendChannel, sendStep } from "./send-step";
+import { sendChannel, sendStep, sendTab } from "./send-step";
 import type { ApplyPlanView } from "./view";
 
 const form: ApplyPlanView = { kind: "web", url: "https://jobs.example/apply/1", host: "jobs.example", atsLabel: "Personio", account: false, autoSubmitOk: false, board: false };
@@ -14,6 +14,16 @@ describe("sendChannel", () => {
     expect(sendChannel(board)).toBe("board");
     expect(sendChannel(email)).toBe("email");
     expect(sendChannel({ kind: "none" })).toBe("none");
+  });
+});
+
+describe("sendTab (Send on a card or a list row)", () => {
+  it("opens where the step's button goes", () => {
+    expect(sendTab(email)).toBe("email");
+    expect(sendTab(form)).toBe("apply");
+    expect(sendTab({ kind: "none" })).toBe("posting");
+    // The job board's link is the guide's button above the documents.
+    expect(sendTab(board)).toBe("resume");
   });
 });
 

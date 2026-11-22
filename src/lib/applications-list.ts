@@ -233,8 +233,8 @@ export function laneNotes(rows: readonly LaneRow[]): Partial<Record<ApplicationS
 export type RowAction = {
   label: string;
   tab: "resume" | "email" | "conversation";
-  /** The work the click starts on the application's page (U3): Prepare's checklist, or a follow-up's draft. */
-  start?: "prepare" | "follow-up";
+  /** The work the click starts on the application's page (U3): Prepare's checklist, a follow-up's draft, or the send guide's step for a written draft. */
+  start?: "prepare" | "follow-up" | "send";
 };
 
 /**
@@ -252,7 +252,7 @@ export function rowAction(
     return { label: place === "header" ? "Answer reply" : "Answer", tab: "conversation" };
   switch (row.status) {
     case ApplicationStatus.DRAFT:
-      return row.docs.resume ? { label: card ? "Send" : "Review and send", tab: "email" } : { label: card ? "Finish" : "Finish draft", tab: "resume" };
+      return row.docs.resume ? { label: card ? "Send" : "Review and send", tab: "email", start: "send" } : { label: card ? "Finish" : "Finish draft", tab: "resume" };
     case ApplicationStatus.SENT:
     case ApplicationStatus.SCREENING:
       return row.flag?.kind === "quiet" ? { label: card ? "Follow up" : "Draft a follow-up", tab: "email", start: "follow-up" } : null;
@@ -265,9 +265,9 @@ export function rowAction(
   }
 }
 
-/** Where a row's or card's button goes. */
+/** Where a row's or card's button goes. Send opens on the tab the send guide picks there, by how the employer takes applications (send-step.ts). */
 export const actionHref = (id: string, action: RowAction) => {
-  const query = new URLSearchParams({ ...(action.tab === "resume" ? {} : { tab: action.tab }), ...(action.start ? { start: action.start } : {}) }).toString();
+  const query = new URLSearchParams({ ...(action.tab === "resume" || action.start === "send" ? {} : { tab: action.tab }), ...(action.start ? { start: action.start } : {}) }).toString();
   return `/applications/${id}${query ? `?${query}` : ""}`;
 };
 

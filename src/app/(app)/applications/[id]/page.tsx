@@ -6,6 +6,7 @@ import { isAiConfigured } from "@/lib/ai/config";
 import { editsSchema, matchSchema } from "@/lib/application-data";
 import { applicationFlag, latestContact } from "@/lib/application-flag";
 import { loadApplication, loadDocuments, readJson } from "@/lib/application-documents";
+import { sendTab } from "@/lib/apply/send-step";
 import { loadApplyTab } from "@/lib/apply/view-data";
 import { formatShortDate } from "@/lib/dates";
 import { resolveFileName } from "@/lib/file-name";
@@ -97,6 +98,8 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
   const moveTo = emails.some((mail) => mail.direction === "INCOMING") ? await applicationChoices(id) : [];
 
   const apply = await loadApplyTab(application, profile, settings, timeZone);
+  // Send on a card or a list row opens where the send guide's one step goes, by how this employer takes applications.
+  const firstTab = start === "send" && !tab ? sendTab(apply.plan) : tab;
   const prepJobs = await findUnfinishedJobs(prepJobKey(id));
   const sampleJobs = await findUnfinishedJobs(workSampleJobKey(id));
   const anlagen = (await listAttachments()).filter((attachment) => attachment.enabled).map((attachment) => attachment.name);
@@ -255,7 +258,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       }
       baseSections={sectionsWithContent(resumeContent(liveProfile, { includeReferences: true })).map((key) => ({ key, name: sectionName(key, liveProfile.customSections) }))}
       letterDate={letterDate}
-      initialTab={tabFrom(tab)}
+      initialTab={tabFrom(firstTab)}
       apply={apply}
       prep={{ pack: callPrepOf(application.prep), jobId: prepJobs.at(-1)?.id ?? null }}
       workSample={{ sample: workSampleOf(application.workSample), jobId: sampleJobs.at(-1)?.id ?? null }}

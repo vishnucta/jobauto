@@ -125,13 +125,22 @@ export async function startPreparing(
   postingId: string,
   { profileId = null, note = "" }: { profileId?: string | null; note?: string } = {},
 ): Promise<{ jobId: string | null; applicationId: string | null }> {
+  const existing = await postingApplication(postingId);
+  if (existing.applicationId || existing.jobId) return existing;
+  return { jobId: await startJob(prepareApplicationJob, { postingId, profileId, note }, { key: prepareJobKey(postingId) }), applicationId: null };
+}
+
+/**
+ * The application a kept posting has, or the task writing one, before
+ * anything writes another: Prepare it for me, and save_application with
+ * what Claude wrote. Both null when it has neither.
+ */
+export async function postingApplication(postingId: string): Promise<{ jobId: string | null; applicationId: string | null }> {
   const posting = await prisma.posting.findUnique({ where: { id: postingId }, select: { id: true, source: true, externalId: true, url: true, applicationId: true } });
   if (!posting) throw new ActionError("That posting is no longer kept. Find it again and prepare it from there.");
   if (posting.applicationId) return { jobId: null, applicationId: posting.applicationId };
   const [unfinished] = await findUnfinishedJobs(prepareJobKey(postingId));
   if (unfinished) return { jobId: unfinished.id, applicationId: null };
   // Made by the job agent or from the same link: answered with, or followed while the agent writes it.
-  const elsewhere = await madeElsewhere(posting);
-  if (elsewhere.applicationId || elsewhere.jobId) return elsewhere;
-  return { jobId: await startJob(prepareApplicationJob, { postingId, profileId, note }, { key: prepareJobKey(postingId) }), applicationId: null };
+  return madeElsewhere(posting);
 }

@@ -211,6 +211,26 @@ describe("the Claude connector's tools (#221)", () => {
       postingUrl: "https://jobs.example/sign-in-only",
     });
 
+    // One application per posting: saving again, from the search or from the same link, answers with the first and saves nothing.
+    const count = await prisma().application.count();
+    const again = await tool("save_application", {
+      search_id: search.id,
+      number: 1,
+      details: { company: "Acme", role: "Product Designer" },
+      resume: { summary: "Designer who ships calm products.", roles: [], skills: ["Figma"] },
+      cover_letter: { paragraphs: [{ text: "Hello again." }] },
+    });
+    expect(again.json).toMatchObject({ application_id: id, status: "exists", next: expect.stringContaining("update_application") });
+    const sameLink = await tool("save_application", {
+      posting_url: "https://jobs.example/sign-in-only",
+      posting_text: "Product Designer at Acme",
+      details: { company: "Acme", role: "Product Designer" },
+      resume: { summary: "Designer who ships calm products.", roles: [], skills: ["Figma"] },
+      cover_letter: { paragraphs: [{ text: "Hello again." }] },
+    });
+    expect(sameLink.json).toMatchObject({ application_id: pasted.json.application_id, status: "exists" });
+    expect(await prisma().application.count()).toBe(count);
+
     expect(await tool("save_application", { details: { company: "Acme", role: "Designer" }, resume: { summary: "", roles: [], skills: [] }, cover_letter: { paragraphs: [{ text: "Hi" }] } })).toMatchObject({
       isError: true,
     });

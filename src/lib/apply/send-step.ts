@@ -75,3 +75,13 @@ export function sendStep(
       };
   }
 }
+
+/**
+ * The tab Send on a card or a list row opens (start=send): the one the
+ * step's button opens. A job board's link is the guide's own button, above
+ * the documents, so that opens on the documents.
+ */
+export function sendTab(plan: ApplyPlanView): "email" | "apply" | "posting" | "resume" {
+  const { target } = sendStep(plan, { hasEmail: false, waitingInBrowser: false, gmailSends: false });
+  return "tab" in target ? target.tab : "resume";
+}

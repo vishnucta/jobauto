@@ -31,7 +31,7 @@ describe("a status's own list (E29-2)", () => {
     expect(screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("link")[0].textContent)).toEqual(["Soon", "Later"]);
     expect(cells(/^Soon/)).toEqual(["SoonLedgerly · Amsterdam · Hybrid", "Thu 19 Nov · 3 days", "5/7", "Resume and letter", "Review and send for Soon, Ledgerly", "⋯"]);
     expect(screen.getByText("Thu 19 Nov · 3 days")).toHaveClass("text-warning");
-    expect(screen.getByRole("link", { name: "Review and send for Soon, Ledgerly" })).toHaveAttribute("href", "/applications/soon?tab=email");
+    expect(screen.getByRole("link", { name: "Review and send for Soon, Ledgerly" })).toHaveAttribute("href", "/applications/soon?start=send");
     expect(screen.getByRole("link", { name: "Finish draft for Later, Ledgerly" })).toHaveAttribute("href", "/applications/later");
   });
 

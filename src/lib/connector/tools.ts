@@ -29,9 +29,10 @@ import { logServerError } from "@/lib/log";
 import { coverageOf, fitWords } from "@/lib/posting-coverage";
 import { saveScore } from "@/lib/posting-scores";
 import { postingsOfSearch } from "@/lib/library";
+import { sameLinkApplication } from "@/lib/posting-application";
 import { loadSearch, runSearch, showMoreFor } from "@/lib/posting-searches";
 import { foundFromPosting } from "@/lib/postings";
-import { startPreparing } from "@/lib/jobs/prepare-application";
+import { postingApplication, startPreparing } from "@/lib/jobs/prepare-application";
 import { prepareOnStatus } from "@/lib/jobs/prepare-call";
 import { prisma } from "@/lib/prisma";
 import { loadProfile } from "@/lib/profile-data";
@@ -448,7 +449,8 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       description:
         "Saves a tailored resume and cover letter you wrote as a Draft application in Dossier, where the user can review, edit and download them as PDFs. " +
         "Give the posting (posting_id or paste_id when Dossier handed it over, search_id and number, posting_url or posting_text), its details, the resume (by the ids from get_profile) and the letter. " +
-        "Only use facts from the profile. Nothing is sent. To change an application already saved, use update_application instead of saving it again.",
+        "Only use facts from the profile. Nothing is sent. A posting gets one application: one that has an application already, or one being written, answers with it and nothing is saved; " +
+        "to change an application already saved, use update_application instead of saving it again.",
       inputSchema: z.object({
         ...postingSource,
         details: writtenDetailsSchema,
@@ -465,6 +467,25 @@ export function createDossierServer(origin: string, clientName = ""): McpServer 
       if ("error" in chosen) return failure(chosen.error);
       const posting = await resolvePosting(source);
       if ("error" in posting) return failure(posting.error);
+      // One application per posting, as Prepare it for me and draft_application keep it (audit round 2).
+      const existing = posting.postingId ? await postingApplication(posting.postingId) : { jobId: null, applicationId: await sameLinkApplication(posting.url) };
+      if (existing.applicationId) {
+        return text({
+          application_id: existing.applicationId,
+          status: "exists",
+          message: "This posting has an application already, so nothing was saved.",
+          next: "Read it with get_application; to put what you wrote in it, use update_application on this application_id.",
+          link: linkTo(`/applications/${existing.applicationId}`),
+        });
+      }
+      if (existing.jobId) {
+        return text({
+          task_id: existing.jobId,
+          status: "being written",
+          message: "Dossier is writing this posting's application already, so nothing was saved.",
+          next: "Follow it with check_task; once it's done, change it with update_application.",
+        });
+      }
       const saved = await saveWrittenApplication({
         profileId: chosen.id,
         posting: posting.text.slice(0, 100_000),
