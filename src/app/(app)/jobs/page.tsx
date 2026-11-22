@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { listProfiles, openProfileId } from "@/lib/profiles";
+import { listProfiles, openProfileId, profileSearchDefaults, type ProfileSummary } from "@/lib/profiles";
 import { isAiUsable } from "@/lib/ai/config";
 import { profileGerman } from "@/lib/german-need";
 import { loadHiddenTitles } from "@/lib/hidden-titles-data";
@@ -11,10 +11,11 @@ import { portalsOffNote } from "@/lib/job-search/portals-off";
 import { COUNTRIES } from "@/lib/job-search/countries";
 import { isAddedSource } from "@/lib/job-search/sources";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
-import { defaultSearch, EMPTY_QUERY, foundSearchIds, latestRole, libraryFromParams, queryFromParams, searchQuerySchema } from "@/lib/job-search/search";
+import { defaultSearch, foundSearchIds, latestRole, libraryFromParams, queryFromParams, type SearchQuery } from "@/lib/job-search/search";
 import { countLibrary, listLibrary } from "@/lib/library";
 import { listSearches, loadSearch } from "@/lib/posting-searches";
 import { prisma } from "@/lib/prisma";
+import type { ProfileData } from "@/lib/profile";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { loadScoringOff } from "@/lib/scoring-off-data";
@@ -33,7 +34,8 @@ export const metadata: Metadata = { title: "Positions" };
  * search written in the URL (?q=…) only fills in the form.
  *
  * Kept from Find jobs (jobauto fork): search words from the profile last
- * opened, as chips in the form, and the titles employers use for its skills;
+ * opened (or the first with any, while that one is still empty), as chips
+ * in the form, a new search starting from the first of them, and the titles employers use for its skills;
  * the German each posting asks for against the profile's; who she knows at
  * each employer; "Prepare it for me"; links to Recruiters and Careers pages,
  * which have screens of their own.
@@ -62,7 +64,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   // An agent run's several searches (E26-4) have no one search to show above the list.
   const ids = foundSearchIds(filters.found);
   const oneSearch = ids?.length === 1 ? ids[0] : null;
-  const [library, searches, foundSearch, profile, scoringOff, portalsOff] = await Promise.all([
+  const [library, searches, foundSearch, opened, scoringOff, portalsOff] = await Promise.all([
     listLibrary(filters, { now }),
     listSearches({ timeZone, now }),
     oneSearch ? loadSearch(oneSearch, { timeZone, now }) : null,
@@ -73,7 +75,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     portalsOffNote(jobSearchView(config).portals),
   ]);
   const enabled = enabledPortals(config);
-  const words = searchWords(profile, now);
+  const { id: wordsFrom, profile, words } = await profileWithWords(opened, profileId, profiles, now);
+  const chips = searchChips(words);
   // What an AI client or a careers page added was no search of the user's: the form doesn't start from it.
   const searched = foundSearch && !isAddedSource(foundSearch.source) ? foundSearch.query : null;
   const [network, alsoAdvertised] = await Promise.all([
@@ -92,9 +95,9 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       scoreInClaude={scoreInClaude}
       profiles={profiles}
       // The profile's own search words, as one-click chips in the form, and all of them under "All search words"; named when there are several profiles.
-      suggestions={searchChips(words)}
+      suggestions={chips}
       wordGroups={words.groups.map((group) => ({ title: group.title, words: group.words.map(({ text, why }) => ({ text, why })) }))}
-      suggestionsFrom={profiles.length > 1 ? (profiles.find((entry) => entry.id === profileId)?.name ?? null) : null}
+      suggestionsFrom={profiles.length > 1 ? (profiles.find((entry) => entry.id === wordsFrom)?.name ?? null) : null}
       alsoAdvertised={alsoAdvertised}
       // German is shared by every profile: each posting's is read against it.
       german={profileGerman(profile.languages)}
@@ -102,7 +105,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       canPrepare={canPrepare}
       // Named here: the browser's ICU can name a few countries differently from the server's.
       countries={COUNTRIES}
-      query={typed ?? searched ?? (await latestQuery()) ?? (await profileSearch())}
+      query={typed ?? searched ?? (await profileSearch(wordsFrom, chips[0] ?? latestRole(profile.experience)))}
       // A search in the URL opens the form to run it (E32-3); ?edit=1 opens it as it is, as Profile's link to the search words does (jobauto fork).
       editing={typed !== null || params.edit === "1"}
       filters={filters}
@@ -118,18 +121,26 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   );
 }
 
-/** What was searched last, for the form when no search is open: not what an AI client or a careers page added (jobauto fork). */
-async function latestQuery() {
-  const latest = await prisma.postingSearch.findFirst({ where: { agentSearchName: null, addedBy: "" }, orderBy: { createdAt: "desc" }, select: { query: true } });
-  return latest ? searchQuerySchema.catch(EMPTY_QUERY).parse(latest.query) : null;
+/**
+ * The profile the search words come from: the one last opened, or, while it
+ * has none (a new, empty profile), the first that has (jobauto fork).
+ */
+async function profileWithWords(opened: ProfileData, openedId: string, profiles: readonly ProfileSummary[], now: Date) {
+  const words = searchWords(opened, now);
+  if (searchChips(words).length > 0) return { id: openedId, profile: opened, words };
+  for (const { id } of profiles.filter((entry) => entry.id !== openedId)) {
+    const profile = await loadProfile(id);
+    const theirs = searchWords(profile, now);
+    if (searchChips(theirs).length > 0) return { id, profile, words: theirs };
+  }
+  return { id: openedId, profile: opened, words };
 }
 
-/** The first search: the current or latest role, in the profile's city and country. */
-async function profileSearch() {
-  const [fields, experience] = await Promise.all([
-    prisma.profileField.findMany({ where: { key: { in: ["city", "country"] } } }),
-    prisma.experience.findMany({ select: { role: true, current: true, startYear: true, startMonth: true, endYear: true, endMonth: true } }),
-  ]);
-  const field = (key: string) => fields.find((entry) => entry.key === key)?.value ?? "";
-  return defaultSearch({ role: latestRole(experience), city: field("city"), country: field("country") });
+/**
+ * A new search, when none is open: the profile's first search word (else its
+ * latest role), with its levels, place and radius. Not the last search typed
+ * (jobauto fork): that may have been one employer's, from Careers pages.
+ */
+async function profileSearch(profileId: string, words: string): Promise<SearchQuery> {
+  return { ...defaultSearch({ role: words, city: "", country: "" }), ...(await profileSearchDefaults(profileId)) };
 }
