@@ -7,7 +7,7 @@ import { DEFAULT_APPLY_ANSWERS } from "@/lib/apply/answers";
 import type { ApplyAttemptView, ApplyTabData } from "@/lib/apply/view";
 import type { JobView } from "@/lib/jobs/runner";
 
-import { fillThisPage, startApply } from "./apply-actions";
+import { fillThisPage, savePostingLink, startApply } from "./apply-actions";
 import { ApplyTab } from "./apply-tab";
 
 // The Apply tab's run card and its "Fill this page" button (jobauto fork).
@@ -16,6 +16,7 @@ vi.mock("./apply-actions", () => ({
   startApply: vi.fn(async () => ({ ok: true, data: { jobId: "job-1", attemptId: "run-2" } })),
   fillThisPage: vi.fn(async () => ({ ok: true, data: { jobId: "job-9", attemptId: "run-1" } })),
   settleApplyAttempt: vi.fn(async () => ({ ok: true, data: null })),
+  savePostingLink: vi.fn(async () => ({ ok: true, data: { route: "web" }, toast: "Link saved." })),
 }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn() }));
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -273,5 +274,63 @@ describe("Your standard answers (jobauto fork)", () => {
     expect(panel.getAllByText("Not filled in")).toHaveLength(4);
     expect(panel.queryByRole("textbox")).not.toBeInTheDocument();
     expect(panel.queryByRole("button", { name: "Save answers" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Find the employer's posting (jobauto fork, Apply at the source)", () => {
+  const copy = {
+    kind: "web",
+    url: "https://de.jooble.org/jdp/1",
+    host: "de.jooble.org",
+    atsLabel: "the employer's website",
+    account: false,
+    autoSubmitOk: false,
+    board: false,
+    owner: { kind: "copy", site: "Jooble" },
+  } as const;
+  const search = { href: "https://www.google.com/search?q=Ledgerly+GmbH+Analyst+Karriere", via: "search", employer: "Ledgerly GmbH" } as const;
+
+  it("offers no assistant on a copy of the ad, but the way to the employer's posting, with the copy one tap away", () => {
+    renderTab(tabData({ plan: copy, attempts: [], findPosting: search }));
+    const panel = card("Find the employer's posting");
+    expect(panel.getByText(/Apply where Ledgerly GmbH's recruiter reads applications: this job on Ledgerly GmbH's own site or its job system/)).toBeInTheDocument();
+    expect(panel.getByText("Jooble")).toBeInTheDocument();
+    expect(panel.getByRole("link", { name: /Search for it/ })).toHaveAttribute("href", search.href);
+    expect(panel.getByRole("link", { name: /Open the copy on Jooble anyway/ })).toHaveAttribute("href", copy.url);
+    expect(screen.queryByRole("button", { name: /Open and fill it in/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Before you use it" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try the apply assistant anyway" })).not.toBeInTheDocument();
+  });
+
+  it("names a careers page the app knows, rather than a search", () => {
+    renderTab(tabData({ plan: copy, attempts: [], findPosting: { href: "https://karriere.ledgerly.de", via: "careers", employer: "Ledgerly GmbH" } }));
+    expect(card("Find the employer's posting").getByRole("link", { name: /Open Ledgerly GmbH's careers page/ })).toHaveAttribute("href", "https://karriere.ledgerly.de");
+  });
+
+  it("saves the link she found, and the page is read again", async () => {
+    const user = userEvent.setup();
+    renderTab(tabData({ plan: copy, attempts: [], findPosting: search }));
+    const panel = card("Find the employer's posting");
+    await user.type(panel.getByLabelText("The employer's link"), "https://karriere.ledgerly.de/jobs/7");
+    await user.click(panel.getByRole("button", { name: "Use this link" }));
+    expect(savePostingLink).toHaveBeenCalledWith({ id: "app-1", link: "https://karriere.ledgerly.de/jobs/7" });
+    expect(toast).toHaveBeenCalledWith("Link saved.");
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("offers no Try again on an earlier run on a copy", () => {
+    renderTab(tabData({ plan: copy, attempts: [attempt({ status: "ABANDONED", watching: false })], findPosting: search }));
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the assistant on a site that may be a copy, with the way to the employer's posting on request", async () => {
+    const user = userEvent.setup();
+    const unsure = { ...copy, url: "https://jobs.unknown-board.example/1", host: "jobs.unknown-board.example", owner: { kind: "unsure" } } as const;
+    renderTab(tabData({ plan: unsure, attempts: [], findPosting: search }));
+    expect(screen.getByRole("button", { name: "Open and fill it in" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Find the employer's posting" })).not.toBeInTheDocument();
+    expect(screen.getByText(/jobs\.unknown-board\.example doesn't look like Ledgerly GmbH's own site\./)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "It's a copy of the ad" }));
+    expect(card("Find the employer's posting").getByLabelText("The employer's link")).toBeInTheDocument();
   });
 });

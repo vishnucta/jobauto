@@ -898,3 +898,16 @@ describe("Positions while scoring is off (jobauto fork)", () => {
     expect(screen.getByRole("link", { name: "Settings → Job search" })).toHaveAttribute("href", "/settings?section=jobs");
   });
 });
+
+describe("a posting whose link is a copy of the ad (jobauto fork, Apply at the source)", () => {
+  it("says so beside the company and in its details, without naming the site twice", async () => {
+    const copied = posting("c", { url: "https://de.jooble.org/jdp/7", via: "Jooble" });
+    renderScreen({ library: { postings: [copied, posting("d")], total: 2, more: false } });
+    const row = screen.getByRole("button", { name: /^Designer c/ });
+    expect(row).toHaveTextContent("Company c via Jooble · Hamburg");
+    expect(row).toHaveTextContent("3 days ago · JSearch · not scored yet");
+    expect(screen.getByRole("button", { name: /^Designer d/ })).toHaveTextContent("Company d · Hamburg");
+    await userEvent.click(row);
+    expect(screen.getByText("Jooble: a copy of the ad, not the employer's own posting")).toBeInTheDocument();
+  });
+});

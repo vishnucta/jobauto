@@ -6,6 +6,7 @@ import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
 import { loadSettings } from "@/lib/settings-data";
 
+import { copyMessage } from "./link-owner";
 import { planFor } from "./plan";
 import { OPEN_ATTEMPT_STATUSES } from "./view";
 import { isWatching } from "./watches";
@@ -21,7 +22,7 @@ export type FillPageStart =
 
 /** Why a run didn't start; the message is written for the Apply tab. */
 export type ApplyStartProblem =
-  | { ok: false; problem: "gone" | "no-link" | "no-resume"; message: string }
+  | { ok: false; problem: "gone" | "no-link" | "no-resume" | "copy"; message: string }
   | { ok: false; problem: "email"; to: string; message: string }
   | { ok: false; problem: "waiting"; attemptId: string; message: string };
 
@@ -44,12 +45,14 @@ export type ApplyStart =
 export async function startApplyRun(id: string, { mayPressSend }: { mayPressSend: boolean }): Promise<ApplyStart> {
   const application = await prisma.application.findUnique({
     where: { id },
-    select: { postingUrl: true, postingText: true, documents: { select: { kind: true } }, posting: { select: { url: true, source: true } } },
+    select: { postingUrl: true, postingText: true, company: true, documents: { select: { kind: true } }, posting: { select: { url: true, source: true } } },
   });
   if (!application) return { ok: false, problem: "gone", message: "That application no longer exists." };
   const plan = planFor(application);
   if (plan.kind === "email") return { ok: false, problem: "email", to: plan.to, message: `This posting asks for applications by email (${plan.to}). Use the Email tab.` };
   if (plan.kind === "none") return { ok: false, problem: "no-link", message: "There's no link to apply at. Add the posting's link on the Job posting tab first." };
+  // A copy of the ad on a site that collects job ads (link-owner.ts): its form is never filled; the employer's own posting is the way in.
+  if (plan.owner?.kind === "copy") return { ok: false, problem: "copy", message: copyMessage(plan.owner.site) };
   if (!application.documents.some((document) => document.kind === DocumentKind.RESUME)) return { ok: false, problem: "no-resume", message: "This application has no resume to attach yet." };
 
   const [running] = await findUnfinishedJobs(applyJobKey(id));

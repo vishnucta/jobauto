@@ -3,8 +3,11 @@ import "server-only";
 import { z } from "zod";
 
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
+import { ActionError } from "@/lib/action";
 import { applyAnswersSchema, LANGUAGE_LEVEL_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { noWindowReason } from "@/lib/apply/display";
+import type { FindPosting } from "@/lib/apply/link-owner";
+import { newRouteLine, setPostingLink } from "@/lib/apply/posting-link";
 import { resolveAttempt } from "@/lib/apply/run";
 import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyPlanView } from "@/lib/apply/view";
@@ -60,11 +63,30 @@ function answersView(answers: ApplyAnswers) {
   };
 }
 
+/** What Claude is told about a link that is a copy of the ad, or may be one (link-owner.ts). */
+function ownerView(plan: Extract<ApplyPlanView, { kind: "web" }>, find: FindPosting | null | undefined) {
+  const look = find ? { look_at: find.href, look_at_is: find.via === "careers" ? "the employer's careers page" : "a web search, for the user to open in their own browser" } : {};
+  switch (plan.owner?.kind) {
+    case "copy":
+      return {
+        copy_of_the_ad_on: plan.owner.site,
+        ...look,
+        next: "This link is a copy of the ad on a site that collects job ads, so start_apply won't fill its form. Help the user find the employer's own posting, then save its link with set_posting_link.",
+      };
+    case "unsure":
+      return { not_named_like_the_employer: true, ...look, next: "This site may be a copy of the ad. If the user finds the employer's own posting, save its link with set_posting_link." };
+    case "agency":
+      return { agency_site: plan.owner.site };
+    default:
+      return {};
+  }
+}
+
 /** Where the application's form is. */
-function formView(plan: ApplyPlanView) {
+function formView(plan: ApplyPlanView, find?: FindPosting | null) {
   switch (plan.kind) {
     case "web":
-      return { where: "web page", url: plan.url, host: plan.host, system: plan.atsLabel, sign_in_needed: plan.account, job_board: plan.board };
+      return { where: "web page", url: plan.url, host: plan.host, system: plan.atsLabel, sign_in_needed: plan.account, job_board: plan.board, ...ownerView(plan, find) };
     case "email":
       return { where: "email", to: plan.to, next: "There's no form to fill: the posting asks for applications by email. The application's Email tab writes the email and sends it with the PDFs." };
     case "none":
@@ -114,7 +136,7 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
     async ({ id }) => {
       const application = await prisma.application.findUnique({
         where: { id },
-        select: { id: true, title: true, status: true, postingUrl: true, postingText: true, documents: { select: { kind: true } } },
+        select: { id: true, title: true, status: true, company: true, role: true, postingUrl: true, postingText: true, documents: { select: { kind: true } } },
       });
       if (!application) return failure("That application no longer exists.");
       const [profile, settings, timeZone] = await Promise.all([loadProfile(), loadSettings(), lastKnownTimeZone()]);
@@ -123,7 +145,7 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
         id: application.id,
         title: application.title,
         application_status: statusInfo(application.status).label,
-        form: formView(tab.plan),
+        form: formView(tab.plan, tab.findPosting),
         has_resume: tab.hasResume,
         has_cover_letter: tab.hasLetter,
         profile_missing: tab.missing.length > 0 ? tab.missing : undefined,
@@ -232,6 +254,30 @@ export function registerApplyTools({ server, linkTo }: ToolContext): void {
         application_status: application ? statusInfo(application.status).label : undefined,
         link: applyTab(attempt.applicationId),
       });
+    },
+  );
+
+  server.registerTool(
+    "set_posting_link",
+    {
+      title: "Use the employer's own posting",
+      description:
+        "Saves the link to the employer's own posting for an application whose link is a copy of the ad on a site that collects job ads (get_apply_status says copy_of_the_ad_on), " +
+        "as the Apply tab's Use this link does, and says how it is sent now. Use a link the user found or confirmed: the employer's careers page or its job system's posting, not another copy. Nothing is sent.",
+      inputSchema: z.object({
+        id: z.string().min(1).max(100).describe("The application's id"),
+        link: z.string().min(1).max(2000).describe("The employer's own posting, starting with https://"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ id, link }) => {
+      try {
+        const plan = await setPostingLink(id, link);
+        return text({ id, link: link.trim(), sent_by: plan.kind === "web" ? (plan.ats.board ? "job board" : "web page") : plan.kind, next: newRouteLine(plan), apply_tab: applyTab(id) });
+      } catch (error) {
+        if (error instanceof ActionError) return failure(error.message);
+        throw error;
+      }
     },
   );
 

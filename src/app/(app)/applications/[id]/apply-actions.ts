@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ApplicationStatus } from "@/generated/prisma/enums";
 import { action, ActionError } from "@/lib/action";
+import { newRouteLine, setPostingLink } from "@/lib/apply/posting-link";
 import { resolveAttempt } from "@/lib/apply/run";
 import { startApplyRun, startFillPage } from "@/lib/apply/start";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +39,18 @@ export const fillThisPage = action(z.object({ id: z.string().min(1) }), async ({
   if (!started.ok) throw new ActionError(started.message);
   if (!started.alreadyRunning) refresh(id);
   return { jobId: started.jobId, attemptId: started.attemptId };
+});
+
+/**
+ * "Use this link": the employer's own posting for an application whose link
+ * is a copy of the ad (src/lib/apply/posting-link.ts). The way to send it is
+ * worked out again from the new link.
+ */
+export const savePostingLink = action(z.object({ id: z.string().min(1), link: z.string().max(4000) }), async ({ id, link }, { toast }) => {
+  const plan = await setPostingLink(id, link);
+  refresh(id);
+  toast(`Link saved. ${newRouteLine(plan)}`);
+  return { route: plan.kind };
 });
 
 /** "I sent it" / "I didn't send it": settles a run the page couldn't read the end of. */

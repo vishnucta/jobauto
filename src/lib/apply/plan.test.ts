@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import { planFor } from "./plan";
 
+describe("a copy of the ad (jobauto fork, Apply at the source)", () => {
+  it("takes an email address the posting names over a copy of the ad", () => {
+    const plan = planFor({ postingUrl: "https://de.jooble.org/jdp/1", postingText: "Bewerbung an jobs@ledgerly.example", posting: null, company: "Ledgerly GmbH" });
+    expect(plan).toEqual({ kind: "email", to: "jobs@ledgerly.example" });
+  });
+
+  it("keeps the copy as the last resort, and says it is one", () => {
+    const plan = planFor({ postingUrl: "https://de.jooble.org/jdp/1", postingText: "Jetzt bewerben.", posting: null, company: "Ledgerly GmbH" });
+    expect(plan).toMatchObject({ kind: "web", host: "de.jooble.org", owner: { kind: "copy", site: "Jooble" } });
+  });
+
+  it("tells an agency's own site and an unknown site from the employer's", () => {
+    expect(planFor({ postingUrl: "https://www.selbyjennings.com/job/1", postingText: "", posting: null, company: "A bank in Hamburg" })).toMatchObject({
+      owner: { kind: "agency", site: "Selby Jennings" },
+    });
+    expect(planFor({ postingUrl: "https://jobs.unknown-board.example/1", postingText: "", posting: null, company: "Ledgerly GmbH" })).toMatchObject({ owner: { kind: "unsure" } });
+    expect(planFor({ postingUrl: "https://karriere.ledgerly.de/1", postingText: "", posting: null, company: "Ledgerly GmbH" })).toMatchObject({ owner: null });
+  });
+});
+
 describe("where an application goes (Phase A)", () => {
   it("takes the employer's own page when there is one", () => {
     const plan = planFor({ postingUrl: "https://karriere.acme.de/jobs/1", postingText: "Bewerbung an jobs@acme.de", posting: null });

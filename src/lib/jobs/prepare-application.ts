@@ -72,7 +72,7 @@ export const prepareApplicationJob = defineJob({
     const posting = await prisma.posting.findUnique({ where: { id: postingId } });
     if (!posting) throw new ActionError("That posting is no longer kept. Find it again and prepare it from there.");
     const text = postingText(posting);
-    const plan = planFor({ postingUrl: posting.url, postingText: text, posting: { url: posting.url, source: posting.source } });
+    const plan = planFor({ postingUrl: posting.url, postingText: text, posting: { url: posting.url, source: posting.source }, company: posting.company });
     // Prepared already, e.g. by a first run that was retried, or by the job agent meanwhile: the same application.
     if (posting.applicationId) return { applicationId: posting.applicationId, route: plan.kind };
     const elsewhere = await madeElsewhere(posting);

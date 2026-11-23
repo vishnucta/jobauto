@@ -17,6 +17,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useJob } from "@/hooks/use-job";
+import { adCopySite } from "@/lib/apply/link-owner";
 import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import { isBoardLink } from "@/lib/dedupe";
@@ -96,6 +97,9 @@ const addedBy = (posting: ShownPosting) =>
 /** The posting's link, or the employer's own when it's on a job board and a portal that found the same job has that (E22-6). */
 const bestLink = (posting: ShownPosting) =>
   posting.url && !isBoardLink(posting.url) ? posting.url : (posting.state.foundOn.find((entry) => entry.url && !isBoardLink(entry.url))?.url ?? posting.url);
+
+/** The site whose copy of the ad the posting's link is ("Jooble"), or null when it isn't one (jobauto fork, link-owner.ts). */
+const copyOn = (posting: Pick<ShownPosting, "url">) => adCopySite(posting.url);
 
 /**
  * Postings in a list, and the selected one's whole text beside it, or above
@@ -597,14 +601,17 @@ function PostingList({
                   <StateBadges state={posting.state} now={now} />
                 </span>
               }
-              sub={[posting.company, posting.place, posting.remote ? "Remote" : ""].filter(Boolean).join(" · ")}
+              // A link to a copy of the ad says so beside the company (jobauto fork, "Apply at the source"): it isn't the employer's own posting.
+              sub={[copyOn(posting) ? `${posting.company || "Employer not named"} via ${copyOn(posting)}` : posting.company, posting.place, posting.remote ? "Remote" : ""]
+                .filter(Boolean)
+                .join(" · ")}
               meta={[
                 postedAgo(posting.postedAt, now),
                 // Where it was listed: every portal that found it, else the board its portal found it on.
                 // What an AI client or a careers page added names who added it instead (jobauto fork).
                 posting.state.foundOn.length > 1
                   ? portalNames(posting.state.foundOn.map((entry) => entry.portal))
-                  : posting.via || (isAddedSource(posting.source) ? "" : portalNames([posting.source])),
+                  : (copyOn(posting) ? "" : posting.via) || (isAddedSource(posting.source) ? "" : portalNames([posting.source])),
                 posting.salary,
                 foundByAgent(posting.state),
                 addedBy(posting),
@@ -731,7 +738,7 @@ function PostingDetail({
     { label: "Posted", value: ago },
     { label: "Where", value: [posting.place, posting.remote ? "Remote" : posting.remote === false ? "On-site or hybrid" : ""].filter(Boolean).join(" · ") },
     { label: "Salary", value: posting.salary },
-    { label: "Via", value: posting.via },
+    { label: "Via", value: copyOn(posting) ? `${copyOn(posting)}: a copy of the ad, not the employer's own posting` : posting.via },
     { label: "Also on", value: state.foundOn.length > 1 ? portalNames(state.foundOn.slice(1).map((entry) => entry.portal)) : "" },
   ].filter((fact) => fact.value);
   const scoreButton = (

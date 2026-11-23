@@ -387,5 +387,56 @@ describe("the Apply tab's tools in the Claude connector", () => {
     expect(listed("fill_apply_page")?.description).toContain("never presses Send");
     expect(listed("settle_apply")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(listed("save_apply_answers")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+    expect(listed("set_posting_link")?.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
+    expect(listed("set_posting_link")?.description).toContain("Nothing is sent");
+  });
+});
+
+describe("a copy of the ad (jobauto fork, Apply at the source)", () => {
+  const COPY = "https://de.jooble.org/jdp/42";
+  /** Ledgerly's link, a copy of its ad on a site that collects job ads. */
+  const onCopy = () => prisma().application.update({ where: { id: ledgerly }, data: { postingUrl: COPY, postingText: "Jetzt bewerben." } });
+
+  it("tells Claude the link is a copy, where to look for the employer's posting, and what to do with it", async () => {
+    await onCopy();
+    const { company } = await prisma().application.findUniqueOrThrow({ where: { id: ledgerly }, select: { company: true } });
+    const form = (await tool("get_apply_status", { id: ledgerly })).json.form as Record<string, string>;
+    expect(form).toMatchObject({ where: "web page", host: "de.jooble.org", copy_of_the_ad_on: "Jooble", next: expect.stringContaining("set_posting_link") });
+    expect(form.look_at_is).toBe("a web search, for the user to open in their own browser");
+    expect(new URL(form.look_at).searchParams.get("q")).toContain(company);
+  });
+
+  it("looks at the careers page of an employer she follows", async () => {
+    await onCopy();
+    const { company } = await prisma().application.findUniqueOrThrow({ where: { id: ledgerly }, select: { company: true } });
+    await prisma().employer.create({ data: { name: company, careersUrl: "https://careers.ledgerly.example", ats: "page" } });
+    expect((await tool("get_apply_status", { id: ledgerly })).json.form).toMatchObject({ look_at: "https://careers.ledgerly.example", look_at_is: "the employer's careers page" });
+  });
+
+  it("doesn't fill a copy's form, from Claude or after a restart", async () => {
+    await onCopy();
+    const refused = await tool("start_apply", { id: ledgerly });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("copy of the ad on Jooble");
+    expect(startJob).not.toHaveBeenCalled();
+    expect(await prisma().applyAttempt.count()).toBe(0);
+  });
+
+  it("saves the employer's own link, after which the form can be filled; another copy or a bad link is refused", async () => {
+    await onCopy();
+    const bad = await tool("set_posting_link", { id: ledgerly, link: "karriere.ledgerly.example/jobs/7" });
+    expect(bad).toMatchObject({ isError: true, text: "Paste the whole link, starting with https://." });
+    const another = await tool("set_posting_link", { id: ledgerly, link: "https://www.trabajo.org/job-7" });
+    expect(another).toMatchObject({ isError: true, text: expect.stringContaining("copy of the ad too, on Trabajo.org") });
+    expect((await prisma().application.findUniqueOrThrow({ where: { id: ledgerly } })).postingUrl).toBe(COPY);
+
+    const saved = await tool("set_posting_link", { id: ledgerly, link: ` ${PERSONIO} ` });
+    expect(saved.json).toMatchObject({ id: ledgerly, link: PERSONIO, sent_by: "web page", next: expect.stringContaining("employer's own page") });
+    expect((await prisma().application.findUniqueOrThrow({ where: { id: ledgerly } })).postingUrl).toBe(PERSONIO);
+    expect((await tool("get_apply_status", { id: ledgerly })).json.form).toMatchObject({ host: "ledgerly.jobs.personio.de", system: "Personio" });
+    expect((await tool("get_apply_status", { id: ledgerly })).json.form).not.toHaveProperty("copy_of_the_ad_on");
+    expect((await tool("start_apply", { id: ledgerly })).json).toMatchObject({ task_id: "apply-job", status: "started" });
+
+    expect(await tool("set_posting_link", { id: "gone", link: PERSONIO })).toMatchObject({ isError: true, text: "That application no longer exists." });
   });
 });

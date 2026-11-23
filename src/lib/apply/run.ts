@@ -32,6 +32,7 @@ import { looksBlocked, looksSubmitted } from "./confirmation";
 import type { FileKind } from "./fields";
 import { fillPage, onPage, screenshot } from "./fill";
 import { clickApplyEntry, clickSubmit, dismissCookieBanner, formStillThere, hasForm, pageText, scanControls } from "./form";
+import { copyMessage } from "./link-owner";
 import { planFor } from "./plan";
 import { filledSchema } from "./run-types";
 import { isSecure, openPreferringHttps, secured } from "./secure";
@@ -219,8 +220,10 @@ export async function runApplyAttempt(attemptId: string, { step, signal }: JobCo
   });
   if (!attempt) return { status: ApplyAttemptStatus.FAILED, note: NOTES.gone };
   const { application } = attempt;
-  const plan = planFor({ postingUrl: application.postingUrl, postingText: application.postingText, posting: application.posting });
+  const plan = planFor({ postingUrl: application.postingUrl, postingText: application.postingText, posting: application.posting, company: application.company });
   if (plan.kind !== "web") return end(attemptId, ApplyAttemptStatus.FAILED, plan.kind === "email" ? NOTES.email(plan.to) : NOTES.noLink);
+  // Started before its link was known for a copy of the ad: still not filled (link-owner.ts).
+  if (plan.owner?.kind === "copy") return end(attemptId, ApplyAttemptStatus.FAILED, copyMessage(plan.owner.site));
 
   let page: Page | null = null;
   try {

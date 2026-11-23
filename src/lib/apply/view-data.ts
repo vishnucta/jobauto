@@ -10,6 +10,7 @@ import type { Basics } from "@/lib/profile";
 import type { SettingsData } from "@/lib/settings";
 
 import { hostOf } from "./ats";
+import { findPostingAt } from "./link-owner";
 import { planFor } from "./plan";
 import { isWatching } from "./watches";
 import { filledSchema, unfilledSchema } from "./run-types";
@@ -36,7 +37,7 @@ function when(date: Date, timeZone: string | undefined): string {
 
 /** Everything the Apply tab shows for an application. */
 export async function loadApplyTab(
-  application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[]; role?: string; title?: string },
+  application: { id: string; postingUrl: string; postingText: string; documents: { kind: DocumentKind }[]; role?: string; title?: string; company?: string },
   profile: { basics: Basics },
   settings: Pick<SettingsData, "applyAnswers" | "applyBrowserAddress">,
   timeZone: string | undefined,
@@ -47,11 +48,25 @@ export async function loadApplyTab(
     findUnfinishedJobs(applyJobKey(application.id)),
     loadSalaryGuide(application.role || application.title || ""),
   ]);
-  const route = planFor({ postingUrl: application.postingUrl, postingText: application.postingText, posting });
+  const company = application.company ?? "";
+  const route = planFor({ postingUrl: application.postingUrl, postingText: application.postingText, posting, company });
   const plan: ApplyPlanView =
     route.kind === "web"
-      ? { kind: "web", url: route.url, host: route.host, atsLabel: route.ats.label, account: route.ats.account, autoSubmitOk: route.ats.autoSubmit, board: route.ats.board }
+      ? {
+          kind: "web",
+          url: route.url,
+          host: route.host,
+          atsLabel: route.ats.label,
+          account: route.ats.account,
+          autoSubmitOk: route.ats.autoSubmit,
+          board: route.ats.board,
+          owner: route.owner,
+        }
       : route;
+  // A copy of the ad, or a site that may be one (link-owner.ts): the way to the employer's own posting, a careers page she follows first.
+  const doubtful = route.kind === "web" && (route.owner?.kind === "copy" || route.owner?.kind === "unsure");
+  const followed = doubtful ? await prisma.employer.findMany({ select: { name: true, careersUrl: true }, orderBy: { createdAt: "asc" } }) : [];
+  const role = application.role || (application.title ?? "").split(" · ")[0] || "";
   const attempts: ApplyAttemptView[] = rows.map((row) => ({
     id: row.id,
     status: row.status,
@@ -77,5 +92,6 @@ export async function loadApplyTab(
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),
     browserAddress: settings.applyBrowserAddress,
     salaryGuide: guide ? describeGuide(guide) : null,
+    findPosting: doubtful ? findPostingAt(company, role, followed) : null,
   };
 }

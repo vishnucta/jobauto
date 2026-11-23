@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 
 import { toast } from "@/components/toast";
 import { Button, buttonClassName } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ProgressSteps } from "@/components/ui/progress-steps";
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 import type { ApplyAnswers } from "@/lib/apply/answers";
@@ -17,7 +18,7 @@ import type { ApplyJobResult } from "@/lib/jobs/apply";
 import type { JobView } from "@/lib/jobs/runner";
 
 import { APPLY_BROWSER_HREF } from "../../settings/apply-browser-card";
-import { fillThisPage, settleApplyAttempt, startApply } from "./apply-actions";
+import { fillThisPage, savePostingLink, settleApplyAttempt, startApply } from "./apply-actions";
 import { JobWatcher } from "./job-watcher";
 
 /** How often the tab asks the server whether the browser saw the confirmation, while it's watching. */
@@ -116,10 +117,18 @@ export function ApplyTab({
   const channel = sendChannel(plan);
   const [tryAssistant, setTryAssistant] = useState(false);
   const assistant = channel === "form" || (channel === "board" && (tryAssistant || latest !== null || job !== null));
+  // A site that isn't named like the employer may be a copy of the ad: the way to its own posting, on request (link-owner.ts).
+  const [findOwn, setFindOwn] = useState(false);
+  const unsure = plan.kind === "web" && plan.owner?.kind === "unsure" && data.findPosting ? data.findPosting : null;
 
   return (
     <div className="flex flex-1 flex-col items-center gap-4 overflow-auto bg-canvas px-10 pt-11 pb-[var(--composer-space,4rem)]">
       {job && <JobWatcher<ApplyJobResult> key={job.id} id={job.id} revision={job.revision} onChange={jobChanged} />}
+
+      {/* A copy of the ad (jobauto fork, "Apply at the source"): no assistant, the way to the employer's own posting instead. */}
+      {channel === "copy" && plan.kind === "web" && (
+        <FindPostingPanel applicationId={applicationId} plan={plan} find={data.findPosting ?? null} />
+      )}
 
       {/* One send path (send-step.ts, jobauto fork): the assistant only where the employer takes applications on a form. */}
       {channel === "board" && plan.kind === "web" && (
@@ -196,7 +205,16 @@ export function ApplyTab({
                 </span>
               </div>
             )}
+            {unsure && !findOwn && (
+              <p className="text-meta text-pretty text-muted">
+                {plan.host} doesn&apos;t look like {unsure.employer || "the employer"}&apos;s own site.{" "}
+                <button type="button" className="underline underline-offset-2 hover:text-ink" onClick={() => setFindOwn(true)}>
+                  It&apos;s a copy of the ad
+                </button>
+              </p>
+            )}
           </Panel>
+          {unsure && findOwn && <FindPostingPanel applicationId={applicationId} plan={plan} find={unsure} />}
         </>
       )}
 
@@ -225,7 +243,7 @@ export function ApplyTab({
           attempt={latest}
           settling={settling}
           onSettle={settle}
-          onRetry={plan.kind === "web" ? start : undefined}
+          onRetry={plan.kind === "web" && channel !== "copy" ? start : undefined}
           fill={{ available: !job && !starting, running: filling, step: current, onFill: fill }}
         />
       )}
@@ -458,6 +476,97 @@ function Panel({ title, tone = "plain", children }: { title: ReactNode; tone?: "
       <h2 className="font-serif text-section">{title}</h2>
       {children}
     </section>
+  );
+}
+
+/**
+ * Find the employer's posting (jobauto fork, "Apply at the source"): for a
+ * link that is a copy of the ad on a site that collects job ads, or may be
+ * one. The way to the employer's own posting (its careers page when she
+ * follows it or it's in her field's list, else a web search in her own
+ * browser), and a box for the link she finds, from which the way to send it
+ * is worked out again. A copy stays one tap away.
+ */
+function FindPostingPanel({
+  applicationId,
+  plan,
+  find,
+}: {
+  applicationId: string;
+  plan: Extract<ApplyTabData["plan"], { kind: "web" }>;
+  find: NonNullable<ApplyTabData["findPosting"]> | null;
+}) {
+  const router = useRouter();
+  const [link, setLink] = useState("");
+  const [saving, startSaving] = useTransition();
+  const copy = plan.owner?.kind === "copy" ? plan.owner.site : null;
+  const employer = find?.employer || "the employer";
+
+  const save = () => {
+    if (!link.trim() || saving) return;
+    startSaving(async () => {
+      const result = await savePostingLink({ id: applicationId, link });
+      if (!result.ok) return toast(result.error);
+      if (result.toast) toast(result.toast);
+      setLink("");
+      router.refresh();
+    });
+  };
+
+  return (
+    <Panel title="Find the employer's posting" tone={copy ? "warning" : "plain"}>
+      <p className="text-sm text-pretty text-muted">
+        {copy ? (
+          <>
+            Apply where {employer}&apos;s recruiter reads applications: this job on {employer}&apos;s own site or its job system, not the copy on{" "}
+            <strong className="font-medium text-ink">{copy}</strong>. Find it, then paste its link here.
+          </>
+        ) : (
+          <>
+            {plan.host} doesn&apos;t look like {employer}&apos;s own site. If it&apos;s a copy of the ad, find the posting on {employer}&apos;s site and paste its link
+            here.
+          </>
+        )}
+      </p>
+      {find && (
+        <div className="flex flex-wrap items-center gap-3">
+          <a href={find.href} target="_blank" rel="noopener noreferrer" className={buttonClassName(copy ? "primary" : "secondary", "md", copy ? "hover:text-on-primary" : undefined)}>
+            {find.via === "careers" ? `Open ${employer}'s careers page` : "Search for it"}
+            <span aria-hidden>↗</span>
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+          {find.via === "search" && <span className="text-meta text-muted">Searches the web for the company, the role and &quot;Karriere&quot;.</span>}
+        </div>
+      )}
+      <form
+        className="flex flex-wrap items-end gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <Input
+          label="The employer's link"
+          type="url"
+          inputMode="url"
+          placeholder="https://"
+          value={link}
+          onChange={(event) => setLink(event.target.value)}
+          className="min-w-0 flex-1 basis-64"
+        />
+        <Button type="submit" variant="secondary" aria-disabled={saving || !link.trim() || undefined}>
+          {saving ? "Saving…" : "Use this link"}
+        </Button>
+      </form>
+      {copy && (
+        <p className="text-meta text-muted">
+          <a href={plan.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">
+            Open the copy on {copy} anyway<span aria-hidden> ↗</span>
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        </p>
+      )}
+    </Panel>
   );
 }
 

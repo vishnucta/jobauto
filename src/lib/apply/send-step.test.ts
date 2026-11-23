@@ -51,3 +51,28 @@ describe("sendStep (one send path)", () => {
     expect(sendStep({ kind: "none" }, quiet)).toMatchObject({ label: "Read the posting", target: { tab: "posting" } });
   });
 });
+
+describe("a copy of the ad (jobauto fork, Apply at the source)", () => {
+  const copy: ApplyPlanView = { ...form, url: "https://de.jooble.org/jdp/1", host: "de.jooble.org", atsLabel: "the employer's website", owner: { kind: "copy", site: "Jooble" } };
+
+  it("is a channel of its own: no form to fill, the way to the employer's posting on the Apply tab", () => {
+    expect(sendChannel(copy)).toBe("copy");
+    expect(sendTab(copy)).toBe("apply");
+    const step = sendStep(copy, quiet);
+    expect(step).toMatchObject({ channel: "copy", label: "Find the employer's posting", target: { tab: "apply" } });
+    expect(step.how).toBe(
+      "This link is a copy of the ad on Jooble (de.jooble.org), a site that collects other sites' job ads, not the employer's own posting. What's sent there may reach the employer late, or not at all.",
+    );
+    expect(step.how).not.toMatch(/its own page/);
+    expect(step.after).toBe("Find the posting on the employer's own site, paste its link on the Apply tab, and the way to send it is worked out again.");
+  });
+
+  it("names an agency's own site as the agency's, and an unknown site as one to check", () => {
+    const agency: ApplyPlanView = { ...form, host: "selbyjennings.com", atsLabel: "the employer's website", owner: { kind: "agency", site: "Selby Jennings" } };
+    expect(sendStep(agency, quiet)).toMatchObject({ channel: "form", label: "Fill in its form" });
+    expect(sendStep(agency, quiet).how).toBe("The posting is on Selby Jennings's own site (selbyjennings.com): applying there reaches the consultant who holds the role.");
+    const unsure: ApplyPlanView = { ...form, host: "jobs.unknown-board.example", atsLabel: "the employer's website", owner: { kind: "unsure" } };
+    expect(sendStep(unsure, quiet)).toMatchObject({ channel: "form", label: "Fill in its form" });
+    expect(sendStep(unsure, quiet).how).toMatch(/^The link is on jobs\.unknown-board\.example, which doesn't look like the employer's own site\./);
+  });
+});

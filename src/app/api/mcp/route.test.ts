@@ -184,6 +184,7 @@ describe("the Claude connector at /api/mcp (#221)", () => {
       "send_email_reply",
       "set_application_status",
       "set_document_look",
+      "set_posting_link",
       "set_profile_levels",
       "set_recruiter_status",
       "settle_apply",

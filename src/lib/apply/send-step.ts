@@ -6,8 +6,8 @@ import type { ApplyPlanView } from "./view";
 // saying how. The Apply tab offers its assistant only for the form channel.
 // Shared with the browser: nothing here reads the database.
 
-/** How this employer takes applications: an email, its own form, a job board, or nothing Dossier can tell. */
-export type SendChannel = "email" | "form" | "board" | "none";
+/** How this employer takes applications: an email, its own form, a job board, nothing Dossier can tell, or not yet known because the link is a copy of the ad (link-owner.ts). */
+export type SendChannel = "email" | "form" | "board" | "none" | "copy";
 
 export type SendStep = {
   channel: SendChannel;
@@ -21,10 +21,21 @@ export type SendStep = {
   after: string;
 };
 
-/** The channel of a route: the employer's own form, or a job board, for a link. */
+/** The channel of a route: the employer's own form, a job board, or a copy of the ad, for a link. */
 export function sendChannel(plan: ApplyPlanView): SendChannel {
-  if (plan.kind === "web") return plan.board ? "board" : "form";
+  if (plan.kind === "web") return plan.owner?.kind === "copy" ? "copy" : plan.board ? "board" : "form";
   return plan.kind;
+}
+
+/** Whose own page the form is on, as the guide says it: "its own page (Personio, ledgerly.de)", an agency's, or one to check. */
+function formWhere(plan: Extract<ApplyPlanView, { kind: "web" }>): string {
+  const system = plan.atsLabel && plan.atsLabel !== plan.host && plan.atsLabel !== "the employer's website" ? `${plan.atsLabel}, ` : "";
+  const account = plan.account ? ", which asks for an account first" : "";
+  if (plan.owner?.kind === "agency") return `The posting is on ${plan.owner.site}'s own site (${plan.host}): applying there reaches the consultant who holds the role${account}.`;
+  if (plan.owner?.kind === "unsure") {
+    return `The link is on ${plan.host}, which doesn't look like the employer's own site. If it is, fill in its form; if it's a copy of the ad, find the employer's posting on the Apply tab.`;
+  }
+  return `This employer takes applications on its own page (${system}${plan.host})${account}.`;
 }
 
 /**
@@ -47,12 +58,19 @@ export function sendStep(
         after: gmailSends ? "Sending it with Gmail marks it sent." : `Send it from your own mail with the PDFs attached, then ${markIt}.`,
       };
     case "web":
+      if (plan.owner?.kind === "copy") {
+        return {
+          channel: "copy",
+          how: `This link is a copy of the ad on ${plan.owner.site} (${plan.host}), a site that collects other sites' job ads, not the employer's own posting. What's sent there may reach the employer late, or not at all.`,
+          label: "Find the employer's posting",
+          target: { tab: "apply" },
+          after: "Find the posting on the employer's own site, paste its link on the Apply tab, and the way to send it is worked out again.",
+        };
+      }
       if (!plan.board) {
         return {
           channel: "form",
-          how: waitingInBrowser
-            ? "Its form is filled in and waiting in the browser window: check it there and press Send."
-            : `This employer takes applications on its own page (${plan.atsLabel && plan.atsLabel !== plan.host && plan.atsLabel !== "the employer's website" ? `${plan.atsLabel}, ` : ""}${plan.host})${plan.account ? ", which asks for an account first" : ""}.`,
+          how: waitingInBrowser ? "Its form is filled in and waiting in the browser window: check it there and press Send." : formWhere(plan),
           label: waitingInBrowser ? "See what was filled in" : "Fill in its form",
           target: { tab: "apply" },
           after: `Sending it through the form marks it sent. Sent it another way? ${markIt[0].toUpperCase()}${markIt.slice(1)}.`,

@@ -1,13 +1,24 @@
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 
 import type { ApplyAnswers } from "./answers";
+import type { FindPosting, LinkOwner } from "./link-owner";
 import type { Filled, UnfilledList } from "./run-types";
 
 // What the Apply tab shows (Phase A). Shared with the browser, so nothing
 // here reads the database.
 
 export type ApplyPlanView =
-  | { kind: "web"; url: string; host: string; atsLabel: string; account: boolean; autoSubmitOk: boolean; board: boolean }
+  | {
+      kind: "web";
+      url: string;
+      host: string;
+      atsLabel: string;
+      account: boolean;
+      autoSubmitOk: boolean;
+      board: boolean;
+      /** Whose page the link is (link-owner.ts): a copy of the ad, an agency's site, or unsure; absent for the employer's own or a known system. */
+      owner?: LinkOwner | null;
+    }
   | { kind: "email"; to: string }
   | { kind: "none" };
 
@@ -45,6 +56,8 @@ export type ApplyTabData = {
   browserAddress: string | null;
   /** What postings like this one pay, from the ones she has seen (salary-guide.ts); null with too few. Missing in older callers. */
   salaryGuide?: string | null;
+  /** Where to look for the employer's own posting, when the link is a copy of the ad or may be one (link-owner.ts); null otherwise. */
+  findPosting?: FindPosting | null;
 };
 
 /** The statuses that mean a run is still going, one way or another. */
