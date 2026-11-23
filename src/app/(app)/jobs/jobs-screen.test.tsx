@@ -899,6 +899,64 @@ describe("Positions while scoring is off (jobauto fork)", () => {
   });
 });
 
+describe("postings in her field (jobauto fork, Niche first)", () => {
+  /** A score covering `hit` of `total` requirements. */
+  const fit = (hit: number, total: number) => ({
+    profileId: "first",
+    profileName: "",
+    score: 60,
+    reasons: [],
+    redFlags: [],
+    breakdown: { factors: [], cap: null, requirements: Array.from({ length: total }, (_, index) => ({ text: `R${index}`, mustHave: false, covered: index < hit, evidence: null })) },
+  });
+  const byTitle = posting("a", { title: "Regulatory Reporting Analyst" });
+  const byText = posting("b", { title: "Financial Analyst", description: "You own the EMIR and MiFIR reports." });
+  const mention = posting("c", { title: "Accountant", description: "Monthly reconciliation." });
+  const low = posting("d", { title: "Meldewesen Referent", state: { ...state, score: fit(1, 5), scores: [fit(1, 5)] } });
+  const good = posting("e", { title: "COREP Analyst", state: { ...state, score: fit(4, 5), scores: [fit(4, 5)] } });
+  const old = posting("f", { title: "Transaction Reporting Analyst", postedAt: "2026-08-01T00:00:00.000Z" });
+  const all = { library: { postings: [byTitle, byText, mention, low, good, old], total: 6, more: false } };
+
+  it("marks them as a word match until scored, then plainly, or with low fit, and asks to check an old ad is still open", () => {
+    renderScreen({ ...all, inField: true });
+    const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^${title}`) });
+    expect(row("Regulatory Reporting Analyst")).toHaveTextContent("In your field (word match) Company a · Hamburg");
+    expect(row("Financial Analyst")).toHaveTextContent("In your field (word match)");
+    expect(row("Accountant")).not.toHaveTextContent("In your field");
+    expect(row("Meldewesen Referent")).toHaveTextContent("In your field · low fit");
+    expect(row("COREP Analyst")).toHaveTextContent("In your field Company e");
+    expect(row("COREP Analyst")).not.toHaveTextContent("word match");
+    expect(row("Transaction Reporting Analyst")).toHaveTextContent("Check it is still open · 1 Aug");
+    expect(row("Regulatory Reporting Analyst")).not.toHaveTextContent("Check it is still open");
+  });
+
+  it("marks nothing while no profile is in the field, and offers no Field filter", () => {
+    renderScreen(all);
+    expect(screen.queryByText(/In your field/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Field: / })).not.toBeInTheDocument();
+  });
+
+  it("says in a posting's details why it's marked, and that a word match can be wrong", async () => {
+    renderScreen({ ...all, inField: true });
+    await userEvent.click(screen.getByRole("button", { name: /^Financial Analyst/ }));
+    expect(screen.getByText(/EMIR and MiFIR in the text\. Word matches can be wrong, so read the posting before you apply\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Transaction Reporting Analyst/ }));
+    expect(screen.getByText(/transaction reporting in the title\./)).toBeInTheDocument();
+    expect(screen.getByText("Check it is still open: it was posted more than 30 days ago.")).toBeInTheDocument();
+  });
+
+  it("narrows the list with the Field filter, and says once under it that the mark is a word match", async () => {
+    const { unmount } = renderScreen({ ...all, inField: true });
+    expect(screen.queryByText(/postings whose title names one of your field's words/)).not.toBeInTheDocument();
+    await choose("Field", "in your field");
+    expect(router.push).toHaveBeenLastCalledWith("/jobs?field=1", { scroll: false });
+    unmount();
+    renderScreen({ ...all, inField: true, filters: { ...DEFAULT_FILTERS, field: true } });
+    expect(screen.getByRole("button", { name: "Field: in your field" })).toBeInTheDocument();
+    expect(screen.getAllByText(/In your field: postings whose title names one of your field's words, or whose text names two of them\. Word matches can be wrong, so read the posting before you apply\./)).toHaveLength(1);
+  });
+});
+
 describe("a posting whose link is a copy of the ad (jobauto fork, Apply at the source)", () => {
   it("says so beside the company and in its details, without naming the site twice", async () => {
     const copied = posting("c", { url: "https://de.jooble.org/jdp/7", via: "Jooble" });

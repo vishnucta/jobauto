@@ -2,8 +2,10 @@
 
 import { z } from "zod";
 
-import { action } from "@/lib/action";
+import { action, ActionError } from "@/lib/action";
+import { isAiUsable } from "@/lib/ai/config";
 import { hideNote, writeNote } from "@/lib/daily-note";
+import { prepareKept } from "@/lib/jobs/prepare-application";
 import { saveSettings } from "@/lib/settings-data";
 import { userTimeZone } from "@/lib/time-zone";
 
@@ -11,6 +13,16 @@ import { userTimeZone } from "@/lib/time-zone";
 export const rememberDashboardPeriod = action(z.object({ period: z.enum(["30d", "90d", "all"]) }), async ({ period }) => {
   await saveSettings({ dashboardPeriod: period });
   return null;
+});
+
+/**
+ * "Prepare" on a posting in her field (Do today, jobauto fork): Prepare it
+ * for me, for a posting Positions keeps. Answers with the job to follow, or
+ * the application when the posting has one already.
+ */
+export const prepareFieldPosting = action(z.object({ postingId: z.string().min(1).max(100) }), async ({ postingId }) => {
+  if (!(await isAiUsable())) throw new ActionError("Set up an AI provider in Settings → AI provider first, or open the posting and start the application step by step.");
+  return prepareKept(postingId);
 });
 
 /** Days without news before Needs you suggests a follow-up (E9-9). */

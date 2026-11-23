@@ -68,6 +68,10 @@ export async function register() {
     const { startCareersSchedule } = await import("@/lib/careers/check");
     startCareersSchedule();
 
+    // A few new postings in her field scored each day, while scoring is on (jobauto fork, field-scoring.ts).
+    const { startFieldScoringSchedule } = await import("@/lib/field-scoring");
+    startFieldScoringSchedule();
+
     // DOSSIER_JOBS_SOURCE=arbeitsagentur: the log says what that choice means (#223).
     // And, once, the job search settings from before E22-3 move into the portals' shape.
     const { arbeitsagenturStartupNotice, loadJobSearchConfig, moveJobSettings } = await import("@/lib/job-search/config");

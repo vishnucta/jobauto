@@ -124,7 +124,8 @@ describe("get_settings and update_settings", () => {
     const read = await tool("get_settings");
     expect(read.json).toMatchObject({
       ai: { ai_provider: "ANTHROPIC", provider_name: "Anthropic", ai_address: "https://api.anthropic.com", ai_model: "claude-opus-5-5", api_key: "set", ready: true, creativity: "BALANCED", never_invent_experience: true },
-      scoring: { scorer: "Your AI model" },
+      // And how many new postings in her field are scored on their own each day (jobauto fork).
+      scoring: { scorer: "Your AI model", field_scores_per_day: 5 },
       job_search: { archive_after_days: 30 },
       documents: { paper: "A4", document_language: "German", resume_language: "English", documents_to_write: "both", languages: expect.arrayContaining(["English", "German", "Hebrew"]) },
       your_data: { nightly_backup: true, last_backup: null, keep_task_data_hours: 24 },
@@ -201,6 +202,15 @@ describe("get_settings and update_settings", () => {
     expect((await own()).resumeLanguage).toBeNull();
     await tool("update_settings", { document_language: null });
     expect((await settings()).docLanguage).toBeNull();
+
+    // How many new postings in her field are scored on their own each day (jobauto fork): 0 switches it off.
+    expect((await tool("update_settings", { field_scores_per_day: 0 })).json).toMatchObject({
+      saved: ["field_scores_per_day"],
+      scoring: { field_scores_per_day: 0 },
+      link: "https://dossier.example/settings?section=scoring",
+    });
+    expect((await settings()).fieldScoresPerDay).toBe(0);
+    expect(await tool("update_settings", { field_scores_per_day: 31 })).toMatchObject({ isError: true });
 
     expect(await tool("update_settings")).toMatchObject({ isError: true, text: "Give at least one setting to change. get_settings shows them all." });
     expect(await tool("update_settings", { keep_task_data_hours: 5 })).toMatchObject({ isError: true });

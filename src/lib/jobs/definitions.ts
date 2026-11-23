@@ -30,3 +30,4 @@ import "./english-copy";
 import "@/lib/notifications/notify";
 import "./write-work-sample";
 import "./prepare-application";
+import "@/lib/field-scoring";

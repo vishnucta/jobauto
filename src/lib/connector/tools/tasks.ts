@@ -6,6 +6,7 @@ import { DocumentKind, JobStatus } from "@/generated/prisma/enums";
 import { agentDraftJob } from "@/lib/agent/draft";
 import { agentScanJob } from "@/lib/agent/jobs";
 import { careersCheckJob } from "@/lib/careers/check";
+import { fieldScoringJob } from "@/lib/field-scoring";
 import { englishCopyJob } from "@/lib/jobs/english-copy";
 import { prepareApplicationJob } from "@/lib/jobs/prepare-application";
 import { prepareCallJob } from "@/lib/jobs/prepare-call";
@@ -282,6 +283,14 @@ const KINDS: Record<string, Tell> = {
       result: checked ? { added: checked.added, search_id: checked.searchId ?? undefined, problems: checked.problems.length ? checked.problems : undefined, message: checked.message } : undefined,
       link: linkTo(checked?.searchId ? libraryHref({ found: checked.searchId }) : "/careers"),
       next: checked?.searchId ? "list_postings with this search_id lists the jobs it added." : undefined,
+    };
+  },
+  [fieldScoringJob.type]: (task, linkTo) => {
+    const scored = resultOf(fieldScoringJob, task);
+    return {
+      task: "Scoring new postings in the user's field",
+      result: scored ?? undefined,
+      link: linkTo(libraryHref({ field: true })),
     };
   },
   [agentDraftJob.type]: (task, linkTo) => {

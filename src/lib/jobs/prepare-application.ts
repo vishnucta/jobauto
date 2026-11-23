@@ -6,10 +6,12 @@ import { AgentCandidateStatus } from "@/generated/prisma/enums";
 import { ActionError } from "@/lib/action";
 import { draftJobKey } from "@/lib/agent/draft";
 import { planFor } from "@/lib/apply/plan";
+import { fullText } from "@/lib/job-search/find";
 import { postingText } from "@/lib/job-search/search";
 import { logServerError } from "@/lib/log";
 import { keptApplication, prepareJobKey } from "@/lib/posting-application";
 import { bestProfileFor } from "@/lib/posting-scores";
+import { foundFromPosting, storePosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 import { openProfileId } from "@/lib/profiles";
 
@@ -128,6 +130,23 @@ export async function startPreparing(
   const existing = await postingApplication(postingId);
   if (existing.applicationId || existing.jobId) return existing;
   return { jobId: await startJob(prepareApplicationJob, { postingId, profileId, note }, { key: prepareJobKey(postingId) }), applicationId: null };
+}
+
+/**
+ * Prepare, for a posting Positions keeps, by its id: the dashboard's row for
+ * a posting in her field (jobauto fork, today.ts). As Positions' button
+ * does, its whole text is asked for first when its portal sent only the
+ * start of it, so the documents aren't written from a snippet.
+ */
+export async function prepareKept(postingId: string): Promise<{ jobId: string | null; applicationId: string | null }> {
+  const row = await prisma.posting.findUnique({ where: { id: postingId } });
+  if (!row) throw new ActionError("That posting is no longer kept. Find it again and prepare it from there.");
+  const posting = foundFromPosting(row);
+  if (!posting.complete) {
+    const text = await fullText(posting);
+    if (text) await storePosting({ ...posting, description: text, complete: true });
+  }
+  return startPreparing(postingId);
 }
 
 /**

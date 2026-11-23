@@ -179,6 +179,23 @@ describe("Positions through the Claude connector", () => {
     expect(await tool("list_postings", { search_id: "gone" })).toMatchObject({ isError: true, text: "That search is no longer kept. Search again." });
   });
 
+  it("marks postings in her field and narrows a list to them, saying the mark is a word match (jobauto fork, Niche first)", async () => {
+    await storeSearch([found("f1", "Transaction Reporting Analyst"), found("f2", "Product Designer")]);
+    // No profile in the field: nothing is marked, though the filter still narrows by the words.
+    const plain = (await tool("list_postings", { view: "open", sort: "new" })).json as unknown as { open: { postings: Record<string, unknown>[] } };
+    expect(plain.open.postings.every((posting) => !("in_your_field" in posting))).toBe(true);
+
+    await prisma().profile.update({ where: { id: TEST_PROFILE_ID }, data: { headline: "Regulatory Reporting Analyst" } });
+    const narrowed = (await tool("list_postings", { view: "open", in_field: true })).json;
+    expect(narrowed).toMatchObject({
+      open: { total: 1, postings: [{ title: "Transaction Reporting Analyst", in_your_field: "In your field (word match)" }], link: "https://dossier.example/jobs?field=1" },
+      in_field_note: "Word matches can be wrong, so read the posting before you apply.",
+    });
+    // Scored, and under half covered: it keeps the mark, as a low fit.
+    await saveScore(found("f1", "Transaction Reporting Analyst"), { ...halfCovered, breakdown: { ...halfCovered.breakdown, requirements: [...halfCovered.breakdown.requirements, { text: "Rust", mustHave: false, covered: false, evidence: null, skill: "Rust" }] } }, "test", TEST_PROFILE_ID);
+    expect((await tool("list_postings", { view: "open", in_field: true })).json).toMatchObject({ open: { postings: [{ in_your_field: "In your field · low fit" }] } });
+  });
+
   it("pages through every list with from and limit, since Positions shows them all", async () => {
     const day = (date: number) => new Date(`2026-10-${date}T09:00:00Z`);
     const searches = await Promise.all([20, 21, 22].map((date) => storeSearch([found(`s${date}`, "Designer")], day(date))));

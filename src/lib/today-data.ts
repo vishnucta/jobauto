@@ -3,6 +3,7 @@ import "server-only";
 import { AgentCandidateStatus, JobStatus } from "@/generated/prisma/enums";
 import { candidateCoverage } from "@/lib/agent/candidates";
 import { draftJobKey } from "@/lib/agent/draft";
+import { loadFieldPicks } from "@/lib/field-data";
 import { passes } from "@/lib/posting-coverage";
 import { prisma } from "@/lib/prisma";
 import { agentCoversOf } from "@/lib/settings";
@@ -16,7 +17,8 @@ const WEIGHED = 300;
 /**
  * Today's three (today.ts), from her drafts, the agent's drafts and its
  * matches: what it scored that passes its cut-off (E32-2), never one a run
- * skipped.
+ * skipped. A slot her drafts and the agent's leave free goes to a posting
+ * in her field first (field-data.ts, jobauto fork).
  */
 export async function loadToday(): Promise<TodayItem[]> {
   const settings = await loadSettings();
@@ -42,7 +44,10 @@ export async function loadToday(): Promise<TodayItem[]> {
     prisma.job.findMany({ where: { type: "agent-draft", status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } }, select: { id: true, key: true } }),
   ]);
   const jobFor = new Map(writing.map((job) => [job.key, job.id]));
+  // Only read while a slot is free: her drafts and the agent's come first.
+  const field = await loadFieldPicks(TODAY_COUNT - drafts.length - reviews.length);
   return todaysThree({
+    field,
     drafts: drafts.map((draft) => ({ id: draft.id, title: draft.role.trim() || draft.title.trim() || "Untitled application", company: draft.company.trim() })),
     reviews: reviews.map((review) => ({
       applicationId: review.applicationId!,

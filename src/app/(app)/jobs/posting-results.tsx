@@ -21,6 +21,7 @@ import { adCopySite } from "@/lib/apply/link-owner";
 import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import { isBoardLink } from "@/lib/dedupe";
+import { checkStillOpen, FIELD_WARNING, fieldLabel, fieldMatch, fieldReason, lowFit, STILL_OPEN } from "@/lib/field-match";
 import { germanFit, textForGerman, type GermanFit, type ProfileGerman } from "@/lib/german-need";
 import type { PrepareApplicationResult } from "@/lib/jobs/prepare-application-types";
 import type { JobView } from "@/lib/jobs/runner";
@@ -70,6 +71,8 @@ export type PostingResultsProps = {
   network?: Record<string, Person[]>;
   /** Dossier's own AI model can write: "Prepare it for me" makes the application in one click, in the background (jobauto fork). */
   canPrepare?: boolean;
+  /** One of her profiles is in the reporting field: postings her field's words mark say "In your field" (field-match.ts, jobauto fork). */
+  inField?: boolean;
 };
 
 /** What a score job gives: the posting's best score and all its scores (E25-5). */
@@ -428,6 +431,7 @@ export function PostingResults(props: PostingResultsProps) {
             onSelect={select}
             germanFits={germanFits}
             scoring={scoring}
+            inField={props.inField ?? false}
           />
         )}
 
@@ -444,6 +448,7 @@ export function PostingResults(props: PostingResultsProps) {
           ref={detail}
           posting={selected}
           german={german}
+          inField={props.inField ?? false}
           people={network[selected.company] ?? []}
           now={now}
           onSave={() => void save(selected)}
@@ -538,6 +543,7 @@ function PostingList({
   onSelect,
   germanFits,
   scoring,
+  inField,
 }: {
   postings: ShownPosting[];
   /** In the Archive: the postings selected, by postingKey; null elsewhere. */
@@ -550,6 +556,8 @@ function PostingList({
   germanFits: Map<string, GermanFit>;
   /** Postings being scored, by postingKey. */
   scoring: Record<string, unknown>;
+  /** Whether postings in her field are marked (field-match.ts, jobauto fork). */
+  inField: boolean;
 }) {
   // Up and down move through the list, as in a mail inbox.
   const move = (event: KeyboardEvent<HTMLUListElement>) => {
@@ -570,6 +578,9 @@ function PostingList({
         const key = postingKey(posting);
         const title = posting.title || "Untitled posting";
         const fit = posting.state.score;
+        // In her field, by its words (jobauto fork): a word match until it's scored, then with "low fit" when it is one.
+        const field = inField && fieldMatch(posting) ? fieldLabel(coverageOf(fit)) : null;
+        const stale = field !== null && !posting.state.applicationId && checkStillOpen(posting.postedAt, now);
         return (
           <li key={key} className="relative flex items-start">
             {chosen && (
@@ -602,10 +613,20 @@ function PostingList({
                 </span>
               }
               // A link to a copy of the ad says so beside the company (jobauto fork, "Apply at the source"): it isn't the employer's own posting.
-              sub={[copyOn(posting) ? `${posting.company || "Employer not named"} via ${copyOn(posting)}` : posting.company, posting.place, posting.remote ? "Remote" : ""]
-                .filter(Boolean)
-                .join(" · ")}
+              sub={
+                <>
+                  {field && (
+                    <>
+                      <RowTag tone={lowFit(coverageOf(fit)) ? "plain" : "success"}>{field}</RowTag>{" "}
+                    </>
+                  )}
+                  {[copyOn(posting) ? `${posting.company || "Employer not named"} via ${copyOn(posting)}` : posting.company, posting.place, posting.remote ? "Remote" : ""]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </>
+              }
               meta={[
+                stale ? STILL_OPEN : "",
                 postedAgo(posting.postedAt, now),
                 // Where it was listed: every portal that found it, else the board its portal found it on.
                 // What an AI client or a careers page added names who added it instead (jobauto fork).
@@ -659,6 +680,7 @@ function PostingDetail({
   ref,
   posting,
   german,
+  inField,
   people,
   now,
   onSave,
@@ -677,6 +699,8 @@ function PostingDetail({
   posting: ShownPosting;
   /** The profile's German, which the posting's is read against (jobauto fork). */
   german: ProfileGerman;
+  /** Whether a posting in her field says so (field-match.ts, jobauto fork). */
+  inField: boolean;
   /** The people she knows at its employer (jobauto fork). */
   people: readonly Person[];
   now: Date;
@@ -723,6 +747,9 @@ function PostingDetail({
   const when = ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago;
   // Read again from the whole text, once it's here (jobauto fork).
   const fullGerman = germanFit(textForGerman({ title: posting.title, description: text.status === "loading" ? posting.description : text.text }), german);
+  // In her field, by its words as Positions keeps it (jobauto fork, field-match.ts), so the list, the filter and this agree.
+  const field = inField ? fieldMatch(posting) : null;
+  const stale = field !== null && !state.applicationId && checkStillOpen(posting.postedAt, now);
   // Added by an AI client or from a careers page (jobauto fork): who added it, and no portal when none found it.
   const onlyAdded = isAddedSource(posting.source) && state.foundOn.length <= 1;
   const kicker = [
@@ -848,6 +875,20 @@ function PostingDetail({
         <PreviewCard label="How it fits">
           {/* The German it asks for against the profile's (jobauto fork), read from its text beside the scoring model's requirements. */}
           <GermanNote fit={fullGerman} />
+          {/* Why it's marked as in her field, that the mark is a word match, and whether the ad may be filled already (jobauto fork). */}
+          {field && (
+            <p role="note" className="rounded-card bg-track px-4 py-3 text-meta text-pretty">
+              <strong className="font-medium">{fieldLabel(coverageOf(state.score))}</strong>: {fieldReason(field)}. {FIELD_WARNING}
+              {stale && (
+                <>
+                  {" "}
+                  <span className="text-warning">
+                    {STILL_OPEN}: {posting.postedAt ? "it was posted more than 30 days ago." : "it has no date."}
+                  </span>
+                </>
+              )}
+            </p>
+          )}
           {scoring && state.scores.length > 0 ? (
             <p role="status" className="text-meta text-muted">
               {scoring.step ?? "Starting…"}

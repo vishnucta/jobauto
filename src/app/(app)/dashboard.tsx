@@ -4,10 +4,12 @@ import type { ReactNode } from "react";
 import { buttonClassName } from "@/components/ui/button";
 import { DEFAULT_QUIET_DAYS, type DashboardFigures, type DashboardPeriod } from "@/lib/dashboard";
 import { doToday, doTodaySummary } from "@/lib/do-today";
+import { fieldWeekLine } from "@/lib/field-match";
 import type { DayPeriod } from "@/lib/greeting";
 import type { SetupStep } from "@/lib/setup-checklist";
 import type { TodayItem } from "@/lib/today";
 import { SHOW_WORKING_FROM, type Insights } from "@/lib/insights";
+import { libraryHref } from "@/lib/job-search/search";
 import type { ScoringOffNotice } from "@/lib/scoring-off";
 import type { WeeklyProgress } from "@/lib/weekly-target";
 
@@ -51,6 +53,7 @@ export function Dashboard({
   todaysThree,
   setup,
   scoringOff = null,
+  field = null,
 }: {
   figures: DashboardFigures;
   firstName: string;
@@ -77,6 +80,8 @@ export function Dashboard({
   setup?: SetupStep[];
   /** Scoring is off while a profile has no levels (scoring-off.ts, jobauto fork); null when it's on. */
   scoringOff?: ScoringOffNotice | null;
+  /** This week's postings in her field, and how many she applied to (field-data.ts, jobauto fork); null while no profile is in the field. */
+  field?: { found: number; applied: number } | null;
 }) {
   const { sent, heardBack } = figures.overall;
   // Needs you and Today's three, each thing once (do-today.ts, jobauto fork).
@@ -107,6 +112,15 @@ export function Dashboard({
           {scoringOff && <ScoringOff off={scoringOff} className="col-span-full" />}
           {/* What to do today, and the ways in not used yet (jobauto fork): first, across both zones. Before the first application, only when something waits. */}
           {(rows.length > 0 || !empty) && <DoToday rows={rows} quietDays={quietDays} />}
+          {/* Her own field this week (jobauto fork, "Niche first"): found by word match against applied, with why to read the posting first. */}
+          {field && (
+            <p className="col-span-full -mt-2 px-1 text-meta text-pretty text-muted">
+              {fieldWeekLine(field)}{" "}
+              <Link href={libraryHref({ field: true, sort: "new" })} className="underline underline-offset-3 hover:text-ink">
+                Show all in your field
+              </Link>
+            </p>
+          )}
           {setup && <SetupCard steps={setup} />}
           {empty ? (
             <Welcome />

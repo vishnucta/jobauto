@@ -175,6 +175,41 @@ describe("get_today", () => {
     });
   });
 
+  it("gives a free slot to a posting in her field, as a word match to read first, and counts the week's (jobauto fork, Niche first)", async () => {
+    // The demo's profile isn't in the field: nothing is marked or counted.
+    expect((await today()).json).not.toHaveProperty("in_your_field_this_week");
+    const profile = await prisma().profile.findFirstOrThrow({ select: { id: true } });
+    await prisma().profile.update({ where: { id: profile.id }, data: { headline: "Regulatory Reporting Analyst" } });
+    await prisma().application.deleteMany({ where: { status: "DRAFT" } });
+    const kept = await prisma().posting.create({
+      data: { source: "JSEARCH", externalId: "field-1", title: "Transaction Reporting Analyst", company: "Northwind Clearing", url: "https://jobs.example/field-1", description: "Our team works in English.", complete: true, postedAt: null },
+    });
+    const general = await find("p2", 4, { title: "Product Designer" });
+
+    const { json } = await today();
+    expect(json.todays_three).toEqual([
+      {
+        number: 1,
+        what: "A posting in the user's field, by its words: read it, then prepare it",
+        title: "Transaction Reporting Analyst",
+        company: "Northwind Clearing",
+        mark: "In your field (word match)",
+        check_first: "Check it is still open",
+        posting_id: kept.id,
+        posting_url: "https://jobs.example/field-1",
+        next: expect.stringContaining("draft_application with this posting_id"),
+        link: `${APP}/jobs?sort=new&field=1`,
+      },
+      expect.objectContaining({ number: 2, find_id: general.id }),
+    ]);
+    expect(json.in_your_field_this_week).toEqual({
+      found_by_word_match: 1,
+      applied: 0,
+      note: "In your field this week: 1 found by word match, 0 applied. Word matches can be wrong, so read the posting before you apply.",
+      link: `${APP}/jobs?sort=new&field=1`,
+    });
+  });
+
   it("says when nothing is waiting, and when scoring is off", async () => {
     await prisma().application.deleteMany({ where: { status: "DRAFT" } });
     const profile = await prisma().profile.findFirstOrThrow({ select: { id: true } });

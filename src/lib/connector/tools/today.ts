@@ -5,7 +5,10 @@ import { z } from "zod";
 import { needsYouHref, type NeedsYouItem } from "@/lib/dashboard";
 import { loadDashboard } from "@/lib/dashboard-data";
 import { doToday, doTodaySummary } from "@/lib/do-today";
+import { loadFieldWeek } from "@/lib/field-data";
+import { fieldLabel, fieldWeekLine, STILL_OPEN } from "@/lib/field-match";
 import { loadWeeklyProgress } from "@/lib/insights-data";
+import { libraryHref } from "@/lib/job-search/search";
 import { waitingByApplication } from "@/lib/google/inbox-data";
 import { fitWords, type Coverage } from "@/lib/posting-coverage";
 import { prisma } from "@/lib/prisma";
@@ -32,6 +35,7 @@ const WHAT: Record<TodayItem["kind"], string> = {
   finish: "Your draft: finish it and send it",
   review: "The agent's draft: read it and send it",
   prepare: "A strong match: let the agent write the draft",
+  field: "A posting in the user's field, by its words: read it, then prepare it",
 };
 
 /** "3 of 5" and "Good fit", when the posting has requirements to count. */
@@ -45,6 +49,7 @@ export function registerTodayTools({ server, linkTo }: ToolContext): void {
       description:
         "The dashboard's Do today list, given in two parts: todays_three (the three things that get applications out today: the user's drafts, the job agent's drafts, then its best matches still to write) " +
         "and needs_you (what's due this week first, soonest on top, then what has no date), each with the ids the other tools take and a link to the screen it opens; " +
+        "a free slot of todays_three goes to a posting in the user's own field, marked by a word match that can be wrong, and in_your_field_this_week counts those; " +
         "summary is the dashboard's line under the greeting; " +
         "the weekly target and how this week is going; and Start here's steps not done yet, each with what it buys and where it's done. " +
         "Use it when the user asks what to do next.",
@@ -53,12 +58,13 @@ export function registerTodayTools({ server, linkTo }: ToolContext): void {
     },
     async () => {
       const [settings, timeZone, replies] = await Promise.all([loadSettings(), lastKnownTimeZone(), waitingByApplication().catch(() => undefined)]);
-      const [figures, three, scoringOff, week, setup] = await Promise.all([
+      const [figures, three, scoringOff, week, setup, field] = await Promise.all([
         loadDashboard({ quietDays: settings.quietDays, timeZone, replies }),
         loadToday(),
         loadScoringOff(),
         loadWeeklyProgress(timeZone),
         loadSetupSteps(),
+        loadFieldWeek(timeZone),
       ]);
       // An agent's draft is acted on by its find, as on the Agent screen.
       const reviews = three.flatMap((item) => (item.kind === "review" ? [item.applicationId] : []));
@@ -79,6 +85,8 @@ export function registerTodayTools({ server, linkTo }: ToolContext): void {
         due_this_week: figures.needsYou.filter((item) => item.soon).length,
         needs_you: figures.needsYou.map((item) => needsYouLine(item, linkTo)),
         weekly_target: weekLine(week),
+        // The dashboard's line for her own field (field-match.ts); left out while no profile is in it.
+        in_your_field_this_week: field ? { found_by_word_match: field.found, applied: field.applied, note: fieldWeekLine(field), link: linkTo(libraryHref({ field: true, sort: "new" })) } : undefined,
         start_here: startHereLine(setup, linkTo),
         link: linkTo("/"),
       });
@@ -111,6 +119,19 @@ function todayLine(item: TodayItem, number: number, findOf: ReadonlyMap<string |
         task_id: item.jobId ?? undefined,
         next: item.jobId ? "check_task follows the draft being written." : "act_on_agent_find prepare_draft has Dossier write the draft.",
         link: linkTo("/agent"),
+      };
+    case "field":
+      return {
+        ...base,
+        mark: fieldLabel(item.coverage),
+        ...coverageLine(item.coverage),
+        check_first: item.stale ? STILL_OPEN : undefined,
+        posting_id: item.postingId,
+        posting_url: item.url || undefined,
+        // Being written already: follow it rather than starting another.
+        task_id: item.jobId ?? undefined,
+        next: item.jobId ? "check_task follows the draft being written." : "Have the user read the posting first; draft_application with this posting_id has Dossier write the draft.",
+        link: linkTo(libraryHref({ field: true, sort: "new" })),
       };
   }
 }

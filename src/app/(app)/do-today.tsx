@@ -11,8 +11,10 @@ import { useJob } from "@/hooks/use-job";
 import { cn } from "@/lib/cn";
 import { needsYouHref, type NeedsYouItem } from "@/lib/dashboard";
 import type { DoTodayRow } from "@/lib/do-today";
+import { fieldLabel, STILL_OPEN } from "@/lib/field-match";
 import type { TodayItem } from "@/lib/today";
 
+import { prepareFieldPosting } from "./actions";
 import { prepareAgentDraft } from "./agent/actions";
 import { QuietDays } from "./quiet-days";
 
@@ -55,7 +57,13 @@ export function DoToday({ rows, quietDays }: { rows: DoTodayRow[]; quietDays: nu
       ) : (
         <ul>
           {shown.map((row) =>
-            row.kind === "needs" ? <NeedsRow key={row.item.id} item={row.item} /> : <AgentRow key={row.item.kind === "prepare" ? row.item.candidateId : row.item.applicationId} item={row.item} />,
+            row.kind === "needs" ? (
+              <NeedsRow key={row.item.id} item={row.item} />
+            ) : row.item.kind === "field" ? (
+              <FieldRow key={row.item.postingId} item={row.item} />
+            ) : (
+              <AgentRow key={row.item.kind === "prepare" ? row.item.candidateId : row.item.applicationId} item={row.item} />
+            ),
           )}
         </ul>
       )}
@@ -107,8 +115,41 @@ function NeedsRow({ item }: { item: NeedsYouItem }) {
   );
 }
 
+/**
+ * A posting in her field with no application yet (jobauto fork,
+ * field-match.ts): the mark as Positions says it, that it is only a word
+ * match until it's scored, and whether to check it is still open. Its
+ * buttons are the posting itself, to read first, and Prepare.
+ */
+function FieldRow({ item }: { item: Extract<TodayItem, { kind: "field" }> }) {
+  return (
+    <li className={rowClassName}>
+      <span aria-hidden="true" className="size-2 flex-none rounded-full border border-primary" />
+      <div className={textClassName}>
+        <p className="truncate text-field max-sm:whitespace-normal">
+          <span className="font-medium">{item.company || item.title}</span>
+          {item.company && <span className="text-muted"> · {item.title}</span>}
+        </p>
+        <p className="text-meta text-pretty text-muted">
+          {fieldLabel(item.coverage)}: read the posting, then prepare it
+          {item.coverage.total > 0 && ` · ${item.coverage.hit} of ${item.coverage.total} requirements covered`}
+          {item.stale && (
+            <>
+              {" · "}
+              <span className="text-warning">{STILL_OPEN}</span>
+            </>
+          )}
+        </p>
+      </div>
+      <div className={actionClassName}>
+        <PrepareButton item={item} />
+      </div>
+    </li>
+  );
+}
+
 /** The job agent's draft to read and send, or its strong match to have it write (Today's three). */
-function AgentRow({ item }: { item: Exclude<TodayItem, { kind: "finish" }> }) {
+function AgentRow({ item }: { item: Exclude<TodayItem, { kind: "finish" | "field" }> }) {
   const what = item.kind === "review" ? "The agent's draft: read it and send it" : "A strong match: let the agent write the draft";
   const name = [item.company, item.title].filter(Boolean).join(", ");
   return (
@@ -137,8 +178,8 @@ function AgentRow({ item }: { item: Exclude<TodayItem, { kind: "finish" }> }) {
   );
 }
 
-/** Prepare: the job agent writes the draft for this match, as on the Agent screen. */
-function PrepareButton({ item }: { item: Extract<TodayItem, { kind: "prepare" }> }) {
+/** Prepare: the job agent writes the draft for this match, as on the Agent screen; for a posting in her field, as Prepare it for me on Positions. */
+function PrepareButton({ item }: { item: Extract<TodayItem, { kind: "prepare" | "field" }> }) {
   const router = useRouter();
   const [jobId, setJobId] = useState(item.jobId);
   const [starting, startTransition] = useTransition();
@@ -156,7 +197,7 @@ function PrepareButton({ item }: { item: Extract<TodayItem, { kind: "prepare" }>
   const preparing = starting || Boolean(jobId);
   const prepare = () =>
     startTransition(async () => {
-      const result = toastResult(await prepareAgentDraft({ candidateId: item.candidateId }));
+      const result = toastResult(item.kind === "field" ? await prepareFieldPosting({ postingId: item.postingId }) : await prepareAgentDraft({ candidateId: item.candidateId }));
       if (!result.ok) return;
       if (result.data.applicationId) router.refresh();
       else setJobId(result.data.jobId);

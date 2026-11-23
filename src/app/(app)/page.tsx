@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { periodFromParam } from "@/lib/dashboard";
+import { loadFieldWeek } from "@/lib/field-data";
 import { calendarWanted } from "@/lib/google/calendar-data";
 import { waitingByApplication } from "@/lib/google/inbox-data";
 import { loadDashboard } from "@/lib/dashboard-data";
@@ -34,7 +35,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   const now = new Date();
   const range = periodFromParam(param) ?? settings.dashboardPeriod;
   const replies = await waitingByApplication().catch(() => undefined);
-  const [figures, name, week, working, todaysThree, setup, scoringOff, withCalendar] = await Promise.all([
+  const [figures, name, week, working, todaysThree, setup, scoringOff, withCalendar, field] = await Promise.all([
     loadDashboard({ period: range, quietDays: settings.quietDays, timeZone, replies }),
     loadProfileName(),
     loadWeeklyProgress(timeZone ?? "UTC", now),
@@ -44,6 +45,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
     // Scoring waits while a profile has no levels (jobauto fork).
     loadScoringOff(),
     calendarWanted(now),
+    // Her own field this week (jobauto fork): null while no profile is in it.
+    loadFieldWeek(timeZone ?? "UTC", now),
   ]);
   return (
     <Dashboard
@@ -60,6 +63,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
       todaysThree={todaysThree}
       setup={setup}
       scoringOff={scoringOff}
+      field={field}
       calendar={
         withCalendar ? (
           <Suspense fallback={<CalendarSkeleton />}>

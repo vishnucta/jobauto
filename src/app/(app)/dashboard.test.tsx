@@ -6,13 +6,18 @@ import type { DashboardFigures } from "@/lib/dashboard";
 
 import type { TodayItem } from "@/lib/today";
 
-import { rememberQuietDays, rememberWeeklyTarget } from "./actions";
+import { prepareFieldPosting, rememberQuietDays, rememberWeeklyTarget } from "./actions";
 import { prepareAgentDraft } from "./agent/actions";
 import { Dashboard } from "./dashboard";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => null, useSearchParams: () => new URLSearchParams() }));
-vi.mock("./actions", () => ({ rememberDashboardPeriod: vi.fn(), rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })), rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })) }));
+vi.mock("./actions", () => ({
+  rememberDashboardPeriod: vi.fn(),
+  rememberQuietDays: vi.fn(async () => ({ ok: true, data: null })),
+  rememberWeeklyTarget: vi.fn(async () => ({ ok: true, data: null })),
+  prepareFieldPosting: vi.fn(async () => ({ ok: true, data: { jobId: "job-2", applicationId: null } })),
+}));
 vi.mock("./agent/actions", () => ({ prepareAgentDraft: vi.fn(async () => ({ ok: true, data: { jobId: "job-1", applicationId: null } })) }));
 vi.mock("@/hooks/use-job", () => ({ useJob: () => ({ step: "Writing your cover letter" }) }));
 vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: unknown) => result }));
@@ -236,6 +241,39 @@ describe("Do today (jobauto fork)", () => {
   it("links to Call prep's general practice", () => {
     render(<Dashboard {...props} />);
     expect(within(screen.getByRole("region", { name: "Do today" })).getByRole("link", { name: "Practise a first call" })).toHaveAttribute("href", "/call-prep");
+  });
+});
+
+describe("Her own field (jobauto fork, Niche first)", () => {
+  const unscored = { hit: 0, total: 0, mustMissing: 0 };
+  const picks: TodayItem[] = [
+    { kind: "field", postingId: "p1", title: "Transaction Reporting Analyst", company: "Northwind Clearing", coverage: unscored, url: "https://jobs.example/p1", jobId: null, stale: false },
+    { kind: "field", postingId: "p2", title: "Meldewesen Referent", company: "Ledgerly Bank", coverage: { hit: 4, total: 6, mustMissing: 0 }, url: "", jobId: null, stale: true },
+  ];
+
+  it("lists a posting in her field as a word match to read first, with Prepare and its posting", async () => {
+    const user = userEvent.setup();
+    render(<Dashboard {...props} figures={{ ...figures, needsYou: [] }} todaysThree={picks} />);
+    const rows = within(screen.getByRole("region", { name: "Do today" })).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Northwind Clearing · Transaction Reporting Analyst");
+    expect(rows[0]).toHaveTextContent("In your field (word match): read the posting, then prepare it");
+    expect(rows[0]).not.toHaveTextContent("Check it is still open");
+    expect(within(rows[0]).getByRole("link", { name: "Posting" })).toHaveAttribute("href", "https://jobs.example/p1");
+    // Scored, and old: no longer only a word match, and to be checked first.
+    expect(rows[1]).toHaveTextContent("In your field: read the posting, then prepare it · 4 of 6 requirements covered · Check it is still open");
+    await user.click(within(rows[0]).getByRole("button", { name: "Prepare" }));
+    expect(prepareFieldPosting).toHaveBeenCalledWith({ postingId: "p1" });
+    expect(prepareAgentDraft).not.toHaveBeenCalled();
+  });
+
+  it("says how the week went in her field, that a word match can be wrong, and links to them", () => {
+    const { rerender } = render(<Dashboard {...props} field={{ found: 6, applied: 1 }} />);
+    const line = screen.getByText(/^In your field this week:/);
+    expect(line).toHaveTextContent("In your field this week: 6 found by word match, 1 applied. Word matches can be wrong, so read the posting before you apply.");
+    expect(within(line).getByRole("link", { name: "Show all in your field" })).toHaveAttribute("href", "/jobs?sort=new&field=1");
+    // No profile in the field: no line.
+    rerender(<Dashboard {...props} field={null} />);
+    expect(screen.queryByText(/^In your field this week:/)).not.toBeInTheDocument();
   });
 });
 

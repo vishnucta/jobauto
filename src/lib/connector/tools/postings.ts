@@ -26,7 +26,7 @@ import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
 import { scoreJobKey, scorePostingJob } from "@/lib/jobs/score-posting";
 import { listLibrary, markAllSeen, markSeen, splitPosting } from "@/lib/library";
-import { COVERS } from "@/lib/posting-coverage";
+import { COVERS, coverageOf } from "@/lib/posting-coverage";
 import { addClientSearch, listSearches, loadSearch, removeSearch, type KnownJob } from "@/lib/posting-searches";
 import { dismissPosting, foundFromPosting, postingStates, savePosting, unmarkPosting } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
@@ -34,6 +34,8 @@ import { loadProfile } from "@/lib/profile-data";
 import { profileNamed, scoreLevelsProblem } from "@/lib/profiles";
 import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig } from "@/lib/scoring/config";
+import { hasFieldProfile } from "@/lib/field-data";
+import { FIELD_WARNING, fieldLabel, fieldMatch } from "@/lib/field-match";
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
 import { chooseProfile, failure, hasMore, herGerman, portalProblems, postingLine, profileInput, started, text, type ToolContext } from "../kit";
@@ -68,14 +70,16 @@ const CHANGE: Record<Exclude<(typeof CHANGES)[number], RowChange>, (posting: Fou
 
 const SEARCH_GONE = "That search is no longer kept. Search again.";
 
-/** A posting from a list as Claude sees it: by its posting_id, with the application made from it. */
-function keptLine(posting: ShownPosting, german: ProfileGerman) {
+/** A posting from a list as Claude sees it: by its posting_id, with the application made from it, and its mark when it's in her field (field-match.ts). */
+function keptLine(posting: ShownPosting, german: ProfileGerman, inField = false) {
   const { number, applied, ...line } = postingLine(posting, 0, german);
   void number;
   void applied;
   return {
     posting_id: posting.state.postingId ?? undefined,
     ...line,
+    // A word match until it's scored, and it can be wrong: the user reads the posting before applying.
+    in_your_field: inField && fieldMatch(posting) ? fieldLabel(coverageOf(posting.state.score)) : undefined,
     dismissed: posting.state.dismissed || undefined,
     archived: posting.state.archived || undefined,
     // Not opened or acted on yet: update_postings' seen marks it seen.
@@ -189,6 +193,10 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
             "Only postings found on this portal, as Positions' Portal filter, by its id: e.g. JSEARCH, SERPAPI, ADZUNA, FREEHIRE, ARBEITSAGENTUR, CLIENT for what AI clients added, or CAREERS for new jobs on the careers pages followed",
           ),
         covers: z.enum(COVERS).optional().describe("Only postings whose requirements the profile covers this much: any, half, two-thirds or all"),
+        in_field: z
+          .boolean()
+          .optional()
+          .describe("Only postings in the user's own field, as Positions' Field filter: a field word in the title, or two in the text. A word match, which can be wrong"),
         sort: z.enum(["fit", "new"]).optional().describe("fit: Best fit, the most requirements covered first (the default); new: the newest found first"),
         profile: profileInput.describe("The profile whose coverage covers and Best fit go by; each posting's best without one"),
         search_id: z.string().min(1).max(100).optional().describe("A search, to list the postings it found instead"),
@@ -197,7 +205,7 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
       }),
       annotations: { readOnlyHint: true },
     },
-    async ({ view, search_id, from, limit, portal: asked, covers, sort, profile }) => {
+    async ({ view, search_id, from, limit, portal: asked, covers, sort, profile, in_field }) => {
       const take = limit ?? 20;
       const start = (from ?? 1) - 1;
       const portal = asked?.toUpperCase() ?? null;
@@ -248,12 +256,15 @@ export function registerPostingTools({ server, linkTo, clientName = "" }: ToolCo
             covers: covers ?? "any",
             fits: fits?.id ?? null,
             sort: sort ?? "fit",
+            ...(in_field ? { field: true } : {}),
           };
           const { postings, total } = await libraryPage(filters, start, take);
-          const german = await herGerman();
-          answer[list] = { total, postings: postings.map((posting) => keptLine(posting, german)), link: linkTo(libraryHref(filters)) };
+          const [german, inField] = await Promise.all([herGerman(), hasFieldProfile()]);
+          answer[list] = { total, postings: postings.map((posting) => keptLine(posting, german, inField)), link: linkTo(libraryHref(filters)) };
         }
       }
+      // The mark is a word match (field-match.ts): said wherever the list is narrowed to it.
+      if (in_field) answer.in_field_note = FIELD_WARNING;
       return text(answer);
     },
   );

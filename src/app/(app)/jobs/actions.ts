@@ -52,6 +52,8 @@ const libraryFilters = z.object({
   covers: z.enum(COVERS).default("any"),
   fits: z.string().min(1).max(100).nullable().default(null),
   sort: z.enum(LIBRARY_SORTS).default("fit"),
+  // "In your field" (jobauto fork, field-match.ts).
+  field: z.boolean().optional(),
 });
 
 /** "Show more" in the library: its next page through the same filters, with who she knows at its employers (jobauto fork). */

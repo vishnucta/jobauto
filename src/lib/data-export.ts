@@ -66,6 +66,8 @@ export const INSTALL_SETTINGS: readonly string[] = [
   "alertProblem",
   // When this server last checked the careers pages.
   "careersCheckedOn",
+  // How many postings in her field this server scored on its own today.
+  "fieldScored",
   // The supporter's own topic is as good as a password, and when it last went.
   "supporterAddress",
   "supporterSentOn",

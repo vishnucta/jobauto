@@ -101,7 +101,8 @@ async function settingsView(profileId: string) {
       daily_note_by_ai: settings.dailyNoteAi,
     },
     // Settings → Scoring (E25): what scores postings; its keys stay there.
-    scoring: { scorer: SCORER_INFO[scoring.scorer].name },
+    // And how many new postings in her field are scored on their own each day (field-scoring.ts); 0 is off.
+    scoring: { scorer: SCORER_INFO[scoring.scorer].name, field_scores_per_day: settings.fieldScoresPerDay },
     job_search: {
       // Every portal, any number switched on (E22-3).
       portals: portalsView(jobs),
@@ -161,6 +162,7 @@ async function settingsView(profileId: string) {
 /** Where each setting update_settings changes is: its section in get_settings, and in Settings (?section=). */
 const SECTIONS = [
   { name: "ai", id: "ai", fields: ["ai_provider", "ai_address", "ai_model", "creativity", "never_invent_experience", "show_what_changed", "daily_note_by_ai"] },
+  { name: "scoring", id: "scoring", fields: ["field_scores_per_day"] },
   { name: "job_search", id: "jobs", fields: ["portals", "archive_after_days"] },
   { name: "documents", id: "documents", fields: ["paper", "date_format", "default_tone", "document_language", "resume_language", "file_name_pattern", "include_references", "documents_to_write"] },
   { name: "your_data", id: "data", fields: ["nightly_backup", "keep_task_data_hours"] },
@@ -250,6 +252,9 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
         daily_note_by_ai: choice.dailyNoteAi.describe("Have the AI write the dashboard's daily note"),
         portals: z.array(portalChange).min(1).max(30).optional().describe("Switch portals on or off, any number at once, and change their fields that aren't keys"),
         archive_after_days: choice.archiveAfterDays.describe(`Days before a posting left untouched moves to the Archive: ${ARCHIVE_DAYS.join(", ")}`),
+        field_scores_per_day: choice.fieldScoresPerDay.describe(
+          "How many new postings in the user's own field (marked by its words) Dossier scores on its own each day, 0 to 30; 0 switches it off. Each one sends the posting and the profile to the scoring model, on top of the job agent's own limit",
+        ),
         paper: choice.paper,
         date_format: choice.dateFormat,
         default_tone: choice.defaultTone,
@@ -315,6 +320,7 @@ export function registerSettingsTools({ server, linkTo }: ToolContext): void {
         jobRetentionHours: input.keep_task_data_hours,
         updateCheck: input.check_for_updates_daily,
         archiveAfterDays: input.archive_after_days,
+        fieldScoresPerDay: input.field_scores_per_day,
       } satisfies SettingChoices);
       // A language goes on the list as "Other language…" adds it; null is each posting's own.
       if (input.document_language === null) await saveSettings({ docLanguage: null });

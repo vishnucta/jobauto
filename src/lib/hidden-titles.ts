@@ -27,8 +27,8 @@ export function coreTitle(title: string): string {
 /** Engineering titles (jobauto fork): a data or analytics engineer asks for her tools, but isn't her job. */
 const ENGINEERING = /\b(engineer(?:ing)?|developer|entwickler(?:in)?|ingenieur(?:in)?|programmer|programmierer(?:in)?|devops)\b/i;
 
-/** Whether `text` holds `term` as words: "EMIR" in "EMIR-Meldungen", not in "Emirates". */
-function holds(text: string, term: string): boolean {
+/** Whether `text` holds `term` as words, both folded with normalText: "EMIR" in "EMIR-Meldungen", not in "Emirates". */
+export function holds(text: string, term: string): boolean {
   return ` ${text} `.includes(` ${term} `);
 }
 

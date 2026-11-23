@@ -11,7 +11,7 @@ import type { TodayItem } from "@/lib/today";
 export type DoTodayRow =
   /** Something of hers that needs her, as a Needs you row. */
   | { kind: "needs"; item: NeedsYouItem }
-  /** The job agent's draft to review, or its match to prepare (Today's three). */
+  /** The job agent's draft to review, its match to prepare, or a posting in her field to prepare (Today's three). */
   | { kind: "agent"; item: Exclude<TodayItem, { kind: "finish" }> };
 
 /** One list from both, never the same application twice. */

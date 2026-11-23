@@ -396,6 +396,8 @@ export type LibraryFilters = {
   fits: string | null;
   /** "Best fit" (E32-2), or the newest found first. */
   sort: LibrarySort;
+  /** "In your field" (jobauto fork, field-match.ts): only postings her field's words mark; missing in older callers. */
+  field?: boolean;
 };
 
 export const LIBRARY_SORTS = ["fit", "new"] as const;
@@ -430,6 +432,7 @@ export function libraryFromParams(params: Record<string, string | string[] | und
     covers,
     fits: one(params.fits).trim().slice(0, 100) || null,
     sort: one(params.sort) === "new" ? "new" : "fit",
+    ...(one(params.field) === "1" ? { field: true } : {}),
   };
 }
 
@@ -444,6 +447,7 @@ export function libraryHref(filters: Partial<LibraryFilters>): string {
   if (filters.covers && filters.covers !== "any") params.set("covers", filters.covers);
   if (filters.fits) params.set("fits", filters.fits);
   if (filters.sort === "new") params.set("sort", "new");
+  if (filters.field) params.set("field", "1");
   const query = params.toString();
   return query ? `/jobs?${query}` : "/jobs";
 }

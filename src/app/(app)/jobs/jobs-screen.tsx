@@ -37,6 +37,7 @@ import {
 } from "@/lib/job-search/search";
 import { isAddedSource, knownPortals, searchSourcesName, sourceInfo } from "@/lib/job-search/sources";
 import { useJob } from "@/hooks/use-job";
+import { FIELD_WARNING } from "@/lib/field-match";
 import { COVERS, COVERS_LABELS } from "@/lib/posting-coverage";
 import type { ScoringOffNotice } from "@/lib/scoring-off";
 
@@ -102,6 +103,8 @@ export type JobsScreenProps = {
   scoringOff?: ScoringOffNotice | null;
   /** Portals with a key that are switched off, for the one-time note (portals-off.ts, jobauto fork); null once it's done. */
   portalsOff?: readonly string[] | null;
+  /** One of her profiles is in the reporting field (field-match.ts, jobauto fork): postings in it are marked, and "Field" narrows the list to them. */
+  inField?: boolean;
 };
 
 const SETTINGS_HREF = "/settings?section=jobs";
@@ -138,6 +141,7 @@ export function JobsScreen({
   elsewhere = { recruiters: 0, employers: 0 },
   scoringOff = null,
   portalsOff = null,
+  inField = false,
 }: JobsScreenProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -262,7 +266,7 @@ export function JobsScreen({
         {added && <AddedSearch search={added} />}
         {ran && <FoundSearch search={ran} />}
       </div>
-      <LibraryBar filters={filters} searches={searches} counts={counts} countries={countries} archiveDays={archiveDays} profiles={profiles} />
+      <LibraryBar filters={filters} searches={searches} counts={counts} countries={countries} archiveDays={archiveDays} profiles={profiles} inField={inField} />
       <div className={cn("flex flex-1 flex-col motion-safe:transition-opacity lg:min-h-[360px]", pending && "opacity-60")} aria-busy={pending || undefined}>
         <PostingResults
           // New filters start the list over; a refresh (a portal answering, More, Mark all as seen) only updates it.
@@ -278,6 +282,7 @@ export function JobsScreen({
           german={german}
           network={network}
           canPrepare={canPrepare}
+          inField={inField}
         />
       </div>
     </div>
@@ -435,6 +440,7 @@ function LibraryBar({
   countries,
   archiveDays,
   profiles,
+  inField,
 }: {
   filters: LibraryFilters;
   searches: PastSearchDay[];
@@ -442,6 +448,8 @@ function LibraryBar({
   countries: readonly Country[];
   archiveDays: number;
   profiles: { id: string; name: string }[];
+  /** One of her profiles is in the reporting field: the "Field" filter is offered (jobauto fork). */
+  inField: boolean;
 }) {
   const router = useRouter();
   const go = (change: Partial<LibraryFilters>) => router.push(libraryHref({ ...filters, ...change }), { scroll: false });
@@ -481,10 +489,20 @@ function LibraryBar({
               <FilterChip label="Fits" value={filters.fits ?? ""} options={[{ value: "", label: "any profile" }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name }))]} onChange={(value) => go({ fits: value || null })} />
             )}
             <FilterChip label="Covers" value={filters.covers} options={COVERS.map((value) => ({ value, label: value === "any" ? "any" : COVERS_LABELS[value].toLowerCase() }))} onChange={(value) => go({ covers: value })} />
+            {/* Her own field (jobauto fork, field-match.ts): only the postings its words mark. */}
+            {(inField || filters.field) && (
+              <FilterChip label="Field" value={filters.field ? "1" : ""} options={[{ value: "", label: "any" }, { value: "1", label: "in your field" }]} onChange={(value) => go({ field: value === "1" })} />
+            )}
           </FilterChips>
           <FilterChip label="Sort" value={filters.sort} options={[{ value: "fit", label: "Best fit" }, { value: "new", label: "Newest" }]} onChange={(value) => go({ sort: value })} />
         </div>
       </div>
+      {/* The mark is a word match: said once, where the list is narrowed to it (jobauto fork). */}
+      {filters.field && (
+        <p role="note" className="pb-2.5 text-meta text-pretty text-muted">
+          In your field: postings whose title names one of your field&apos;s words, or whose text names two of them. {FIELD_WARNING}
+        </p>
+      )}
       {(filters.tab === "archive" || (counts.new > 0 && filters.show !== "dismissed")) && (
         <p className="pb-2.5 text-meta text-muted">
           {filters.tab === "archive" ? (

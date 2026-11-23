@@ -19,7 +19,9 @@ const coverage = { hit: 5, total: 6, mustMissing: 0 };
 const finish = (id: string): TodayItem => ({ kind: "finish", applicationId: id, title: "Analyst", company: `Company ${id}` });
 const review = (id: string): TodayItem => ({ kind: "review", applicationId: id, title: "Reporting", company: "Berenberg", coverage });
 const prepare = (id: string): TodayItem => ({ kind: "prepare", candidateId: id, title: "Middle Office", company: "Warburg", coverage, url: "", jobId: null });
-const ids = (rows: DoTodayRow[]) => rows.map((row) => (row.kind === "needs" ? row.item.id : row.item.kind === "prepare" ? row.item.candidateId : row.item.applicationId));
+const inField = (id: string): TodayItem => ({ kind: "field", postingId: id, title: "Regulatory Reporting Analyst", company: "Northwind Clearing", coverage: { hit: 0, total: 0, mustMissing: 0 }, url: "", jobId: null, stale: false });
+const ids = (rows: DoTodayRow[]) =>
+  rows.map((row) => (row.kind === "needs" ? row.item.id : row.item.kind === "prepare" ? row.item.candidateId : row.item.kind === "field" ? row.item.postingId : row.item.applicationId));
 
 describe("doToday (jobauto fork)", () => {
   it("lists her draft once, where Today's three puts it, not again among Needs you", () => {
@@ -40,6 +42,12 @@ describe("doToday (jobauto fork)", () => {
   it("keeps a draft that's due this week where Needs you has it, once", () => {
     const rows = doToday([needs("deadline", "DRAFT", true, { due: "apply by Thu 1 Oct" })], [finish("deadline")]);
     expect(ids(rows)).toEqual(["deadline"]);
+  });
+
+  it("lists a posting in her field where Today's three puts it, among the agent's rows", () => {
+    const rows = doToday([needs("old-draft", "DRAFT", false)], [review("agent-draft"), inField("posting"), prepare("match")]);
+    expect(ids(rows)).toEqual(["agent-draft", "posting", "match", "old-draft"]);
+    expect(doTodaySummary(doToday([], [inField("posting")]), { empty: false })).toBe("Nothing is due this week.");
   });
 
   it("is empty when nothing waits", () => {

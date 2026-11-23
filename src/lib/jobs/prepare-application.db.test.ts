@@ -7,7 +7,9 @@ import { createTestClient, resetDatabase, TEST_PROFILE_ID } from "@/test/db";
 import { seedBuiltIns } from "../../../prisma/seed/built-ins";
 import { MockProvider } from "../ai/providers/mock";
 
-import { prepareApplicationJob, startPreparing } from "./prepare-application";
+import { fullText } from "@/lib/job-search/find";
+
+import { prepareApplicationJob, prepareKept, startPreparing } from "./prepare-application";
 import { startJob, type JobContext } from "./runner";
 
 const db = vi.hoisted(() => ({ client: undefined as ReturnType<typeof createTestClient> | undefined }));
@@ -21,6 +23,8 @@ vi.mock("@/lib/profile-data", async () => {
   return { loadProfile: async () => demoProfile(), loadFactTexts: async () => [] };
 });
 vi.mock("@/lib/notifications/notify", () => ({ emit: vi.fn(async () => 0) }));
+// No job portal is asked in a test: the whole text is what a test says it is.
+vi.mock("@/lib/job-search/find", () => ({ fullText: vi.fn(async () => null) }));
 // The AI model scores, as Settings → Scoring has it by default (E25-7).
 vi.mock("@/lib/env", () => ({ env: { DOSSIER_SECRET: "a".repeat(32) } }));
 vi.mock("@/lib/ai/config", () => ({ isAiConfigured: async () => true }));
@@ -175,6 +179,23 @@ describe("Prepare it for me (jobauto fork)", () => {
     const { applicationId } = await prepareApplicationJob.run(postingOnly(posting.id), context());
     expect(await startPreparing(posting.id)).toEqual({ jobId: null, applicationId });
     await expect(startPreparing("gone")).rejects.toThrow(/no longer kept/);
+  });
+
+  it("prepares a kept posting by its id, as the dashboard's row for a posting in her field does, asking for the whole text only when it has just the start", async () => {
+    const whole = await storePosting(found);
+    expect(await prepareKept(whole.id)).toEqual({ jobId: "new-run", applicationId: null });
+    expect(fullText).not.toHaveBeenCalled();
+    expect(startJob).toHaveBeenCalledWith(prepareApplicationJob, { postingId: whole.id, profileId: null, note: "" }, { key: `prepare:${whole.id}` });
+
+    const start = await storePosting({ ...found, externalId: "ledgerly-2", url: "https://jobs.example/ledgerly-2", title: "Meldewesen Referent", description: "The start of it…", complete: false });
+    vi.mocked(fullText).mockResolvedValueOnce("The whole posting, as the portal has it.");
+    await prepareKept(start.id);
+    expect(await prisma().posting.findUniqueOrThrow({ where: { id: start.id } })).toMatchObject({ description: "The whole posting, as the portal has it.", complete: true });
+    // When the portal has no more, it's prepared from what there is.
+    await prisma().posting.update({ where: { id: start.id }, data: { complete: false } });
+    vi.mocked(fullText).mockResolvedValueOnce(null);
+    expect(await prepareKept(start.id)).toMatchObject({ jobId: expect.any(String) });
+    await expect(prepareKept("gone")).rejects.toThrow(/no longer kept/);
   });
 
   it("makes no second application for a posting the job agent drafted or is drafting (one writer, audit round 2)", async () => {

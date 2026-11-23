@@ -5,6 +5,7 @@ import { announcementFeedSchema } from "@/lib/announcements/contract";
 import { applyAnswersSchema, DEFAULT_APPLY_ANSWERS, type ApplyAnswers } from "@/lib/apply/answers";
 import { JOB_SOURCES, JSEARCH_HOSTS } from "@/lib/job-search/search";
 import { callPrepSchema } from "@/lib/call-prep";
+import { DEFAULT_FIELD_SCORES } from "@/lib/field-match";
 import { setupGuideSchema } from "@/lib/setup-guide";
 import { SCORERS } from "@/lib/scoring/scorers";
 import { DEFAULT_STARTUP_SOURCES, startupSourcesSchema, startupsRefreshSchema } from "@/lib/startups/types";
@@ -278,6 +279,13 @@ const settingsSchema = z.object({
   supporterSentOn: z.string().nullable().catch(null),
   /** The day, in the user's time zone, the careers pages were last all checked (careers/check.ts). The install's, so exports leave it out. */
   careersCheckedOn: z.string().nullable().catch(null),
+  // In your field (field-match.ts, jobauto fork): how many new postings in
+  // her field are scored on their own each day (field-scoring.ts); 0 is off.
+  // And the day, in the user's time zone, with how many were scored on it,
+  // so the day's limit holds across restarts. The count is the install's, so
+  // exports leave it out (INSTALL_SETTINGS).
+  fieldScoresPerDay: z.coerce.number().int().min(0).max(30).catch(DEFAULT_FIELD_SCORES),
+  fieldScored: json(z.object({ day: z.string(), count: z.number().int().min(0) })).nullable().catch(null),
   /** Call prep's general practice (jobs/prepare-practice.ts): the call prep pack from her profile alone, and the prompt that wrote it. */
   practicePrep: json(callPrepSchema).nullable().catch(null),
   practicePrepWith: z.string().nullable().catch(null),

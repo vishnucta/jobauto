@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { listProfiles, openProfileId, profileSearchDefaults, type ProfileSummary } from "@/lib/profiles";
 import { isAiUsable } from "@/lib/ai/config";
+import { hasFieldProfile } from "@/lib/field-data";
 import { profileGerman } from "@/lib/german-need";
 import { loadHiddenTitles } from "@/lib/hidden-titles-data";
 import { peopleAt } from "@/lib/network-data";
@@ -64,7 +65,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
   // An agent run's several searches (E26-4) have no one search to show above the list.
   const ids = foundSearchIds(filters.found);
   const oneSearch = ids?.length === 1 ? ids[0] : null;
-  const [library, searches, foundSearch, opened, scoringOff, portalsOff] = await Promise.all([
+  const [library, searches, foundSearch, opened, scoringOff, portalsOff, inField] = await Promise.all([
     listLibrary(filters, { now }),
     listSearches({ timeZone, now }),
     oneSearch ? loadSearch(oneSearch, { timeZone, now }) : null,
@@ -73,6 +74,8 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
     loadScoringOff(),
     // The one-time note about portals with a key that are off (jobauto fork).
     portalsOffNote(jobSearchView(config).portals),
+    // Postings in her own field are marked while any of her profiles is in it (jobauto fork, field-match.ts).
+    hasFieldProfile(),
   ]);
   const enabled = enabledPortals(config);
   const { id: wordsFrom, profile, words } = await profileWithWords(opened, profileId, profiles, now);
@@ -91,6 +94,7 @@ export default async function JobsPage({ searchParams }: PageProps<"/jobs">) {
       sources={enabled}
       scoringOff={scoringOff}
       portalsOff={portalsOff}
+      inField={inField}
       arbeitsagenturNote={enabled.includes("ARBEITSAGENTUR") && !portalSetup(config, "ARBEITSAGENTUR")?.acceptedAt}
       scoreInClaude={scoreInClaude}
       profiles={profiles}

@@ -210,6 +210,8 @@ export const settingChoicesSchema = z.strictObject({
   weeklyTarget: z.number().int().min(0).max(50).optional(),
   supporterDay: z.number().int().min(1).max(7).optional(),
   supporterHour: z.number().int().min(0).max(23).optional(),
+  /** New postings in her field scored on their own each day (field-scoring.ts, jobauto fork); 0 switches it off. */
+  fieldScoresPerDay: z.number().int().min(0).max(30).optional(),
 });
 export type SettingChoices = z.output<typeof settingChoicesSchema>;
 

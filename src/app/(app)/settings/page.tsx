@@ -27,6 +27,7 @@ import { loadProfile, loadProfileName } from "@/lib/profile-data";
 import { searchChips, searchWords } from "@/lib/job-search/suggestions";
 import { describeGuide } from "@/lib/salary-guide";
 import { loadSalaryGuide } from "@/lib/salary-guide-data";
+import { hasFieldProfile } from "@/lib/field-data";
 import { scoringProblem } from "@/lib/scoring";
 import { loadScoringConfig, scoringView } from "@/lib/scoring/config";
 import { loadScoringOff } from "@/lib/scoring-off-data";
@@ -49,6 +50,7 @@ import { DocumentsSection } from "./documents-section";
 import { GoogleSection } from "./google-section";
 import { GoogleNotice } from "./google-notice";
 import { JobSearchSection } from "./job-search-section";
+import { FieldScoringCard } from "./field-scoring-card";
 import { ScoringSection } from "./scoring-section";
 import { ScoringOffNotice } from "../scoring-off-notice";
 import { AboutSection, type AboutFacts } from "./about-section";
@@ -198,8 +200,14 @@ async function JobSearchSectionWithNote({ archiveDays }: { archiveDays: number }
 
 /** Settings → Scoring, under "Scoring is off" while a profile has no levels (jobauto fork): its card here says so too. */
 async function ScoringWithNotice() {
-  const [config, off] = await Promise.all([loadScoringConfig(), loadScoringOff()]);
-  return <ScoringSection initial={scoringView(config)} notice={off && <ScoringOffNotice off={off} />} />;
+  const [config, off, settings, inField] = await Promise.all([loadScoringConfig(), loadScoringOff(), loadSettings(), hasFieldProfile()]);
+  return (
+    <>
+      <ScoringSection initial={scoringView(config)} notice={off && <ScoringOffNotice off={off} />} />
+      {/* A few new postings in her field scored each day (jobauto fork, field-scoring.ts): offered while a profile is in the field. */}
+      {inField && <FieldScoringCard perDay={settings.fieldScoresPerDay} agent={{ on: settings.agentEnabled, maxScores: settings.agentMaxScores }} />}
+    </>
+  );
 }
 
 /** The salary guide beside the salary expectation (jobauto fork): for the open profile's own title, from the postings she has seen. */
