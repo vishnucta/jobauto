@@ -106,6 +106,20 @@ export const EMPTY_QUERY: SearchQuery = {
   postedWithin: "any",
 };
 
+/** A place a portal lists to apply at (jobauto fork): the site's name as the portal gives it ("LinkedIn", "Ledgerly Careers"), and its link. */
+export const applyOptionSchema = z.object({
+  name: z.string().max(100),
+  url: z
+    .string()
+    .min(1)
+    .max(2000)
+    .refine((url) => safeLink(url) !== "", "Not a web address."),
+});
+export type ApplyOption = z.output<typeof applyOptionSchema>;
+
+/** At most this many places to apply at are kept with a posting. */
+export const MAX_APPLY_OPTIONS = 12;
+
 /** A posting as a source found it, in one shape for every source. */
 export const foundPostingSchema = z.object({
   /** The source's id: one of JOB_SOURCES when it was found, but a stored one may no longer be listed (#269). */
@@ -131,6 +145,12 @@ export const foundPostingSchema = z.object({
   description: z.string().max(100_000),
   /** False while the description is only the start of the posting. */
   complete: z.boolean(),
+  /**
+   * Every place the portal listed to apply at, `url` among them (jobauto
+   * fork, link-owner.ts chose `url` from them); missing for a posting found
+   * before, or from a portal that lists one.
+   */
+  applyOptions: z.array(applyOptionSchema).max(MAX_APPLY_OPTIONS).optional(),
 });
 export type FoundPosting = z.output<typeof foundPostingSchema>;
 
@@ -264,10 +284,11 @@ const GENDER_MARK = /\(\s*(?:all genders|[a-z](?:\s*[/|]\s*[a-z]){1,3})\s*\)|\b[
  * postings and so must never be wrong: this only keeps a job from being
  * added twice.
  */
-export function jobKeys(job: Pick<FoundPosting, "url" | "title" | "company" | "place">): string[] {
+export function jobKeys(job: Pick<FoundPosting, "url" | "title" | "company" | "place"> & { applyOptions?: readonly ApplyOption[] | null }): string[] {
   const keys: string[] = [];
-  const link = linkKey(job.url);
-  if (link) keys.push(`link:${link}`);
+  // Its link and every other place it's listed to apply at (jobauto fork), so a link it was known by before still matches.
+  const links = new Set([job.url, ...(job.applyOptions ?? []).map((option) => option.url)].map(linkKey).filter(Boolean));
+  for (const link of links) keys.push(`link:${link}`);
   const company = normalText(job.company);
   const title = normalText(job.title.replace(GENDER_MARK, " "));
   const city = normalText(job.place.split(/[,(/·|–]/)[0] ?? "");

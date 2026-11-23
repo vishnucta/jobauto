@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { linkKeysOf, optionsFromColumn } from "@/lib/job-search/apply-options";
 import { linkKey } from "@/lib/job-search/search";
 import { logServerError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
@@ -45,12 +46,13 @@ export async function archiveUntouched({ now = new Date(), days, db = prisma }: 
         lastFoundAt: { lt: cutoff },
         OR: [{ movedBackAt: null }, { movedBackAt: { lt: cutoff } }],
       },
-      select: { id: true, url: true },
+      select: { id: true, url: true, applyOptions: true },
     }),
     db.application.findMany({ where: { postingUrl: { not: "" } }, select: { postingUrl: true } }),
   ]);
   const applied = new Set(applications.map((application) => linkKey(application.postingUrl)).filter(Boolean));
-  const ids = candidates.filter((posting) => !applied.has(linkKey(posting.url))).map((posting) => posting.id);
+  // By its link or any other place it's listed to apply at (jobauto fork).
+  const ids = candidates.filter((posting) => !linkKeysOf({ url: posting.url, applyOptions: optionsFromColumn(posting.applyOptions) }).some((link) => applied.has(link))).map((posting) => posting.id);
   return inChunks(ids, (chunk) => db.posting.updateMany({ where: { id: { in: chunk }, archivedAt: null }, data: { archivedAt: now } }));
 }
 

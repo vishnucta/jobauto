@@ -413,6 +413,33 @@ describe("a copy of the ad (jobauto fork, Apply at the source)", () => {
     expect((await tool("get_apply_status", { id: ledgerly })).json.form).toMatchObject({ look_at: "https://careers.ledgerly.example", look_at_is: "the employer's careers page" });
   });
 
+  it("offers the other places the posting was listed at, best first, never another copy (jobauto fork, Keep every apply option)", async () => {
+    await onCopy();
+    await prisma().posting.create({
+      data: {
+        source: "JSEARCH",
+        externalId: "ledgerly-42",
+        title: "Analyst",
+        company: "Ledgerly",
+        url: COPY,
+        applicationId: ledgerly,
+        applyOptions: [
+          { name: "Jooble", url: COPY },
+          { name: "Trabajo.org", url: "https://www.trabajo.org/job-42" },
+          { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/42" },
+          { name: "Ledgerly", url: PERSONIO },
+        ],
+      },
+    });
+    expect((await tool("get_apply_status", { id: ledgerly })).json.form).toMatchObject({
+      copy_of_the_ad_on: "Jooble",
+      also_listed_at: [
+        { site: "Ledgerly", url: PERSONIO },
+        { site: "LinkedIn", url: "https://www.linkedin.com/jobs/view/42" },
+      ],
+    });
+  });
+
   it("doesn't fill a copy's form, from Claude or after a restart", async () => {
     await onCopy();
     const refused = await tool("start_apply", { id: ledgerly });

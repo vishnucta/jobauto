@@ -2,7 +2,8 @@ import "server-only";
 
 import type { Posting, Prisma } from "@/generated/prisma/client";
 import { breakdownOf, isOlderScore } from "@/lib/fit";
-import { bestFit, linkKey, postingKey, type FoundPosting, type PostingState, type ProfileFit } from "@/lib/job-search/search";
+import { linkKeysOf, mergedOptions, optionsFromColumn } from "@/lib/job-search/apply-options";
+import { bestFit, linkKey, postingKey, type ApplyOption, type FoundPosting, type PostingState, type ProfileFit } from "@/lib/job-search/search";
 import { stringsOf } from "@/lib/agent/candidates";
 import { lockAgentSearches } from "@/lib/agent/searches";
 import { prisma } from "@/lib/prisma";
@@ -48,27 +49,36 @@ export function foundFromPosting(posting: Posting): FoundPosting {
     via: posting.via,
     description: posting.description,
     complete: posting.complete,
+    // Every place it's listed to apply at (jobauto fork); none for one kept before, or from a portal that lists one.
+    ...(optionsFromColumn(posting.applyOptions) ? { applyOptions: optionsFromColumn(posting.applyOptions) } : {}),
   };
 }
 
 /**
  * Stores a posting, or refreshes it from a newer search, with `marks`. A
  * whole description isn't replaced by a snippet; saved and dismissed dates
- * only change when `marks` says so.
+ * only change when `marks` says so. A posting kept already keeps its link
+ * (jobauto fork): what matches it by link keeps matching; the places to
+ * apply at the search lists are added to its own.
  */
 export async function storePosting(found: FoundPosting, marks: { savedAt?: Date | null; dismissedAt?: Date | null; seenAt?: Date; archivedAt?: null } = {}): Promise<Posting> {
   return prisma.$transaction(async (tx) => {
     const where = whereRef(found);
-    const existing = await tx.posting.findUnique({ where, select: { complete: true } });
-    const { description, complete, ...rest } = fieldsOf(found);
+    const existing = await tx.posting.findUnique({ where, select: { complete: true, url: true, applyOptions: true } });
+    const { description, complete, url, ...rest } = fieldsOf(found);
     const text = existing?.complete && !complete ? {} : { description, complete };
+    const options = existing ? mergedOptions({ url: existing.url, applyOptions: optionsFromColumn(existing.applyOptions) }, found) : found.applyOptions;
     return tx.posting.upsert({
       where,
-      create: { source: found.source, externalId: found.externalId, ...rest, description, complete, ...marks },
-      update: { ...rest, ...text, ...marks },
+      create: { source: found.source, externalId: found.externalId, ...rest, url, description, complete, ...optionsColumn(options), ...marks },
+      update: { ...rest, ...(existing?.url ? {} : { url }), ...text, ...optionsColumn(options), ...marks },
     });
   });
 }
+
+/** The places to apply at as the column takes them; nothing when there are none, so the column stays as it is. */
+export const optionsColumn = (options: readonly ApplyOption[] | undefined): { applyOptions?: Prisma.InputJsonValue } =>
+  options && options.length > 0 ? { applyOptions: options.map(({ name, url }) => ({ name, url })) } : {};
 
 /** Save: into the Saved list, and out of Dismissed and the Archive. */
 export async function savePosting(found: FoundPosting): Promise<Posting> {
@@ -124,7 +134,7 @@ const agentOf = (candidate: { id: string; status: string; applicationId: string 
  * counts applications made from the same link before Find jobs, ignoring
  * tracking parameters.
  */
-export async function postingStates(found: readonly (PostingRef & { url: string })[], db: Prisma.TransactionClient = prisma): Promise<Map<string, PostingState>> {
+export async function postingStates(found: readonly (PostingRef & { url: string; applyOptions?: readonly ApplyOption[] | null })[], db: Prisma.TransactionClient = prisma): Promise<Map<string, PostingState>> {
   if (found.length === 0) return new Map();
   const refs = found.map(({ source, externalId }) => ({ source, externalId }));
   const [stored, applications, scores, candidates] = await Promise.all([
@@ -187,7 +197,8 @@ export async function postingStates(found: readonly (PostingRef & { url: string 
   return new Map(
     found.map((posting) => {
       const row = byKey.get(postingKey(posting));
-      const link = linkKey(posting.url);
+      // By its link, or any other place it's listed to apply at (jobauto fork): an application made from a link it had before still counts.
+      const link = linkKeysOf(posting).find((key) => byLink.has(key)) ?? "";
       return [
         postingKey(posting),
         {

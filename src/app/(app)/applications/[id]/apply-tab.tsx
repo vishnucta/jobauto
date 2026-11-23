@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { ProgressSteps } from "@/components/ui/progress-steps";
 import type { ApplyAttemptStatus } from "@/generated/prisma/enums";
 import type { ApplyAnswers } from "@/lib/apply/answers";
+import { hostOf } from "@/lib/apply/ats";
 import { sendChannel } from "@/lib/apply/send-step";
 import { APPLY_STEPS, FILL_STEPS } from "@/lib/apply/steps";
 import { OPEN_ATTEMPT_STATUSES, type ApplyAttemptView, type ApplyTabData } from "@/lib/apply/view";
@@ -502,10 +503,10 @@ function FindPostingPanel({
   const copy = plan.owner?.kind === "copy" ? plan.owner.site : null;
   const employer = find?.employer || "the employer";
 
-  const save = () => {
-    if (!link.trim() || saving) return;
+  const save = (chosen = link) => {
+    if (!chosen.trim() || saving) return;
     startSaving(async () => {
-      const result = await savePostingLink({ id: applicationId, link });
+      const result = await savePostingLink({ id: applicationId, link: chosen });
       if (!result.ok) return toast(result.error);
       if (result.toast) toast(result.toast);
       setLink("");
@@ -528,6 +529,26 @@ function FindPostingPanel({
           </>
         )}
       </p>
+      {/* The other places the portal listed it (jobauto fork, link-owner.ts), the employer's own first: one is a click instead of a search. */}
+      {find?.listed && find.listed.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-meta text-muted">Also listed at</h3>
+          <ul aria-label="Also listed at" className="flex flex-col divide-y divide-line">
+            {find.listed.slice(0, 5).map((option) => (
+              <li key={option.url} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-sm">
+                <a href={option.url} target="_blank" rel="noopener noreferrer" className="min-w-0 break-all text-ink underline underline-offset-2">
+                  {option.name || hostOf(option.url)}
+                  {option.name && <span className="text-muted"> · {hostOf(option.url)}</span>}
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+                <Button size="sm" variant="secondary" aria-label={`Use this link: ${option.name || hostOf(option.url)}`} aria-disabled={saving || undefined} onClick={() => save(option.url)}>
+                  Use this link
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {find && (
         <div className="flex flex-wrap items-center gap-3">
           <a href={find.href} target="_blank" rel="noopener noreferrer" className={buttonClassName(copy ? "primary" : "secondary", "md", copy ? "hover:text-on-primary" : undefined)}>

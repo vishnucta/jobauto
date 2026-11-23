@@ -1,5 +1,6 @@
 import "server-only";
 
+import { optionsFromColumn } from "@/lib/job-search/apply-options";
 import { linkKey } from "@/lib/job-search/search";
 import { prisma } from "@/lib/prisma";
 
@@ -17,24 +18,25 @@ type PostingRef = { source: string; externalId: string; url: string };
 /**
  * The application a posting has outside the job agent's queue: the one
  * Positions keeps with it (or with the posting it was merged into), else
- * one made from the same link, as Positions' "Applied" counts it. An agent
+ * one made from the same link, as Positions' "Applied" counts it: its own
+ * or any other place it's listed to apply at (jobauto fork). An agent
  * draft still waiting for review isn't one: it's the agent's to settle.
  */
 export async function keptApplication(ref: PostingRef): Promise<string | null> {
   const posting = await prisma.posting.findUnique({
     where: { source_externalId: { source: ref.source, externalId: ref.externalId } },
-    select: { applicationId: true, mergedInto: { select: { applicationId: true } } },
+    select: { applicationId: true, url: true, applyOptions: true, mergedInto: { select: { applicationId: true } } },
   });
   const kept = posting?.applicationId ?? posting?.mergedInto?.applicationId ?? null;
-  return kept ?? sameLinkApplication(ref.url);
+  return kept ?? sameLinkApplication([ref.url, posting?.url ?? "", ...(optionsFromColumn(posting?.applyOptions) ?? []).map((option) => option.url)]);
 }
 
-/** An application made from the same link, for a posting Positions doesn't keep (save_application from a link). */
-export async function sameLinkApplication(url: string): Promise<string | null> {
-  const link = linkKey(url);
-  if (!link) return null;
+/** An application made from the same link, or one of several, for a posting Positions doesn't keep (save_application from a link). */
+export async function sameLinkApplication(urls: string | readonly string[]): Promise<string | null> {
+  const links = new Set((typeof urls === "string" ? [urls] : urls).map(linkKey).filter(Boolean));
+  if (links.size === 0) return null;
   const sameLink = await prisma.application.findMany({ where: { postingUrl: { not: "" }, awaitingReview: false }, select: { id: true, postingUrl: true }, orderBy: { createdAt: "asc" } });
-  return sameLink.find((application) => linkKey(application.postingUrl) === link)?.id ?? null;
+  return sameLink.find((application) => links.has(linkKey(application.postingUrl)))?.id ?? null;
 }
 
 /** The posting Positions keeps for a ref, for the Prepare it for me under way for it; null when it keeps none. */

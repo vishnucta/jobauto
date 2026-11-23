@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { unitsSchema } from "@/lib/application-data";
 import { germanDecision, germanNeed, profileGerman, textForGerman, type GermanNeed, type ProfileGerman } from "@/lib/german-need";
+import { otherOptions } from "@/lib/job-search/apply-options";
 import { fullText } from "@/lib/job-search/find";
 import { postingText, type FoundPosting, type ProfileFit, type SearchPortal, type ShownPosting } from "@/lib/job-search/search";
 import { sourceInfo } from "@/lib/job-search/sources";
@@ -105,6 +106,8 @@ export function postingLine(posting: ShownPosting | FoundPosting, number: number
     // The AI clients or careers pages that added it (add_found_jobs, careers pages).
     added_by: state?.addedBy.length ? state.addedBy : undefined,
     url: posting.url || undefined,
+    // The other places the portal listed to apply at (jobauto fork): url is the best of them, the employer's own first.
+    also_listed_at: otherOptions(posting).length > 0 ? otherOptions(posting).map((option) => option.url) : undefined,
     saved: state?.saved || undefined,
     applied: state?.applicationId ? true : undefined,
     fit: fitLine(state?.score),

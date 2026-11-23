@@ -66,6 +66,23 @@ describe("JSearch search", () => {
     expect(page.postings).toHaveLength(2);
   });
 
+  it("takes the employer's own place to apply at over a copy of the ad that Google marks direct, and keeps every option (jobauto fork)", async () => {
+    const [ledgerly] = jsearchV2Page.data.jobs;
+    const options = [
+      { publisher: "Jooble", apply_link: "https://de.jooble.org/jdp/42", is_direct: true },
+      { publisher: "StepStone", apply_link: "https://www.stepstone.de/stellenangebote--42.html", is_direct: false },
+      { publisher: "Ledgerly", apply_link: "https://ledgerly.wd3.myworkdayjobs.com/External/job/42", is_direct: false },
+    ];
+    stubFetch(() => json({ ...jsearchV2LastPage, data: { jobs: [{ ...ledgerly, job_apply_link: options[0].apply_link, apply_options: options }], cursor: null } }));
+    const [posting] = (await jsearch.search(query, ninja, null)).postings;
+    expect(posting.url).toBe("https://ledgerly.wd3.myworkdayjobs.com/External/job/42");
+    expect(posting.applyOptions).toEqual([
+      { name: "Jooble", url: "https://de.jooble.org/jdp/42" },
+      { name: "StepStone", url: "https://www.stepstone.de/stellenangebote--42.html" },
+      { name: "Ledgerly", url: "https://ledgerly.wd3.myworkdayjobs.com/External/job/42" },
+    ]);
+  });
+
   it("searches the US when no country is chosen, as JSearch would anyway", async () => {
     const requests = stubFetch(() => json(jsearchV2LastPage));
     await jsearch.search({ ...query, country: "" }, ninja, null);
@@ -90,6 +107,11 @@ describe("JSearch search", () => {
         via: "LinkedIn",
         description: expect.stringContaining("Senior Product Designer for its payments team"),
         complete: true,
+        // Every place it's listed to apply at (jobauto fork): its own, the employer's careers page, first.
+        applyOptions: [
+          { name: "Ledgerly Careers", url: "https://careers.ledgerly.example/jobs/42" },
+          { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/1234567890?utm_source=google_jobs_apply" },
+        ],
       },
       {
         source: "JSEARCH",

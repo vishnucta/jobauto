@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { daysBetween, formatDay, formatTime } from "@/lib/dates";
 import { enabledPortals, loadJobSearchConfig } from "@/lib/job-search/config";
 import { countryName } from "@/lib/job-search/countries";
+import { optionsFromColumn } from "@/lib/job-search/apply-options";
 import { askSource } from "@/lib/job-search/find";
 import {
   EMPTY_QUERY,
@@ -11,6 +12,7 @@ import {
   jobKeys,
   postingKey,
   searchQuerySchema,
+  type ApplyOption,
   type FoundPosting,
   type PastSearchDay,
   type PostingOrigin,
@@ -268,7 +270,7 @@ export type KnownJob =
   | { where: "agent" }
   | { where: "twice" };
 
-type KnownRow = { id: string; mergedIntoId: string | null; url: string; title: string; company: string; place: string; savedAt: Date | null; dismissedAt: Date | null; archivedAt: Date | null; removedAt: Date | null };
+type KnownRow = { id: string; mergedIntoId: string | null; url: string; applyOptions?: ApplyOption[]; title: string; company: string; place: string; savedAt: Date | null; dismissedAt: Date | null; archivedAt: Date | null; removedAt: Date | null };
 
 /**
  * Every job Dossier has, by its keys (jobKeys): applied to, saved,
@@ -286,9 +288,12 @@ export async function knownJobs(): Promise<Map<string, KnownJob>> {
       select: { searchId: true, postingId: true, portal: true, posting: { select: { removedAt: true } }, search: { select: { addedBy: true, agentSearchName: true, createdAt: true } } },
       orderBy: [{ foundAt: "asc" }, { id: "asc" }],
     }),
-    prisma.posting.findMany({
-      select: { id: true, mergedIntoId: true, url: true, title: true, company: true, place: true, savedAt: true, dismissedAt: true, archivedAt: true, removedAt: true },
-    }),
+    prisma.posting
+      .findMany({
+        select: { id: true, mergedIntoId: true, url: true, applyOptions: true, title: true, company: true, place: true, savedAt: true, dismissedAt: true, archivedAt: true, removedAt: true },
+      })
+      // Known by every place it's listed to apply at too (jobauto fork).
+      .then((rows) => rows.map((row) => ({ ...row, applyOptions: optionsFromColumn(row.applyOptions) }))),
     prisma.application.findMany({ where: { awaitingReview: false }, select: { id: true, postingUrl: true, title: true, company: true, location: true } }),
   ]);
   // Each find's number in its search's list (one removed from the Archive isn't listed), and the latest search that has each posting.

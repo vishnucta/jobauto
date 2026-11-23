@@ -16,7 +16,8 @@ import {
 } from "@/lib/job-search/search";
 import { companyKey, sameJob } from "@/lib/dedupe";
 import { fieldMatch } from "@/lib/field-match";
-import { foundFromPosting, postingStates } from "@/lib/postings";
+import { mergedOptions, optionsFromColumn } from "@/lib/job-search/apply-options";
+import { foundFromPosting, optionsColumn, postingStates } from "@/lib/postings";
 import { byBestFit, coverageOf, passes } from "@/lib/posting-coverage";
 import { prisma } from "@/lib/prisma";
 
@@ -76,7 +77,10 @@ async function keep(
 ): Promise<void> {
   for (const posting of found) {
     const where = { source_externalId: { source: posting.source, externalId: posting.externalId } };
-    const existing = await db.posting.findUnique({ where, select: { id: true, complete: true, dismissedAt: true, removedAt: true, lastFoundAt: true, mergedIntoId: true } });
+    const existing = await db.posting.findUnique({
+      where,
+      select: { id: true, complete: true, dismissedAt: true, removedAt: true, lastFoundAt: true, mergedIntoId: true, url: true, applyOptions: true },
+    });
     const keys = { matchCompany: companyKey(posting.company) };
     let id: string;
     // The posting that shows: this one, or the one it's the same job as (E22-6).
@@ -85,7 +89,7 @@ async function keep(
       const same = await sameJobAs(posting, db);
       id = (
         await db.posting.create({
-          data: { source: posting.source, externalId: posting.externalId, ...fieldsOf(posting), ...keys, description: posting.description, complete: posting.complete, lastFoundAt: now, seenAt, mergedIntoId: same },
+          data: { source: posting.source, externalId: posting.externalId, ...fieldsOf(posting), ...optionsColumn(posting.applyOptions), ...keys, description: posting.description, complete: posting.complete, lastFoundAt: now, seenAt, mergedIntoId: same },
           select: { id: true },
         })
       ).id;
@@ -95,8 +99,12 @@ async function keep(
       shown = existing.mergedIntoId ?? id;
       const later = existing.lastFoundAt < now ? { lastFoundAt: now } : {};
       const text = existing.complete && !posting.complete ? {} : { description: posting.description, complete: posting.complete };
+      // A posting kept already keeps its link (jobauto fork), so what matches it by link keeps matching; the places to apply at found now are added.
+      const { url, ...fields } = fieldsOf(posting);
+      const link = existing.url ? {} : { url };
+      const options = optionsColumn(mergedOptions({ url: existing.url, applyOptions: optionsFromColumn(existing.applyOptions) }, posting));
       // Dismissed or removed from the Archive, it stays as it is; archived, it stays there, found again (E22-7).
-      await db.posting.update({ where: { id }, data: existing.dismissedAt || existing.removedAt ? later : { ...fieldsOf(posting), ...keys, ...text, ...later } });
+      await db.posting.update({ where: { id }, data: existing.dismissedAt || existing.removedAt ? later : { ...fields, ...link, ...options, ...keys, ...text, ...later } });
     }
     if (shown !== id) await fillIn(shown, posting, now, db);
     await db.postingFind.upsert({
@@ -118,11 +126,11 @@ async function sameJobAs(posting: FoundPosting, db: Db): Promise<string | null> 
   if (!company) return null;
   const candidates = await db.posting.findMany({
     where: { matchCompany: company, mergedIntoId: null },
-    select: { id: true, url: true, company: true, title: true, place: true, remote: true, description: true },
+    select: { id: true, url: true, applyOptions: true, company: true, title: true, place: true, remote: true, description: true },
     orderBy: { createdAt: "asc" },
     take: 200,
   });
-  return candidates.find((candidate) => sameJob(posting, candidate) !== null)?.id ?? null;
+  return candidates.find((candidate) => sameJob(posting, { ...candidate, applyOptions: optionsFromColumn(candidate.applyOptions) }) !== null)?.id ?? null;
 }
 
 /**
@@ -131,13 +139,19 @@ async function sameJobAs(posting: FoundPosting, db: Db): Promise<string | null> 
  * when it was posted), unless it's dismissed.
  */
 async function fillIn(shownId: string, other: FoundPosting, now: Date, db: Db): Promise<void> {
-  const shown = await db.posting.findUnique({ where: { id: shownId }, select: { complete: true, description: true, salary: true, postedAt: true, remote: true, dismissedAt: true, removedAt: true, lastFoundAt: true } });
+  const shown = await db.posting.findUnique({
+    where: { id: shownId },
+    select: { complete: true, description: true, salary: true, postedAt: true, remote: true, dismissedAt: true, removedAt: true, lastFoundAt: true, url: true, applyOptions: true },
+  });
   if (!shown) return;
   const data: Prisma.PostingUpdateInput = shown.lastFoundAt < now ? { lastFoundAt: now } : {};
   if (!shown.dismissedAt && !shown.removedAt) {
     if (!shown.complete && (other.complete || other.description.length > shown.description.length)) Object.assign(data, { description: other.description, complete: other.complete });
     if (!shown.salary && other.salary) data.salary = other.salary;
     if (!shown.postedAt && other.postedAt) data.postedAt = new Date(other.postedAt);
+    // The places the other lists to apply at, its own link among them (jobauto fork): the shown one's link stays.
+    const options = mergedOptions({ url: shown.url, applyOptions: optionsFromColumn(shown.applyOptions) }, { applyOptions: [...(other.url ? [{ name: other.via, url: other.url }] : []), ...(other.applyOptions ?? [])] });
+    if (options && options.length > 1) Object.assign(data, optionsColumn(options));
     if (shown.remote === null && other.remote !== null) data.remote = other.remote;
   }
   if (Object.keys(data).length > 0) await db.posting.update({ where: { id: shownId }, data });

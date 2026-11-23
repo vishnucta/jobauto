@@ -968,4 +968,24 @@ describe("a posting whose link is a copy of the ad (jobauto fork, Apply at the s
     await userEvent.click(row);
     expect(screen.getByText("Jooble: a copy of the ad, not the employer's own posting")).toBeInTheDocument();
   });
+
+  it("lists the other places it's listed to apply at, the employer's own first, a copy marked as one (jobauto fork, Keep every apply option)", async () => {
+    const listed = posting("e", {
+      company: "Ledgerly",
+      url: "https://www.linkedin.com/jobs/view/7",
+      applyOptions: [
+        { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/7" },
+        { name: "Jooble", url: "https://de.jooble.org/jdp/7" },
+        { name: "", url: "https://ledgerly.jobs.personio.de/job/7" },
+      ],
+    });
+    renderScreen({ library: { postings: [listed, posting("f")], total: 2, more: false } });
+    await userEvent.click(screen.getByRole("button", { name: /^Designer e/ }));
+    const links = within(screen.getByText("Also listed at").nextElementSibling as HTMLElement).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual(["ledgerly.jobs.personio.de (opens in a new tab)", "Jooble (a copy of the ad) (opens in a new tab)"]);
+    expect(links[0]).toHaveAttribute("href", "https://ledgerly.jobs.personio.de/job/7");
+    // One that lists none says nothing of it.
+    await userEvent.click(screen.getByRole("button", { name: /^Designer f/ }));
+    expect(screen.queryByText("Also listed at")).not.toBeInTheDocument();
+  });
 });

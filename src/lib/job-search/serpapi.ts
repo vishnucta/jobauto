@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { PortalAdapter, PortalFields } from "@/lib/portals/engine";
 
 import type { RequestContext } from "./adapter";
+import { withApplyOptions } from "./apply-options";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
 import { normalText, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
@@ -163,7 +164,7 @@ function remoteOf(job: Job, extensions: string[]): boolean | null {
 export function postingFromJob(job: Job, now = Date.now()): FoundPosting {
   const description = (job.description ?? "").trim().slice(0, 100_000);
   const extensions = (job.extensions ?? []).map((extension) => extension.trim()).filter(Boolean);
-  return {
+  const posting: FoundPosting = {
     source: "SERPAPI",
     externalId: externalIdOf(job.job_id),
     title: (job.title ?? "").trim().slice(0, 500),
@@ -179,6 +180,8 @@ export function postingFromJob(job: Job, now = Date.now()): FoundPosting {
     description,
     complete: description.length > 0,
   };
+  // Every place Google lists to apply at (jobauto fork): the link becomes the best of them, the pick above staying on a tie.
+  return withApplyOptions(posting, (job.apply_options ?? []).map((option) => ({ name: option.title, url: option.link })));
 }
 
 /** "designer in Hamburg remote": Google reads the place, and remote work, from the query; its own filters for them are gone. */

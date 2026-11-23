@@ -1,6 +1,7 @@
 import "server-only";
 
 import { DocumentKind } from "@/generated/prisma/enums";
+import { optionsFromColumn } from "@/lib/job-search/apply-options";
 import { applyJobKey } from "@/lib/jobs/apply";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +11,7 @@ import type { Basics } from "@/lib/profile";
 import type { SettingsData } from "@/lib/settings";
 
 import { hostOf } from "./ats";
-import { findPostingAt } from "./link-owner";
+import { betterListed, findPostingAt } from "./link-owner";
 import { planFor } from "./plan";
 import { isWatching } from "./watches";
 import { filledSchema, unfilledSchema } from "./run-types";
@@ -43,7 +44,7 @@ export async function loadApplyTab(
   timeZone: string | undefined,
 ): Promise<ApplyTabData> {
   const [posting, rows, jobs, guide] = await Promise.all([
-    prisma.posting.findUnique({ where: { applicationId: application.id }, select: { url: true, source: true } }),
+    prisma.posting.findUnique({ where: { applicationId: application.id }, select: { url: true, source: true, applyOptions: true } }),
     prisma.applyAttempt.findMany({ where: { applicationId: application.id }, orderBy: { startedAt: "desc" }, take: ATTEMPTS_SHOWN }),
     findUnfinishedJobs(applyJobKey(application.id)),
     loadSalaryGuide(application.role || application.title || ""),
@@ -67,6 +68,8 @@ export async function loadApplyTab(
   const doubtful = route.kind === "web" && (route.owner?.kind === "copy" || route.owner?.kind === "unsure");
   const followed = doubtful ? await prisma.employer.findMany({ select: { name: true, careersUrl: true }, orderBy: { createdAt: "asc" } }) : [];
   const role = application.role || (application.title ?? "").split(" · ")[0] || "";
+  // The other places the portal listed the posting to apply at (jobauto fork), to pick instead of searching.
+  const listed = doubtful && route.kind === "web" ? betterListed(optionsFromColumn(posting?.applyOptions) ?? [], route.url, company) : [];
   const attempts: ApplyAttemptView[] = rows.map((row) => ({
     id: row.id,
     status: row.status,
@@ -92,6 +95,6 @@ export async function loadApplyTab(
     missing: ASKED.filter(([field]) => !profile.basics[field]?.toString().trim()).map(([, name]) => name),
     browserAddress: settings.applyBrowserAddress,
     salaryGuide: guide ? describeGuide(guide) : null,
-    findPosting: doubtful ? findPostingAt(company, role, followed) : null,
+    findPosting: doubtful ? { ...findPostingAt(company, role, followed), ...(listed.length > 0 ? { listed } : {}) } : null,
   };
 }

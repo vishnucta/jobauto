@@ -1,4 +1,4 @@
-import { linkKey } from "@/lib/job-search/search";
+import { linkKey, type ApplyOption } from "@/lib/job-search/search";
 
 // The same job on several portals (E22-6, #392): careful matching in four
 // layers, cheapest first, never AI. A wrong merge hides a job from the user,
@@ -109,7 +109,10 @@ function titleWithin(a: string, b: string): boolean {
   return true;
 }
 
-export type Comparable = { url: string; company: string; title: string; place: string; remote: boolean | null; description: string };
+export type Comparable = { url: string; company: string; title: string; place: string; remote: boolean | null; description: string; applyOptions?: readonly ApplyOption[] | null };
+
+/** Every link a posting is known by: its own and each other place it's listed to apply at (jobauto fork). */
+const linksOf = (posting: Comparable) => new Set([posting.url, ...(posting.applyOptions ?? []).map((option) => option.url)].map(linkKey).filter(Boolean));
 
 /**
  * Which layer says two postings are the same job, or null when none does
@@ -123,7 +126,9 @@ export function sameJob(a: Comparable, b: Comparable): 2 | 3 | 4 | null {
   if (one.city && other.city && one.city !== other.city) return null;
   if (levelsOf(a.title) !== levelsOf(b.title)) return null;
   // 2: the employer's own apply link, tracking parameters aside; with one title within the other, since some sites give every job one careers page.
-  if (one.link && one.link === other.link && titleWithin(one.title, other.title)) return 2;
+  // Any link either is known by counts (jobauto fork): one kept with a link it no longer leads with still matches.
+  const links = linksOf(b);
+  if ([...linksOf(a)].some((link) => links.has(link)) && titleWithin(one.title, other.title)) return 2;
   // 3: the same title in the same city (or both remote, with no city).
   const sameCity = one.city ? one.city === other.city : !other.city && a.remote === true && b.remote === true;
   if (one.title && one.title === other.title && sameCity) return 3;

@@ -104,7 +104,7 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<{
 }
 
 /** A kept search with what it found, in the library as a search keeps it (E22-5). */
-const storeSearch = async (postings: ReturnType<typeof found>[], createdAt?: Date) => {
+const storeSearch = async (postings: (ReturnType<typeof found> & { applyOptions?: { name: string; url: string }[] })[], createdAt?: Date) => {
   const search = await prisma().postingSearch.create({
     data: {
       source: "JSEARCH",
@@ -194,6 +194,23 @@ describe("Positions through the Claude connector", () => {
     // Scored, and under half covered: it keeps the mark, as a low fit.
     await saveScore(found("f1", "Transaction Reporting Analyst"), { ...halfCovered, breakdown: { ...halfCovered.breakdown, requirements: [...halfCovered.breakdown.requirements, { text: "Rust", mustHave: false, covered: false, evidence: null, skill: "Rust" }] } }, "test", TEST_PROFILE_ID);
     expect((await tool("list_postings", { view: "open", in_field: true })).json).toMatchObject({ open: { postings: [{ in_your_field: "In your field · low fit" }] } });
+  });
+
+  it("names the other places a posting is listed to apply at (jobauto fork, Keep every apply option)", async () => {
+    await storeSearch([
+      {
+        ...found("o1", "Product Designer"),
+        url: "https://acme.jobs.personio.de/job/1",
+        applyOptions: [
+          { name: "Acme", url: "https://acme.jobs.personio.de/job/1" },
+          { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/1" },
+        ],
+      },
+      found("o2", "UX Writer"),
+    ]);
+    const { open } = (await tool("list_postings", { view: "open", sort: "new" })).json as unknown as { open: { postings: Record<string, unknown>[] } };
+    expect(open.postings.find((posting) => posting.title === "Product Designer")).toMatchObject({ url: "https://acme.jobs.personio.de/job/1", also_listed_at: ["https://www.linkedin.com/jobs/view/1"] });
+    expect(open.postings.find((posting) => posting.title === "UX Writer")).not.toHaveProperty("also_listed_at");
   });
 
   it("pages through every list with from and limit, since Positions shows them all", async () => {

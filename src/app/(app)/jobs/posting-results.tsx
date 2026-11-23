@@ -17,7 +17,9 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useJob } from "@/hooks/use-job";
-import { adCopySite } from "@/lib/apply/link-owner";
+import { hostOf } from "@/lib/apply/ats";
+import { adCopySite, linkRank } from "@/lib/apply/link-owner";
+import { otherOptions } from "@/lib/job-search/apply-options";
 import { openPendingTab, sendPendingTab } from "@/lib/claude-tab";
 import { cn } from "@/lib/cn";
 import { isBoardLink } from "@/lib/dedupe";
@@ -100,6 +102,21 @@ const addedBy = (posting: ShownPosting) =>
 /** The posting's link, or the employer's own when it's on a job board and a portal that found the same job has that (E22-6). */
 const bestLink = (posting: ShownPosting) =>
   posting.url && !isBoardLink(posting.url) ? posting.url : (posting.state.foundOn.find((entry) => entry.url && !isBoardLink(entry.url))?.url ?? posting.url);
+
+/** Other places a posting is listed to apply at, each a link named as the portal names the site, else by its host; a copy of the ad says so. */
+function AlsoListed({ options }: { options: readonly { name: string; url: string; rank: number }[] }) {
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {options.map((option) => (
+        <a key={option.url} href={option.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">
+          {option.name || hostOf(option.url)}
+          {option.rank === 4 && <span className="text-muted"> (a copy of the ad)</span>}
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      ))}
+    </span>
+  );
+}
 
 /** The site whose copy of the ad the posting's link is ("Jooble"), or null when it isn't one (jobauto fork, link-owner.ts). */
 const copyOn = (posting: Pick<ShownPosting, "url">) => adCopySite(posting.url);
@@ -747,6 +764,11 @@ function PostingDetail({
   const when = ago === "Today" || ago === "Yesterday" ? ago.toLowerCase() : ago;
   // Read again from the whole text, once it's here (jobauto fork).
   const fullGerman = germanFit(textForGerman({ title: posting.title, description: text.status === "loading" ? posting.description : text.text }), german);
+  // The other places to apply at, best first, at most six (jobauto fork, link-owner.ts).
+  const alsoListed = otherOptions(posting)
+    .map((option) => ({ ...option, rank: linkRank(option, posting.company) ?? 5 }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 6);
   // In her field, by its words as Positions keeps it (jobauto fork, field-match.ts), so the list, the filter and this agree.
   const field = inField ? fieldMatch(posting) : null;
   const stale = field !== null && !state.applicationId && checkStillOpen(posting.postedAt, now);
@@ -767,6 +789,8 @@ function PostingDetail({
     { label: "Salary", value: posting.salary },
     { label: "Via", value: copyOn(posting) ? `${copyOn(posting)}: a copy of the ad, not the employer's own posting` : posting.via },
     { label: "Also on", value: state.foundOn.length > 1 ? portalNames(state.foundOn.slice(1).map((entry) => entry.portal)) : "" },
+    // The other places the portal listed to apply at (jobauto fork), the employer's own first: Open posting is the best of them.
+    { label: "Also listed at", value: alsoListed.length > 0 ? <AlsoListed options={alsoListed} /> : "" },
   ].filter((fact) => fact.value);
   const scoreButton = (
     <ScoreMenu profiles={profiles} disabled={Boolean(scoring)} onScore={onScore}>

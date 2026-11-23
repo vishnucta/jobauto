@@ -81,6 +81,11 @@ describe("SerpApi search", () => {
         via: "LinkedIn",
         description: expect.stringContaining("Senior Product Designer for its payments team"),
         complete: true,
+        // Every place it's listed to apply at (jobauto fork): its own, the employer's careers page, first.
+        applyOptions: [
+          { name: "Ledgerly Careers", url: "https://careers.ledgerly.example/jobs/42" },
+          { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/1234567890?utm_source=google_jobs_apply" },
+        ],
       },
       {
         source: "SERPAPI",

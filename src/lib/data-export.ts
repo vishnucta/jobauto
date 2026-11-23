@@ -482,6 +482,8 @@ const posting = z.object({
   postedAt: optionalDate,
   url: text,
   via: text,
+  /** The jobauto fork's: every place the portal listed to apply at; absent in files from before, and null for a posting with none. */
+  applyOptions: z.unknown().optional(),
   description: text,
   complete: z.boolean(),
   savedAt: optionalDate,

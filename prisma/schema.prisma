@@ -914,6 +914,9 @@ model Posting {
   url           String        @default("")
   /// Where the source found it, e.g. "LinkedIn".
   via           String        @default("")
+  /// Every place the portal listed to apply at (jobauto fork): [{ name, url }], `url`
+  /// among them; null for a posting found before, or from a portal that lists one.
+  applyOptions  Json?
   description   String        @default("")
   /// False while the description is only the start of the posting.
   complete      Boolean       @default(false)

@@ -65,7 +65,14 @@ function answersView(answers: ApplyAnswers) {
 
 /** What Claude is told about a link that is a copy of the ad, or may be one (link-owner.ts). */
 function ownerView(plan: Extract<ApplyPlanView, { kind: "web" }>, find: FindPosting | null | undefined) {
-  const look = find ? { look_at: find.href, look_at_is: find.via === "careers" ? "the employer's careers page" : "a web search, for the user to open in their own browser" } : {};
+  const look = find
+    ? {
+        look_at: find.href,
+        look_at_is: find.via === "careers" ? "the employer's careers page" : "a web search, for the user to open in their own browser",
+        // The other places the portal listed it (jobauto fork), best first: one can be saved with set_posting_link as it is.
+        also_listed_at: find.listed?.map((option) => ({ site: option.name || undefined, url: option.url })),
+      }
+    : {};
   switch (plan.owner?.kind) {
     case "copy":
       return {

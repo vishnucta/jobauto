@@ -266,6 +266,8 @@ export async function importExport(db: PrismaClient, data: DossierExport): Promi
       await tx.posting.createMany({
         data: postings.map((posting) => ({
           ...posting,
+          // Absent in a file from before the jobauto fork kept them: none.
+          applyOptions: json(posting.applyOptions),
           applicationId: posting.applicationId && applicationIds.has(posting.applicationId) ? posting.applicationId : null,
           // Before version 12, a file held kept postings only: seen, and last found when kept.
           lastFoundAt: posting.lastFoundAt ?? posting.createdAt,

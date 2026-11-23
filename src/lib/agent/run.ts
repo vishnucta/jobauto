@@ -31,7 +31,7 @@ import { agentCoversOf, type SettingsData, type AgentSearchRun } from "@/lib/set
 import { lastKnownTimeZone } from "@/lib/time-zone";
 
 import { attributeAgentCandidates } from "./attribution";
-import { agentDedupeKey, candidateCoverage, candidateData, stringsOf, type SkipReason } from "./candidates";
+import { agentDedupeKeys, candidateCoverage, candidateData, stringsOf, type SkipReason } from "./candidates";
 import { agentDraftJob, draftJobKey } from "./draft";
 import { reconcileInterruptedRuns, recordRunEnd, recordSourceRequest, reserveRun } from "./runs";
 import { agentMayAsk, agentPortalPool, agentPortals, portalProblem } from "./source";
@@ -132,17 +132,18 @@ async function newPostings(postings: readonly FoundPosting[]): Promise<FoundPost
     const state = states.get(postingKey(posting));
     return !state?.saved && !state?.dismissed && !state?.applicationId && !state?.archived;
   });
-  const keys = unseen.map(agentDedupeKey);
+  // Each posting's keys: its own, and one for each other place it's listed to apply at (jobauto fork).
+  const keys = unseen.map(agentDedupeKeys);
   // A posting a run skipped (E32-5) isn't seen yet: a later run can still score it.
   const known = await prisma.agentCandidate.findMany({
-    where: { skipReason: null, OR: [...unseen.map(({ source, externalId }) => ({ source, externalId })), { dedupeKey: { in: keys } }] },
+    where: { skipReason: null, OR: [...unseen.map(({ source, externalId }) => ({ source, externalId })), { dedupeKey: { in: keys.flat() } }] },
     select: { source: true, externalId: true, dedupeKey: true },
   });
   const seen = new Set(known.flatMap((candidate) => [postingKey(candidate), candidate.dedupeKey]));
   // The same job twice in one page counts once too.
   return unseen.filter((posting, index) => {
-    const fresh = !seen.has(postingKey(posting)) && !seen.has(keys[index]);
-    seen.add(keys[index]);
+    const fresh = !seen.has(postingKey(posting)) && !keys[index].some((key) => seen.has(key));
+    for (const key of keys[index]) seen.add(key);
     return fresh;
   });
 }
@@ -320,9 +321,9 @@ export function roundRobinPostings(pages: readonly (readonly FoundPosting[])[]):
     for (const queue of queues) {
       while (queue.length) {
         const posting = queue.shift()!;
-        const key = agentDedupeKey(posting);
-        if (seen.has(key) || seen.has(postingKey(posting))) continue;
-        seen.add(key);
+        const keys = agentDedupeKeys(posting);
+        if (keys.some((key) => seen.has(key)) || seen.has(postingKey(posting))) continue;
+        for (const key of keys) seen.add(key);
         seen.add(postingKey(posting));
         ordered.push(posting);
         break;
@@ -485,7 +486,7 @@ async function evaluateAgentPostings(
 async function keepCandidate(posting: FoundPosting, fit: PostingFit): Promise<{ id: string }> {
   const data = candidateData(posting, fit);
   const skipped = await prisma.agentCandidate.findFirst({
-    where: { skipReason: { not: null }, OR: [{ source: posting.source, externalId: posting.externalId }, { dedupeKey: agentDedupeKey(posting) }] },
+    where: { skipReason: { not: null }, OR: [{ source: posting.source, externalId: posting.externalId }, { dedupeKey: { in: agentDedupeKeys(posting) } }] },
     select: { id: true },
   });
   if (!skipped) return prisma.agentCandidate.create({ data, select: { id: true } });

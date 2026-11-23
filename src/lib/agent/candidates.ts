@@ -22,6 +22,16 @@ export function agentDedupeKey(posting: Pick<FoundPosting, "source" | "externalI
   return createHash("sha256").update(basis).digest("hex");
 }
 
+/**
+ * Every dedupe key a posting matches by (jobauto fork): its own, then one
+ * for each other place it's listed to apply at, so a candidate kept under a
+ * link the posting no longer leads with still matches it.
+ */
+export function agentDedupeKeys(posting: Pick<FoundPosting, "source" | "externalId" | "url" | "title" | "company" | "place" | "applyOptions">): string[] {
+  const others = (posting.applyOptions ?? []).map((option) => linkKey(option.url)).filter((link) => link && link !== linkKey(posting.url));
+  return [...new Set([agentDedupeKey(posting), ...others.map((link) => createHash("sha256").update(`link:${link}`).digest("hex"))])];
+}
+
 /** A posting as a new candidate, with its score. */
 export function candidateData(posting: FoundPosting, score: { score: number; reasons: string[]; redFlags: string[]; breakdown?: Breakdown | null }): Prisma.AgentCandidateCreateInput {
   const coverage = coverageOf(score);

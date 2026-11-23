@@ -110,8 +110,67 @@ export function linkOwner(url: string, company: string): LinkOwner | null {
   return { kind: "unsure" };
 }
 
+/**
+ * How good a place to apply at is, best first (jobauto fork, "Keep every
+ * apply option"): 0 the employer's own site or its job system, 1 an
+ * agency's own site, 2 a job board, 3 a site the app can't place (no
+ * employer to compare, or not named like it), 4 a copy of the ad; null for
+ * what isn't a web address. `name` is what the portal calls the site
+ * ("Ledgerly Careers"): a site it names after the employer counts as the
+ * employer's.
+ */
+export function linkRank({ url, name = "" }: { url: string; name?: string }, company: string): number | null {
+  const host = hostOf(url);
+  if (!host || !/^https?:\/\//i.test(url.trim())) return null;
+  const ats = detectAts(url);
+  if (ats.id !== "unknown") return ats.board ? 2 : 0;
+  const owner = linkOwner(url, company);
+  if (owner?.kind === "copy") return 4;
+  if (owner?.kind === "agency") return 1;
+  if (!companyKey(company)) return 3;
+  if (owner === null || namedAfter(name, company)) return 0;
+  return 3;
+}
+
+/** Whether the portal's name for a site names the employer: "Ledgerly Careers" for "Ledgerly GmbH". */
+function namedAfter(name: string, company: string): boolean {
+  const key = companyKey(company);
+  const said = companyKey(name);
+  return key.length >= 3 && said.length > 0 && ` ${said} `.includes(` ${key} `);
+}
+
+/**
+ * The link to keep as a posting's own: the best-ranked of `options`
+ * (linkRank), the first of them on a tie, so a portal's own choice, put
+ * first, stays when nothing is better. "" when none is a web address.
+ */
+export function bestApplyLink(options: readonly { url: string; name?: string }[], company: string): string {
+  let best: { url: string; rank: number } | null = null;
+  for (const option of options) {
+    const rank = linkRank(option, company);
+    if (rank !== null && (best === null || rank < best.rank)) best = { url: option.url, rank };
+  }
+  return best?.url ?? "";
+}
+
 /** Where to look for the employer's own posting: its careers page when the app knows it, else a web search in her own browser. */
-export type FindPosting = { href: string; via: "careers" | "search"; employer: string };
+export type FindPosting = {
+  href: string;
+  via: "careers" | "search";
+  employer: string;
+  /** Other places the portal listed it to apply at, best first and never a copy of the ad (jobauto fork); missing when there are none. */
+  listed?: { name: string; url: string }[];
+};
+
+/** The places to offer instead of a link that is a copy of the ad, or may be one: the others listed, best first, without copies or the link itself. */
+export function betterListed(options: readonly { name: string; url: string }[], current: string, company: string): { name: string; url: string }[] {
+  const here = current.trim();
+  return options
+    .map((option) => ({ option, rank: linkRank(option, company) }))
+    .filter(({ option, rank }) => rank !== null && rank < 4 && option.url !== here)
+    .sort((a, b) => a.rank! - b.rank!)
+    .map(({ option }) => ({ name: option.name, url: option.url }));
+}
 
 /** "Senior Analyst (m/w/d)" without the gender mark, for a search. */
 const withoutGenderMark = (title: string) => title.replace(/\((?:[mwfdx*]\s*\/\s*){1,3}[mwfdx*]\)/gi, " ").replace(/\s+/g, " ").trim();

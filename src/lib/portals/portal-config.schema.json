@@ -715,6 +715,28 @@
             "applyLink": {
               "$ref": "#/$defs/__schema0"
             },
+            "applyOptions": {
+              "type": "object",
+              "properties": {
+                "each": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_@#$:-]+(?:\\.[A-Za-z0-9_@#$:-]+)*$"
+                },
+                "link": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_@#$:-]+(?:\\.[A-Za-z0-9_@#$:-]+)*$"
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_@#$:-]+(?:\\.[A-Za-z0-9_@#$:-]+)*$"
+                }
+              },
+              "required": [
+                "each",
+                "link"
+              ],
+              "additionalProperties": false
+            },
             "description": {
               "$ref": "#/$defs/__schema0"
             },

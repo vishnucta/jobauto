@@ -200,6 +200,11 @@
           }
         ]
       },
+      "applyOptions": {
+        "each": "apply_options",
+        "link": "apply_link",
+        "name": "publisher"
+      },
       "via": "job_publisher",
       "description": "job_description",
       "complete": "description"

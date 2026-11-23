@@ -156,6 +156,12 @@ const postingSpecSchema = z.strictObject({
   via: valueSpecSchema.optional(),
   /** The employer's own apply link, when the portal has one (for merging duplicates, E22-6). */
   applyLink: valueSpecSchema.optional(),
+  /**
+   * Every place the portal lists to apply at (jobauto fork): each entry of the
+   * list at `each`, its link at `link` and the site's name at `name`. The
+   * posting's link becomes the best of them and `url`, and all are kept.
+   */
+  applyOptions: z.strictObject({ each: pathSchema, link: pathSchema, name: pathSchema.optional() }).optional(),
   description: valueSpecSchema.optional(),
   /** Whether the description is the whole posting: always, never, or when there is one. */
   complete: z.union([z.boolean(), z.literal("description")]).default(false),

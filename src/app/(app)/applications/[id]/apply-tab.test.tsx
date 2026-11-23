@@ -290,6 +290,22 @@ describe("Find the employer's posting (jobauto fork, Apply at the source)", () =
   } as const;
   const search = { href: "https://www.google.com/search?q=Ledgerly+GmbH+Analyst+Karriere", via: "search", employer: "Ledgerly GmbH" } as const;
 
+  it("offers the other places the portal listed it, best first, each one click to use (jobauto fork, Keep every apply option)", async () => {
+    const user = userEvent.setup();
+    const listed = { ...search, listed: [{ name: "Ledgerly Careers", url: "https://ledgerly.jobs.personio.de/job/1" }, { name: "", url: "https://www.linkedin.com/jobs/view/1" }] };
+    renderTab(tabData({ plan: copy, attempts: [], findPosting: listed }));
+    const list = card("Find the employer's posting").getByRole("list", { name: "Also listed at" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Ledgerly Careers · ledgerly.jobs.personio.de");
+    // Not named by the portal: its host, once.
+    expect(rows[1]).toHaveTextContent("linkedin.com (opens in a new tab)Use this link");
+    expect(within(rows[1]).getByRole("button", { name: "Use this link: linkedin.com" })).toBeInTheDocument();
+    expect(rows[1]).not.toHaveTextContent("·");
+    await user.click(within(rows[0]).getByRole("button", { name: "Use this link: Ledgerly Careers" }));
+    expect(savePostingLink).toHaveBeenCalledWith({ id: "app-1", link: "https://ledgerly.jobs.personio.de/job/1" });
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
   it("offers no assistant on a copy of the ad, but the way to the employer's posting, with the copy one tap away", () => {
     renderTab(tabData({ plan: copy, attempts: [], findPosting: search }));
     const panel = card("Find the employer's posting");

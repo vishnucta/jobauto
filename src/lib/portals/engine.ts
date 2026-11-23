@@ -6,6 +6,7 @@ import { cached, remember } from "@/lib/job-search/cache";
 import { jobSearchError, JobSearchError, type ErrorInfo } from "@/lib/job-search/errors";
 import { readLimited } from "@/lib/job-search/http";
 import { workableFrom } from "@/lib/job-search/regions";
+import { withApplyOptions } from "@/lib/job-search/apply-options";
 import { EMPTY_QUERY, experienceAskedFor, experienceRangeAskedFor, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "@/lib/job-search/search";
 import { fetchPosting, guardedLookup } from "@/lib/posting-fetch";
 
@@ -269,7 +270,7 @@ function postingOf(config: PortalConfig, item: unknown, values: TemplateValues):
   const context: ReadContext = { tables, values: { ...values, id: externalId } };
   const text = (part: keyof PostingSpec, max: number) => textOf(read(item, spec[part] as Parameters<typeof read>[1], context), max);
   const description = text("description", 100_000);
-  return {
+  const posting: FoundPosting = {
     source: config.id,
     externalId,
     title: text("title", 500),
@@ -283,7 +284,19 @@ function postingOf(config: PortalConfig, item: unknown, values: TemplateValues):
     description,
     complete: spec.complete === "description" ? description.length > 0 : spec.complete,
   };
+  // Every place it lists to apply at (jobauto fork): the link becomes the best of them.
+  if (!spec.applyOptions) return posting;
+  const { each, link, name } = spec.applyOptions;
+  const listed = at(item, each);
+  if (!Array.isArray(listed)) return posting;
+  return withApplyOptions(
+    posting,
+    listed.map((entry) => ({ url: textOf(flat(at(entry, link)), 2000), name: name ? textOf(flat(at(entry, name)), 100) : "" })),
+  );
 }
+
+/** A value from an answer as text or nothing: a list or an object isn't one. */
+const flat = (value: unknown): Value => (typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null);
 
 const normal = (value: string) =>
   value

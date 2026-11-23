@@ -4,7 +4,7 @@ import { postingKey, type FoundPosting } from "@/lib/job-search/search";
 import { postingStates } from "@/lib/postings";
 import { prisma } from "@/lib/prisma";
 
-import { agentDedupeKey } from "./candidates";
+import { agentDedupeKeys } from "./candidates";
 import { lockAgentSearches } from "./searches";
 
 /**
@@ -31,7 +31,7 @@ export async function attributeAgentCandidates(search: { id: string; name: strin
     const candidates = await tx.agentCandidate.findMany({
       where: {
         status: { not: "DISMISSED" },
-        OR: [...eligible.map(({ source, externalId }) => ({ source, externalId })), { dedupeKey: { in: eligible.map(agentDedupeKey) } }],
+        OR: [...eligible.map(({ source, externalId }) => ({ source, externalId })), { dedupeKey: { in: eligible.flatMap(agentDedupeKeys) } }],
       },
       select: { id: true, source: true, externalId: true, url: true },
     });

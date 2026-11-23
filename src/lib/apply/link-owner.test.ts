@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FIELD_EMPLOYERS } from "@/lib/careers/field-employers";
 
-import { adCopySite, copyMessage, findPostingAt, linkOwner, namedLike } from "./link-owner";
+import { adCopySite, bestApplyLink, betterListed, copyMessage, findPostingAt, linkOwner, linkRank, namedLike } from "./link-owner";
 
 // Whose page a posting's link is (jobauto fork, "Apply at the source"). Made-up
 // employers and links only.
@@ -96,5 +96,51 @@ describe("copyMessage", () => {
   it("names the site and says what to do instead", () => {
     expect(copyMessage("Jooble")).toMatch(/copy of the ad on Jooble/);
     expect(copyMessage("Jooble")).toMatch(/paste its link on the Apply tab/);
+  });
+});
+
+describe("linkRank and bestApplyLink (jobauto fork, Keep every apply option)", () => {
+  const company = "Ledgerly GmbH";
+  it("ranks the employer's own site and its job system first, then an agency, a job board, a site it can't place, and a copy last", () => {
+    expect(linkRank({ url: "https://karriere.ledgerly.de/jobs/7" }, company)).toBe(0);
+    expect(linkRank({ url: "https://ledgerly.wd3.myworkdayjobs.com/jobs/7" }, company)).toBe(0);
+    expect(linkRank({ url: "https://www.selbyjennings.com/job/7" }, company)).toBe(1);
+    expect(linkRank({ url: "https://www.stepstone.de/stellenangebote--7.html" }, company)).toBe(2);
+    expect(linkRank({ url: "https://jobs.unknown-board.example/7" }, company)).toBe(3);
+    expect(linkRank({ url: "https://de.jooble.org/jdp/7" }, company)).toBe(4);
+    expect(linkRank({ url: "mailto:jobs@ledgerly.example" }, company)).toBeNull();
+    expect(linkRank({ url: "" }, company)).toBeNull();
+  });
+
+  it("counts a site the portal names after the employer as the employer's, and can't place an unknown site with no employer", () => {
+    expect(linkRank({ url: "https://careers-portal.example/7", name: "Ledgerly Careers" }, company)).toBe(0);
+    expect(linkRank({ url: "https://careers-portal.example/7", name: "Careers" }, company)).toBe(3);
+    expect(linkRank({ url: "https://karriere.ledgerly.de/jobs/7" }, "")).toBe(3);
+  });
+
+  it("chooses the best-ranked, the first on a tie, and nothing from no web address", () => {
+    const options = [
+      { name: "Jooble", url: "https://de.jooble.org/jdp/7" },
+      { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/7" },
+      { name: "Ledgerly Careers", url: "https://ledgerly.jobs.personio.de/job/7" },
+    ];
+    expect(bestApplyLink(options, company)).toBe("https://ledgerly.jobs.personio.de/job/7");
+    expect(bestApplyLink(options.slice(0, 2), company)).toBe("https://www.linkedin.com/jobs/view/7");
+    expect(bestApplyLink([{ name: "StepStone", url: "https://www.stepstone.de/a" }, { name: "Indeed", url: "https://de.indeed.com/b" }], company)).toBe("https://www.stepstone.de/a");
+    expect(bestApplyLink([{ name: "", url: "not a link" }], company)).toBe("");
+  });
+
+  it("offers the other places instead of a copy, best first, never another copy or the link itself", () => {
+    const options = [
+      { name: "Jooble", url: "https://de.jooble.org/jdp/7" },
+      { name: "Trabajo.org", url: "https://www.trabajo.org/job-7" },
+      { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/7" },
+      { name: "Ledgerly Careers", url: "https://karriere.ledgerly.de/jobs/7" },
+    ];
+    expect(betterListed(options, "https://de.jooble.org/jdp/7", company)).toEqual([
+      { name: "Ledgerly Careers", url: "https://karriere.ledgerly.de/jobs/7" },
+      { name: "LinkedIn", url: "https://www.linkedin.com/jobs/view/7" },
+    ]);
+    expect(betterListed([], "https://de.jooble.org/jdp/7", company)).toEqual([]);
   });
 });
