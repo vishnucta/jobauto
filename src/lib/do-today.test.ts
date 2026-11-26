@@ -26,8 +26,8 @@ const ids = (rows: DoTodayRow[]) =>
 describe("doToday (jobauto fork)", () => {
   it("lists her draft once, where Today's three puts it, not again among Needs you", () => {
     // The audit's case: the same draft in both cards.
-    const rows = doToday([needs("quaan", "DRAFT", false)], [finish("quaan")]);
-    expect(rows).toEqual([{ kind: "needs", item: needs("quaan", "DRAFT", false) }]);
+    const rows = doToday([needs("acme", "DRAFT", false)], [finish("acme")]);
+    expect(rows).toEqual([{ kind: "needs", item: needs("acme", "DRAFT", false) }]);
   });
 
   it("puts what's due first, then undated offers and interviews, then Today's three, then her other drafts", () => {
@@ -57,7 +57,7 @@ describe("doToday (jobauto fork)", () => {
 
 describe("doTodaySummary (jobauto fork)", () => {
   it("counts the undated drafts as well as what's due, so it never contradicts the list", () => {
-    expect(doTodaySummary(doToday([needs("quaan", "DRAFT", false)], [finish("quaan")]), { empty: false })).toBe("1 draft is waiting for you.");
+    expect(doTodaySummary(doToday([needs("acme", "DRAFT", false)], [finish("acme")]), { empty: false })).toBe("1 draft is waiting for you.");
     expect(doTodaySummary(doToday([needs("a", "INTERVIEW", true), needs("b", "DRAFT", false)], [review("c")]), { empty: false })).toBe(
       "1 thing needs you this week, and 2 drafts are waiting.",
     );

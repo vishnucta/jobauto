@@ -39,7 +39,7 @@ describe("sendStep (one send path)", () => {
     expect(sendStep(form, quiet).how).toBe("This employer takes applications on its own page (Personio, jobs.example).");
     expect(sendStep(form, { ...quiet, waitingInBrowser: true })).toMatchObject({ label: "See what was filled in" });
     // No "the employer's website" before the host.
-    expect(sendStep({ ...form, atsLabel: "the employer's website", host: "doerner.de" }, quiet).how).toBe("This employer takes applications on its own page (doerner.de).");
+    expect(sendStep({ ...form, atsLabel: "the employer's website", host: "acme.example" }, quiet).how).toBe("This employer takes applications on its own page (acme.example).");
   });
 
   it("opens a job board's posting rather than the Email tab (the audit's Fielmann case)", () => {
