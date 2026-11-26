@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DocumentKind } from "@/generated/prisma/enums";
+import { trimmedSchema, unitsSchema } from "@/lib/application-data";
 import type { FoundPosting } from "@/lib/job-search/search";
 import { prepareApplicationJob } from "@/lib/jobs/prepare-application";
 import { startJob } from "@/lib/jobs/runner";
@@ -256,6 +258,64 @@ describe("the Claude connector's tools (#221)", () => {
     expect(await tool("update_application", { application_id: id, change: "Nothing" })).toMatchObject({ isError: true });
     await tool("set_application_status", { id, status: "SENT" });
     expect((await tool("update_application", { application_id: id, change: "Too late", match: [] })).text).toContain("Only a Draft");
+  });
+
+  it("keeps what was left out of the resume out when it changes a Draft", async () => {
+    const saved = await tool("save_application", {
+      posting_text: "Product Designer at Acme",
+      details: { company: "Acme", role: "Product Designer" },
+      resume: { summary: "Designer who ships calm products.", roles: [], skills: ["Figma"] },
+      cover_letter: { paragraphs: [{ text: "I'd like to help Acme." }] },
+    });
+    const id = saved.json.application_id as string;
+    const where = { applicationId_kind: { applicationId: id, kind: DocumentKind.RESUME } };
+    // "Leave out" on a project, as the application page does it.
+    const units = unitsSchema.parse((await prisma().document.findUniqueOrThrow({ where })).units);
+    const index = units.findIndex((unit) => unit.id.startsWith("project:"));
+    expect(index).toBeGreaterThanOrEqual(0);
+    const [project] = units.splice(index, 1);
+    await prisma().document.update({ where, data: { units, trimmed: [{ kind: "unit", unit: project, index, byHand: true }] } });
+
+    const projectId = project.id.slice("project:".length);
+    await tool("update_application", {
+      application_id: id,
+      change: "Warmer summary",
+      resume: { summary: "Designer who ships warm products.", roles: [], projects: [{ id: projectId, bullets: ["Rewrote the checkout."] }], skills: ["Figma"] },
+    });
+
+    const after = await prisma().document.findUniqueOrThrow({ where });
+    expect(unitsSchema.parse(after.units).map((unit) => unit.id)).not.toContain(project.id);
+    // Listed once, and Put back brings the revised part.
+    expect(trimmedSchema.parse(after.trimmed)).toEqual([{ kind: "unit", unit: expect.objectContaining({ id: project.id, text: expect.stringContaining("Rewrote the checkout.") }), index, byHand: true }]);
+  });
+
+  it("no longer lists bullets taken off to fit the page once the changed resume has them again", async () => {
+    const saved = await tool("save_application", {
+      posting_text: "Product Designer at Acme",
+      details: { company: "Acme", role: "Product Designer" },
+      resume: { summary: "Designer who ships calm products.", roles: [], skills: ["Figma"] },
+      cover_letter: { paragraphs: [{ text: "I'd like to help Acme." }] },
+    });
+    const id = saved.json.application_id as string;
+    const where = { applicationId_kind: { applicationId: id, kind: DocumentKind.RESUME } };
+    // Fit to one page took a role's last line off, and a line no role has any more.
+    const units = unitsSchema.parse((await prisma().document.findUniqueOrThrow({ where })).units);
+    const role = units.find((unit) => unit.id.startsWith("experience:") && unit.text.includes("\n"))!;
+    const last = role.text.split("\n").at(-1)!;
+    role.text = role.text.split("\n").slice(0, -1).join("\n");
+    const gone = { kind: "bullets" as const, unitId: role.id, label: role.label, lines: ["A line from an older profile."] };
+    await prisma().document.update({ where, data: { units, trimmed: [{ kind: "bullets", unitId: role.id, label: role.label, lines: [last] }, gone] } });
+
+    // The role keeps its profile lines, so the line is back on the resume: Put back would add it twice.
+    const resume = { summary: "Designer who ships warm products.", roles: [], skills: ["Figma"] };
+    await tool("update_application", { application_id: id, change: "Warmer summary", resume });
+    const after = await prisma().document.findUniqueOrThrow({ where });
+    expect(unitsSchema.parse(after.units).find((unit) => unit.id === role.id)?.text).toContain(last);
+    expect(trimmedSchema.parse(after.trimmed)).toEqual([gone]);
+
+    await prisma().document.update({ where, data: { trimmed: [{ kind: "bullets", unitId: role.id, label: role.label, lines: [last] }] } });
+    await tool("update_application", { application_id: id, change: "Warmer still", resume });
+    expect((await prisma().document.findUniqueOrThrow({ where })).trimmed).toBeNull();
   });
 
   it("has Dossier's own model draft one only when there is one, as Prepare it for me does for a posting Positions keeps (round 2 of the audit)", async () => {

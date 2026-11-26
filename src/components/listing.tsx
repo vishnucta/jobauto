@@ -24,9 +24,9 @@ export const listingScreen = "flex flex-col lg:h-panel lg:min-h-[560px]";
 /** The list beside the preview: it takes the rest of the screen's height, at least 360 px, so a tall header (an open search form) scrolls the page instead of hiding the list. */
 export const listingSplit = "flex flex-wrap items-start pb-16 lg:min-h-[360px] lg:flex-1 lg:flex-nowrap lg:items-stretch lg:pb-0";
 /** The 600 px list (E32-1), scrolling on its own from `lg`. */
-export const listingList = "flex w-full min-w-0 flex-col border-line lg:w-[min(600px,48%)] lg:flex-none lg:overflow-y-auto lg:border-r lg:pb-16";
+export const listingList = "relative flex w-full min-w-0 flex-col border-line lg:w-[min(600px,48%)] lg:flex-none lg:overflow-y-auto lg:border-r lg:pb-16";
 /** The preview, scrolling on its own from `lg`. */
-export const listingPreview = "flex w-full min-w-0 flex-col gap-5 px-10 py-7 max-lg:order-first lg:w-auto lg:flex-1 lg:overflow-y-auto";
+export const listingPreview = "relative flex w-full min-w-0 flex-col gap-5 px-10 py-7 max-lg:order-first lg:w-auto lg:flex-1 lg:overflow-y-auto";
 
 /** Where the list comes from: an icon, its query as chips, a note, Edit and the main action; Edit opens `editor` in place. */
 export function SourceBar({
@@ -54,7 +54,7 @@ export function SourceBar({
           {icon}
         </span>
         {/* On a phone the chips take the row and the buttons go under them (jobauto fork). */}
-        <ul aria-label="What it looks for" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 max-sm:basis-[calc(100%-1.75rem)]">
+        <ul aria-label="What it looks for" className="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-1.5 max-sm:basis-[calc(100%-1.75rem)]">
           {chips.map((chip, index) => (
             <li key={index} className="rounded-[7px] bg-track px-2.5 py-1 text-[13px] text-ink">
               {chip}

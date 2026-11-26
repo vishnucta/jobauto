@@ -2,12 +2,13 @@ import "server-only";
 
 import { z } from "zod";
 
+import { Prisma } from "@/generated/prisma/client";
 import { ApplicationStatus, DocumentKind, VersionCause, type Tone } from "@/generated/prisma/enums";
 import { guardSources, guardUnits, inLanguage, type FactSources } from "@/lib/ai/fact-guard";
 import { resumeUnits } from "@/lib/ai/tasks/tailor-resume";
 import { tidyLines, withoutFrame } from "@/lib/ai/tasks/write-cover-letter";
 import { createApplicationFromDocuments } from "@/lib/application-create";
-import { extractedOf, SIGN_OFF_UNIT, unitsSchema, type Extracted, type Match, type Unit } from "@/lib/application-data";
+import { extractedOf, SIGN_OFF_UNIT, trimmedSchema, unitsSchema, type Extracted, type Match, type Trimmed, type Unit } from "@/lib/application-data";
 import { documentLabels } from "@/lib/document-labels";
 import { updateDocuments } from "@/lib/document-units";
 import { FRAME_LABELS, isFrameUnit, withFrame, type Frame } from "@/lib/letter-frame";
@@ -235,10 +236,30 @@ export async function reviseWrittenApplication(
     if (letter) letter = checked(letter, sources);
   }
 
+  let leftOut: Trimmed | null = null;
   await updateDocuments(
     applicationId,
     async (documents, tx) => {
-      if (resume) documents.RESUME = resume;
+      if (resume) {
+        // What's left out stays out (#217). The revision holds every part of the profile, so the parts
+        // left out come off it again, and Put back brings the revised part rather than the old one.
+        const row = await tx.document.findUniqueOrThrow({
+          where: { applicationId_kind: { applicationId, kind: DocumentKind.RESUME } },
+          select: { trimmed: true },
+        });
+        const trimmed = trimmedSchema.safeParse(row.trimmed);
+        const cuts = trimmed.success ? trimmed.data : [];
+        const units = resume;
+        const out = new Set(cuts.flatMap((cut) => (cut.kind === "unit" ? [cut.unit.id] : [])));
+        // Bullets taken off to fit the page that the revision has again are no longer left out, as after restoring a version.
+        leftOut = cuts.flatMap((cut): Trimmed => {
+          if (cut.kind === "bullets") return cut.lines.every((line) => units.find((unit) => unit.id === cut.unitId)?.text.includes(line)) ? [] : [cut];
+          const revised = units.find((unit) => unit.id === cut.unit.id);
+          return [revised ? { ...cut, unit: revised } : cut];
+        });
+        if (cuts.length === 0) leftOut = null;
+        documents.RESUME = units.filter((unit) => !out.has(unit.id));
+      }
       if (letter && documents.COVER_LETTER) {
         // The sender, date and signature stay, and the recipient and greeting when none was written.
         const frame: Partial<Frame> = Object.fromEntries(documents.COVER_LETTER.filter((unit) => isFrameUnit(unit.id)).map((unit) => [unit.id, unit.text]));
@@ -248,5 +269,10 @@ export async function reviseWrittenApplication(
     },
     { version: { cause: VersionCause.REFINED, detail: revision.change } },
   );
+  // Written after the document itself: updateDocuments checks it wasn't changed meanwhile.
+  const cuts = leftOut as Trimmed | null;
+  if (cuts) {
+    await prisma.document.update({ where: { applicationId_kind: { applicationId, kind: DocumentKind.RESUME } }, data: { trimmed: cuts.length > 0 ? cuts : Prisma.DbNull } });
+  }
   return { unverified: unverifiedOf([...(resume ?? []), ...(letter ?? [])]) };
 }
