@@ -19,6 +19,7 @@ import { exportFileName } from "@/lib/data-export";
 import { isSqliteUrl } from "@/lib/database";
 import { env } from "@/lib/env";
 import { redirectUri } from "@/lib/google/oauth";
+import { lanOrigin } from "@/lib/google/origin";
 import { googleClientView, googleView, requestOrigin, whenRan } from "@/lib/settings-views";
 import { lastKnownTimeZone, userTimeZone } from "@/lib/time-zone";
 import { appVersion } from "@/lib/version";
@@ -149,6 +150,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         <ConnectorSection
           initial={{ on: settings.connectorEnabledAt !== null, redirects: settings.connectorRedirects }}
           address={mcpUrl(env.DOSSIER_PUBLIC_URL ?? (await requestOrigin()))}
+          lanAddress={((lan) => (lan ? mcpUrl(lan) : undefined))(lanOrigin(await requestOrigin()))}
           inDesktopApp={isDesktopApp()}
         />
       ) : section === "data" ? (

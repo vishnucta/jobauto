@@ -2,7 +2,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { connectorSince, mcpUrl, readClient, SCOPE, verifyAccessToken } from "@/lib/connector/oauth";
 import { createDossierServer } from "@/lib/connector/tools";
-import { publicOrigin } from "@/lib/google/origin";
+import { connectorOrigin } from "@/lib/google/origin";
 import { logServerError } from "@/lib/log";
 
 // The Claude connector (#221): Dossier as a remote MCP server (Streamable
@@ -29,7 +29,7 @@ function unauthorized(origin: string): Response {
 
 async function handle(request: Request): Promise<Response> {
   if (!(await connectorSince())) return new Response(null, { status: 404 });
-  const origin = publicOrigin(request);
+  const origin = connectorOrigin(request);
   const token = /^Bearer\s+(\S.*)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   const access = await verifyAccessToken(token);
   if (!access) return unauthorized(origin);

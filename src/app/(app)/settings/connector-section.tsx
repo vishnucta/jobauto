@@ -24,10 +24,13 @@ const LINK = "font-medium text-ink underline underline-offset-2";
 export function ConnectorSection({
   initial,
   address,
+  lanAddress,
   inDesktopApp = false,
 }: {
   initial: { on: boolean; redirects: string[] };
   address: string;
+  /** The same connector at the home-network address this page was opened on, when that differs from `address`. */
+  lanAddress?: string;
   /** On this computer, in the desktop app: an app's approval page opens in the browser, which the app signs in (#365). */
   inDesktopApp?: boolean;
 }) {
@@ -44,7 +47,7 @@ export function ConnectorSection({
     if (!result.ok) setOn(!next);
   };
 
-  const copy = async () => toast((await copyText(address)) ? "Address copied." : "Couldn't copy it. Select the address and copy it instead.");
+  const copy = async (text = address) => toast((await copyText(text)) ?"Address copied." : "Couldn't copy it. Select the address and copy it instead.");
 
   const addRedirect = async () => {
     const uri = draft.trim();
@@ -102,6 +105,22 @@ export function ConnectorSection({
                 </Button>
               </div>
             </div>
+            {lanAddress && lanAddress !== address && (
+              <div className="flex flex-col gap-[7px] border-t border-line pt-4">
+                <span className="text-label text-muted">On your home network</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <code className="min-w-0 flex-1 rounded-control border border-line-input bg-input px-3 py-2 font-mono text-[13px] [overflow-wrap:anywhere]">
+                    {lanAddress}
+                  </code>
+                  <Button variant="secondary" size="sm" onClick={() => void copy(lanAddress)}>
+                    Copy <span className="sr-only">the home network address</span>
+                  </Button>
+                </div>
+                <p className="text-meta text-muted">
+                  For a computer at home that can&apos;t reach the address above. It only works while that computer is on this network.
+                </p>
+              </div>
+            )}
             <h3 className="text-control font-medium">In Claude</h3>
             <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-pretty">
               <li>
