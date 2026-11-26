@@ -24,14 +24,29 @@ function calledAt(request: Request): { host: string; origin: string } {
  */
 const LAN_HOST = /^(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d{1,5})?$/;
 
+/** This machine, with a port: what a tunnel or port forward on the app's own computer is called at. */
+const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]):(\d{1,5})$/;
+
+/**
+ * A loopback address on a port other than the one Dossier listens on: an SSH
+ * tunnel or port forward the user set up. A proxy beside Dossier, such as
+ * `tailscale serve`, calls Dossier's own port, so it doesn't count.
+ */
+function forwardedToHere(host: string): boolean {
+  const port = LOOPBACK_HOST.exec(host)?.[1];
+  return port !== undefined && Number(port) !== Number(process.env.PORT ?? 3000);
+}
+
 /**
  * The address the MCP connector's sign-in is given at. With DOSSIER_PUBLIC_URL
- * set, an app that called a home-network address gets that address back, since
- * it may not be able to reach the public one. Everyone else gets publicOrigin.
+ * set, an app that called a home-network address, or a tunnel to Dossier, gets
+ * that address back, since it may not be able to reach the public one. MCP
+ * apps sign in over plain HTTP only at localhost, so a tunnel is how a computer
+ * without the public address connects. Everyone else gets publicOrigin.
  */
 export function connectorOrigin(request: Request): string {
   const called = calledAt(request);
-  return env.DOSSIER_PUBLIC_URL && LAN_HOST.test(called.host) ? called.origin : publicOrigin(request);
+  return env.DOSSIER_PUBLIC_URL && (LAN_HOST.test(called.host) || forwardedToHere(called.host)) ? called.origin : publicOrigin(request);
 }
 
 /** `origin` when it's a home-network address the connector also answers at, beside DOSSIER_PUBLIC_URL; else null. */

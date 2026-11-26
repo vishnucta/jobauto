@@ -44,10 +44,21 @@ describe("connectorOrigin", () => {
     expect(connectorOrigin(request("http://192.168.1.20:3000/api/mcp", forwarded))).toBe(PUBLIC);
   });
 
-  it("keeps the public address for this machine itself, which a proxy beside it calls", () => {
-    for (const origin of ["http://127.0.0.1:3000", "http://localhost:3000"]) {
+  it("keeps the public address for this machine on Dossier's own port, which a proxy beside it calls", () => {
+    vi.stubEnv("PORT", "3000");
+    for (const origin of ["http://127.0.0.1:3000", "http://localhost:3000", "http://[::1]:3000", "http://localhost"]) {
       expect(connectorOrigin(request(`${origin}/api/mcp`))).toBe(PUBLIC);
     }
+    vi.unstubAllEnvs();
+  });
+
+  it("gives a tunnel to Dossier, a loopback address on another port, the address it called", () => {
+    vi.stubEnv("PORT", "3000");
+    for (const origin of ["http://localhost:3010", "http://127.0.0.1:3010", "http://[::1]:3010"]) {
+      expect(connectorOrigin(request(`${origin}/api/mcp`))).toBe(origin);
+    }
+    expect(connectorOrigin(request("http://localhost.evil.example:3010/api/mcp"))).toBe(PUBLIC);
+    vi.unstubAllEnvs();
   });
 
   it("keeps the public address for names and public addresses, so a rebound domain gets nothing of its own", () => {
