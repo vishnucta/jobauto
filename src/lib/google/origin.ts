@@ -48,8 +48,3 @@ export function connectorOrigin(request: Request): string {
   const called = calledAt(request);
   return env.DOSSIER_PUBLIC_URL && (LAN_HOST.test(called.host) || forwardedToHere(called.host)) ? called.origin : publicOrigin(request);
 }
-
-/** `origin` when it's a home-network address the connector also answers at, beside DOSSIER_PUBLIC_URL; else null. */
-export function lanOrigin(origin: string): string | null {
-  return env.DOSSIER_PUBLIC_URL && URL.canParse(origin) && LAN_HOST.test(new URL(origin).host) ? origin : null;
-}

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const env = vi.hoisted(() => ({ DOSSIER_PUBLIC_URL: undefined as string | undefined }));
 vi.mock("@/lib/env", () => ({ env }));
 
-import { connectorOrigin, lanOrigin, publicOrigin } from "./origin";
+import { connectorOrigin, publicOrigin } from "./origin";
 
 const PUBLIC = "https://dossier.example";
 
@@ -72,16 +72,5 @@ describe("connectorOrigin", () => {
     env.DOSSIER_PUBLIC_URL = undefined;
     expect(connectorOrigin(request("http://192.168.1.20:3000/api/mcp"))).toBe("http://192.168.1.20:3000");
     expect(connectorOrigin(request("http://127.0.0.1:3000/api/mcp", { "x-forwarded-host": "jobs.example", "x-forwarded-proto": "https" }))).toBe("https://jobs.example");
-  });
-});
-
-describe("lanOrigin", () => {
-  it("is the home-network address a page was opened on, only beside a public address", () => {
-    expect(lanOrigin("http://192.168.1.20:3000")).toBeNull();
-    env.DOSSIER_PUBLIC_URL = PUBLIC;
-    expect(lanOrigin("http://192.168.1.20:3000")).toBe("http://192.168.1.20:3000");
-    for (const origin of [PUBLIC, "http://localhost:3000", "http://127.0.0.1:3000", "http://evil.example", "not an address"]) {
-      expect(lanOrigin(origin)).toBeNull();
-    }
   });
 });

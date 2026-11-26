@@ -43,28 +43,6 @@ describe("Settings → MCP connector (#221, #281)", () => {
     expect(toast).toHaveBeenCalledWith("Address copied.");
   });
 
-  it("shows the home-network address too when the page was opened on one, with a Copy of its own", async () => {
-    const user = userEvent.setup();
-    const lan = "http://192.168.1.20:3000/api/mcp";
-    render(<ConnectorSection initial={{ on: true, redirects: [] }} address={ADDRESS} lanAddress={lan} />);
-    expect(screen.getByText("On your home network")).toBeInTheDocument();
-    expect(screen.getByText(lan)).toBeInTheDocument();
-    // The public address stays the one in the steps and the command.
-    expect(screen.getByText(/claude mcp add --transport http dossier https:\/\/dossier\.example\/api\/mcp/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Copy the home network address" }));
-    expect(copyText).toHaveBeenCalledWith(lan);
-    await user.click(screen.getByRole("button", { name: "Copy" }));
-    expect(copyText).toHaveBeenLastCalledWith(ADDRESS);
-  });
-
-  it("shows one address when there's no home-network one, or it's the same", () => {
-    const { rerender } = render(<ConnectorSection initial={{ on: true, redirects: [] }} address={ADDRESS} />);
-    expect(screen.queryByText("On your home network")).not.toBeInTheDocument();
-    rerender(<ConnectorSection initial={{ on: true, redirects: [] }} address={ADDRESS} lanAddress={ADDRESS} />);
-    expect(screen.queryByText("On your home network")).not.toBeInTheDocument();
-  });
-
   it("turns it off again, and puts the switch back when that fails", async () => {
     const user = userEvent.setup();
     render(<ConnectorSection initial={{ on: true, redirects: [] }} address={ADDRESS} />);
